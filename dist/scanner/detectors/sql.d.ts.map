@@ -1,0 +1,1 @@
+{"version":3,"file":"sql.d.ts","sourceRoot":"","sources":["../../../src/scanner/detectors/sql.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,WAAW,EAAE,MAAM,WAAW,CAAC;AACxC,OAAO,EAAE,OAAO,EAAE,MAAM,aAAa,CAAC;AAkDtC,wBAAgB,kBAAkB,CAAC,MAAM,EAAE,WAAW,GAAG,OAAO,EAAE,CA4BjE"}

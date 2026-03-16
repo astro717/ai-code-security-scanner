@@ -1,0 +1,127 @@
+name: AI Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: 'Path to scan (file or directory)'
+        required: false
+        default: '.'
+        type: string
+      fail-on:
+        description: 'Severity level that causes failure: critical | high | any'
+        required: false
+        default: 'high'
+        type: string
+    outputs:
+      findings-count:
+        description: 'Total number of findings'
+        value: ${{ jobs.scan.outputs.findings-count }}
+      critical-count:
+        description: 'Number of critical findings'
+        value: ${{ jobs.scan.outputs.critical-count }}
+
+  workflow_dispatch:
+    inputs:
+      path:
+        description: 'Path to scan'
+        required: false
+        default: '.'
+      fail-on:
+        description: 'Fail on: critical | high | any'
+        required: false
+        default: 'high'
+
+jobs:
+  scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    outputs:
+      findings-count: ${{ steps.parse.outputs.findings-count }}
+      critical-count: ${{ steps.parse.outputs.critical-count }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build scanner
+        run: npm run build
+
+      - name: Run security scan (SARIF output)
+        id: scan
+        run: |
+          node dist/cli.js "${{ inputs.path || '.' }}" --sarif > scan-results.sarif 2>scan-stderr.txt || true
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+
+      - name: Run security scan (JSON for metrics)
+        id: scan-json
+        run: |
+          node dist/cli.js "${{ inputs.path || '.' }}" --json > scan-results.json 2>/dev/null || true
+
+      - name: Parse findings
+        id: parse
+        run: |
+          TOTAL=$(node -e "const d=require('./scan-results.json'); console.log(d.summary.total)")
+          CRITICAL=$(node -e "const d=require('./scan-results.json'); console.log(d.summary.critical)")
+          HIGH=$(node -e "const d=require('./scan-results.json'); console.log(d.summary.high)")
+          echo "findings-count=$TOTAL" >> $GITHUB_OUTPUT
+          echo "critical-count=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high-count=$HIGH" >> $GITHUB_OUTPUT
+          echo "### Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| High | $HIGH |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scan-results.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarif-report
+          path: scan-results.sarif
+          retention-days: 30
+
+      - name: Upload JSON report as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: json-report
+          path: scan-results.json
+          retention-days: 30
+
+      - name: Enforce fail-on threshold
+        run: |
+          FAIL_ON="${{ inputs.fail-on || 'high' }}"
+          CRITICAL=${{ steps.parse.outputs.critical-count }}
+          HIGH=${{ steps.parse.outputs.high-count }}
+          TOTAL=${{ steps.parse.outputs.findings-count }}
+
+          if [ "$FAIL_ON" = "critical" ] && [ "$CRITICAL" -gt 0 ]; then
+            echo "❌ Failing: $CRITICAL critical finding(s) found (fail-on=critical)"
+            exit 1
+          elif [ "$FAIL_ON" = "high" ] && [ $((CRITICAL + HIGH)) -gt 0 ]; then
+            echo "❌ Failing: $CRITICAL critical + $HIGH high finding(s) found (fail-on=high)"
+            exit 1
+          elif [ "$FAIL_ON" = "any" ] && [ "$TOTAL" -gt 0 ]; then
+            echo "❌ Failing: $TOTAL total finding(s) found (fail-on=any)"
+            exit 1
+          else
+            echo "✅ Security scan passed (fail-on=$FAIL_ON)"
+          fi

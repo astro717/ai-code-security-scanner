@@ -1,0 +1,18 @@
+# Source files (compiled output in dist/ is what gets published)
+src/
+*.map
+
+# Web frontend (not needed for CLI/server package)
+web/
+
+# Tests
+tests/
+
+# Config files
+tsconfig.json
+.github/
+.gitignore
+
+# Dev artifacts
+node_modules/
+*.log
