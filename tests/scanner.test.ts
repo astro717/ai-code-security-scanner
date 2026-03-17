@@ -19,6 +19,7 @@ import { detectPrototypePollution } from '../src/scanner/detectors/prototypePoll
 import { detectInsecureRandom } from '../src/scanner/detectors/insecureRandom';
 import { detectSSRF } from '../src/scanner/detectors/ssrf';
 import { detectJWTSecrets } from '../src/scanner/detectors/jwt';
+import { detectOpenRedirect } from '../src/scanner/detectors/openRedirect';
 import { Finding } from '../src/scanner/reporter';
 
 // ─── Tiny test runner ─────────────────────────────────────────────────────────
@@ -242,6 +243,21 @@ test('parseCode: no JWT findings when secret comes from env variable', () => {
   const code = `jwt.sign(payload, process.env.JWT_SECRET);`;
   const parsed = parseCode(code);
   const findings = detectJWTSecrets(parsed);
+  expect(findings.length).toBe(0);
+});
+
+test('parseCode detects OPEN_REDIRECT when res.redirect() receives dynamic URL', () => {
+  const code = `res.redirect(req.query.next);`;
+  const parsed = parseCode(code);
+  const findings = detectOpenRedirect(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('OPEN_REDIRECT');
+});
+
+test('parseCode: no OPEN_REDIRECT finding when res.redirect() uses a static string', () => {
+  const code = `res.redirect('/dashboard');`;
+  const parsed = parseCode(code);
+  const findings = detectOpenRedirect(parsed);
   expect(findings.length).toBe(0);
 });
 
