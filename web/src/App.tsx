@@ -176,6 +176,12 @@ function App() {
     }
   }, [])
 
+  const clearHistory = useCallback(() => {
+    localStorage.removeItem(HISTORY_KEY)
+    setHistory([])
+    setShowHistory(false)
+  }, [])
+
   const handleScan = async () => {
     setStatus('loading')
     setErrorMsg('')
@@ -470,31 +476,42 @@ function App() {
           {/* Recent Scans panel */}
           {history.length > 0 && (
             <div className="border border-[#1e1e2e] rounded-lg overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setShowHistory((v) => !v)}
-                className="w-full flex items-center justify-between px-3 py-2 text-xs font-mono text-[#7d8590] hover:text-[#e6edf3] hover:bg-[#0d1117] transition-colors"
-              >
-                <span className="flex items-center gap-1.5">
+              <div className="w-full flex items-center justify-between px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => setShowHistory((v) => !v)}
+                  className="flex items-center gap-1.5 text-xs font-mono text-[#7d8590] hover:text-[#e6edf3] transition-colors"
+                >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                     <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
                   </svg>
                   Recent Scans
                   <span className="px-1.5 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[#7d8590]">{history.length}</span>
-                </span>
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  className={`transition-transform ${showHistory ? 'rotate-180' : ''}`}
-                  aria-hidden="true"
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className={`transition-transform ${showHistory ? 'rotate-180' : ''}`}
+                    aria-hidden="true"
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={clearHistory}
+                  title="Clear scan history"
+                  className="flex items-center gap-1 px-2 py-0.5 text-xs font-mono rounded border border-[#30363d] text-[#7d8590] hover:border-red-500/40 hover:text-red-400 transition-colors"
                 >
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                  </svg>
+                  Clear
+                </button>
+              </div>
               {showHistory && (
                 <div className="border-t border-[#1e1e2e] divide-y divide-[#1e1e2e]">
                   {history.map((entry) => {
