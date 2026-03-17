@@ -19,6 +19,7 @@ import { detectPrototypePollution } from '../src/scanner/detectors/prototypePoll
 import { detectInsecureRandom } from '../src/scanner/detectors/insecureRandom';
 import { detectSSRF } from '../src/scanner/detectors/ssrf';
 import { detectJWTSecrets } from '../src/scanner/detectors/jwt';
+import { detectCommandInjection } from '../src/scanner/detectors/commandInjection';
 import { Finding } from '../src/scanner/reporter';
 
 // ─── Tiny test runner ─────────────────────────────────────────────────────────
@@ -137,6 +138,12 @@ test('detectSSRF: ≥1 SSRF finding', () => {
   expect(findings).toContain('SSRF');
 });
 
+test('detectCommandInjection: ≥1 COMMAND_INJECTION finding', () => {
+  const findings = detectCommandInjection(vulnerableParsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('COMMAND_INJECTION');
+});
+
 // ─── Tests: clean.ts — zero false positives ───────────────────────────────────
 
 console.log('\nclean.ts — should produce 0 findings (no false positives):');
@@ -183,6 +190,11 @@ test('detectInsecureRandom: 0 findings on clean code', () => {
 
 test('detectSSRF: 0 findings on clean code', () => {
   const findings = detectSSRF(cleanParsed);
+  expect(findings.length).toBe(0);
+});
+
+test('detectCommandInjection: 0 findings on clean code', () => {
+  const findings = detectCommandInjection(cleanParsed);
   expect(findings.length).toBe(0);
 });
 
@@ -245,6 +257,29 @@ test('parseCode: no JWT findings when secret comes from env variable', () => {
   expect(findings.length).toBe(0);
 });
 
+test('parseCode detects command injection via spawn with dynamic command', () => {
+  const code = `spawn(userCommand, ['--flag']);`;
+  const parsed = parseCode(code);
+  const findings = detectCommandInjection(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('COMMAND_INJECTION');
+});
+
+test('parseCode detects command injection via spawnSync with template literal command', () => {
+  const code = "spawnSync(`${req.body.tool}`, ['-r', file]);";
+  const parsed = parseCode(code);
+  const findings = detectCommandInjection(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('COMMAND_INJECTION');
+});
+
+test('parseCode: no COMMAND_INJECTION when spawn uses hardcoded command string', () => {
+  const code = `spawn('convert', [inputFile, '-resize', '800x600', outputFile]);`;
+  const parsed = parseCode(code);
+  const findings = detectCommandInjection(parsed);
+  expect(findings.length).toBe(0);
+});
+
 // ─── Integration: scan-repo detector coverage ─────────────────────────────────
 
 console.log('\nscan-repo integration — all detector types registered:');
@@ -263,6 +298,7 @@ test('all detector types fire on a multi-vuln snippet (simulating scan-repo file
     `res.redirect(req.query.next);`,
     `await fetch(userUrl);`,
     `jwt.sign({ id: 1 }, 'short');`,
+    `spawn(userTool, ['--help']);`,
   ].join('\n');
 
   const parsed = parseCode(code);
@@ -278,6 +314,7 @@ test('all detector types fire on a multi-vuln snippet (simulating scan-repo file
     ...detectInsecureRandom(parsed),
     ...detectSSRF(parsed),
     ...detectJWTSecrets(parsed),
+    ...detectCommandInjection(parsed),
   ];
 
   const types = new Set(allFindings.map((f) => f.type));
@@ -293,6 +330,7 @@ test('all detector types fire on a multi-vuln snippet (simulating scan-repo file
     'INSECURE_RANDOM',
     'SSRF',
     'JWT_WEAK_SECRET',
+    'COMMAND_INJECTION',
   ];
 
   for (const t of expected) {

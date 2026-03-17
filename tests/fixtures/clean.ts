@@ -99,4 +99,17 @@ async function pingHealthCheck() {
   return res.ok;
 }
 
-export { getUserById, getProductBySlug, resizeImage, getApiClient, add, setStaticContent, getConfigFile, readStaticFile, getRandomIndex, rollDice, redirectToHome, redirectWithStatusStatic, fetchPublicData, pingHealthCheck };
+// ── Safe spawn usage (hardcoded command) ──────────────────────────────────────
+import { spawn as _spawn, spawnSync as _spawnSync } from 'child_process';
+
+function convertImage(inputPath: string, outputPath: string) {
+  // Static command string — only args are dynamic, which is safe for spawn
+  _spawn('convert', [inputPath, '-resize', '800x600', outputPath]);
+}
+
+function listDirectory(dirPath: string) {
+  // Hardcoded command, dynamic args — safe
+  _spawnSync('ls', ['-la', dirPath]);
+}
+
+export { getUserById, getProductBySlug, resizeImage, getApiClient, add, setStaticContent, getConfigFile, readStaticFile, getRandomIndex, rollDice, redirectToHome, redirectWithStatusStatic, fetchPublicData, pingHealthCheck, convertImage, listDirectory };
