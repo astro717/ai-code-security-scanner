@@ -245,6 +245,30 @@ test('parseCode: no JWT findings when secret comes from env variable', () => {
   expect(findings.length).toBe(0);
 });
 
+test('parseCode detects PROTOTYPE_POLLUTION via Object.assign with dynamic source', () => {
+  const code = `Object.assign(target, userPayload);`;
+  const parsed = parseCode(code);
+  const findings = detectPrototypePollution(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('PROTOTYPE_POLLUTION');
+});
+
+test('parseCode detects PROTOTYPE_POLLUTION via __proto__ assignment', () => {
+  const code = `(obj as any).__proto__ = attackerPayload;`;
+  const parsed = parseCode(code);
+  const findings = detectPrototypePollution(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('PROTOTYPE_POLLUTION');
+});
+
+test('parseCode detects INSECURE_RANDOM via Math.random() for token generation', () => {
+  const code = `const sessionToken = Math.random().toString(36).slice(2);`;
+  const parsed = parseCode(code);
+  const findings = detectInsecureRandom(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('INSECURE_RANDOM');
+});
+
 // ─── Integration: scan-repo detector coverage ─────────────────────────────────
 
 console.log('\nscan-repo integration — all detector types registered:');
