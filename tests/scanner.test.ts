@@ -137,6 +137,15 @@ test('detectSSRF: ≥1 SSRF finding', () => {
   expect(findings).toContain('SSRF');
 });
 
+test('detectJWTSecrets: ≥1 JWT_HARDCODED_SECRET or JWT_WEAK_SECRET finding', () => {
+  const findings = detectJWTSecrets(vulnerableParsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  const types = findings.map((f) => f.type);
+  if (!types.includes('JWT_HARDCODED_SECRET') && !types.includes('JWT_WEAK_SECRET')) {
+    throw new Error(`Expected JWT_HARDCODED_SECRET or JWT_WEAK_SECRET, got: [${types.join(', ')}]`);
+  }
+});
+
 // ─── Tests: clean.ts — zero false positives ───────────────────────────────────
 
 console.log('\nclean.ts — should produce 0 findings (no false positives):');
@@ -183,6 +192,11 @@ test('detectInsecureRandom: 0 findings on clean code', () => {
 
 test('detectSSRF: 0 findings on clean code', () => {
   const findings = detectSSRF(cleanParsed);
+  expect(findings.length).toBe(0);
+});
+
+test('detectJWTSecrets: 0 findings on clean code', () => {
+  const findings = detectJWTSecrets(cleanParsed);
   expect(findings.length).toBe(0);
 });
 

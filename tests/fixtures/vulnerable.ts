@@ -118,5 +118,18 @@ async function proxyRequest(targetUrl: string) {
   http.get(targetUrl, (res: any) => res.pipe(process.stdout));
 }
 
-// ── 11. UNSAFE DEPS — see package.json with "latest" versions ─────────────────
+// ── 11. JWT HARDCODED SECRET ──────────────────────────────────────────────────
+import jwt from 'jsonwebtoken';
+
+function createTokenHardcoded(userId: number) {
+  // Hardcoded string secret — JWT_HARDCODED_SECRET
+  return jwt.sign({ userId }, 'my-super-secret-key-that-is-long-enough-here');
+}
+
+function createTokenWeak(userId: number) {
+  // Short hardcoded secret — JWT_WEAK_SECRET
+  return jwt.sign({ userId }, 'weak');
+}
+
+// ── 12. UNSAFE DEPS — see package.json with "latest" versions ─────────────────
 // (deps detector reads package.json, not this file)

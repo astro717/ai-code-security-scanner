@@ -14,6 +14,7 @@ import { detectPrototypePollution } from './scanner/detectors/prototypePollution
 import { detectInsecureRandom } from './scanner/detectors/insecureRandom';
 import { detectOpenRedirect } from './scanner/detectors/openRedirect';
 import { detectSSRF } from './scanner/detectors/ssrf';
+import { detectJWTSecrets } from './scanner/detectors/jwt';
 import { Finding, printFindings, formatJSON, summarize } from './scanner/reporter';
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
@@ -62,6 +63,7 @@ function scanFile(filePath: string): Finding[] {
       ...detectInsecureRandom(parsed),
       ...detectOpenRedirect(parsed),
       ...detectSSRF(parsed),
+      ...detectJWTSecrets(parsed),
     ].map((f) => ({ ...f, file: filePath }));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
