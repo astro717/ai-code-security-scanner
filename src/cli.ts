@@ -110,8 +110,13 @@ program
   .option('--json', 'Output results as JSON')
   .option('--sarif', 'Output results as SARIF 2.1.0')
   .option('--severity <level>', 'Minimum severity to report (critical|high|medium|low)', 'low')
+  .option(
+    '--min-severity <level>',
+    'Minimum severity level that triggers a non-zero exit code (critical|high|medium|low). ' +
+    'Defaults to high when omitted (only critical/high cause failure).',
+  )
   .option('--ignore <glob>', 'Glob pattern to exclude (repeatable, e.g. --ignore \'**/node_modules/**\')', (val, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; ignore: string[] }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; minSeverity?: string; ignore: string[] }) => {
     const resolved = path.resolve(targetPath);
 
     if (!fs.existsSync(resolved)) {
@@ -126,9 +131,11 @@ program
       allFindings.push(...scanFile(file));
     }
 
-    const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-    const minSeverity = severityOrder[options.severity as keyof typeof severityOrder] ?? 3;
-    const filtered = allFindings.filter((f) => severityOrder[f.severity] <= minSeverity);
+    const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+    // --severity controls which findings are reported
+    const minReport = severityOrder[options.severity] ?? 3;
+    const filtered = allFindings.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
 
     if (options.sarif) {
       console.log(JSON.stringify(buildSARIF(filtered), null, 2));
@@ -139,8 +146,20 @@ program
     }
 
     const summary = summarize(filtered);
-    if (summary.critical > 0 || summary.high > 0) {
-      process.exit(1);
+
+    // --min-severity controls which severity triggers a non-zero exit code.
+    // If not set, fall back to the legacy behaviour (exit 1 on critical or high).
+    if (options.minSeverity) {
+      const exitThreshold = severityOrder[options.minSeverity] ?? 1;
+      const hasViolation = filtered.some((f) => (severityOrder[f.severity] ?? 3) <= exitThreshold);
+      if (hasViolation) {
+        process.exit(1);
+      }
+    } else {
+      // Legacy default: exit non-zero on critical or high
+      if (summary.critical > 0 || summary.high > 0) {
+        process.exit(1);
+      }
     }
   });
 
