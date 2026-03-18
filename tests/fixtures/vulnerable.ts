@@ -120,3 +120,20 @@ async function proxyRequest(targetUrl: string) {
 
 // ── 11. UNSAFE DEPS — see package.json with "latest" versions ─────────────────
 // (deps detector reads package.json, not this file)
+
+// ── 12. COMMAND INJECTION ────────────────────────────────────────────────────
+import { spawn, spawnSync } from 'child_process';
+
+function runTool(toolName: string) {
+  // Dynamic command name — attacker can run any program
+  spawn(toolName, ['--help']);
+}
+
+function runToolSync(cmd: string, args: string[]) {
+  spawnSync(cmd, args);
+}
+
+function runWithTemplate(userInput: string) {
+  // Template literal command — still dynamic
+  spawn(`${userInput}`, ['-v']);
+}
