@@ -186,7 +186,14 @@ function detectUnsafeDepsFromJson(packageJsonStr: string): Finding[] {
 }
 
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+
+// Limit request body to 500 KB. Express will automatically respond with 413
+// for bodies larger than this limit — but we also enforce it explicitly inside
+// route handlers so the error message is consistent and human-readable.
+const PAYLOAD_LIMIT = '500kb';
+const PAYLOAD_LIMIT_BYTES = 500 * 1024;
+
+app.use(express.json({ limit: PAYLOAD_LIMIT }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 
@@ -211,6 +218,15 @@ app.get('/health', (_req, res) => {
 });
 
 app.post('/scan', scanLimiter, async (req, res) => {
+  // Explicit payload size guard (belt-and-suspenders on top of express.json limit)
+  const rawLength = parseInt(req.headers['content-length'] ?? '0', 10);
+  if (rawLength > PAYLOAD_LIMIT_BYTES) {
+    res.status(413).json({
+      error: `Payload too large. Maximum allowed size is ${PAYLOAD_LIMIT} (${PAYLOAD_LIMIT_BYTES} bytes). Received ${rawLength} bytes.`,
+    });
+    return;
+  }
+
   const { code, filename, packageJson, aiExplain } = req.body as {
     code?: string;
     filename?: string;
