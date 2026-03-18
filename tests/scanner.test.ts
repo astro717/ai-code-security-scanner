@@ -278,6 +278,18 @@ test('parseCode: no COMMAND_INJECTION when spawn uses hardcoded command string',
   const parsed = parseCode(code);
   const findings = detectCommandInjection(parsed);
   expect(findings.length).toBe(0);
+test('parseCode detects PROTOTYPE_POLLUTION via Object.assign with dynamic source', () => {
+  const code = `Object.assign(target, userPayload);`;
+  const findings = detectPrototypePollution(parsed);
+  expect(findings).toContain('PROTOTYPE_POLLUTION');
+test('parseCode detects PROTOTYPE_POLLUTION via __proto__ assignment', () => {
+  const code = `(obj as any).__proto__ = attackerPayload;`;
+  const findings = detectPrototypePollution(parsed);
+  expect(findings).toContain('PROTOTYPE_POLLUTION');
+test('parseCode detects INSECURE_RANDOM via Math.random() for token generation', () => {
+  const code = `const sessionToken = Math.random().toString(36).slice(2);`;
+  const findings = detectInsecureRandom(parsed);
+  expect(findings).toContain('INSECURE_RANDOM');
 });
 
 // ─── Integration: scan-repo detector coverage ─────────────────────────────────
