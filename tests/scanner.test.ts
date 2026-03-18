@@ -142,6 +142,12 @@ test('detectCommandInjection: ≥1 COMMAND_INJECTION finding', () => {
   const findings = detectCommandInjection(vulnerableParsed);
   expect(findings.length).toBeGreaterThanOrEqual(1);
   expect(findings).toContain('COMMAND_INJECTION');
+test('detectJWTSecrets: ≥1 JWT_HARDCODED_SECRET or JWT_WEAK_SECRET finding', () => {
+  const findings = detectJWTSecrets(vulnerableParsed);
+  const types = findings.map((f) => f.type);
+  if (!types.includes('JWT_HARDCODED_SECRET') && !types.includes('JWT_WEAK_SECRET')) {
+    throw new Error(`Expected JWT_HARDCODED_SECRET or JWT_WEAK_SECRET, got: [${types.join(', ')}]`);
+  }
 });
 
 // ─── Tests: clean.ts — zero false positives ───────────────────────────────────
@@ -195,6 +201,8 @@ test('detectSSRF: 0 findings on clean code', () => {
 
 test('detectCommandInjection: 0 findings on clean code', () => {
   const findings = detectCommandInjection(cleanParsed);
+test('detectJWTSecrets: 0 findings on clean code', () => {
+  const findings = detectJWTSecrets(cleanParsed);
   expect(findings.length).toBe(0);
 });
 
