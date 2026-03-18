@@ -1,0 +1,49 @@
+{
+  "name": "ai-code-security-scanner",
+  "displayName": "AI Code Security Scanner",
+  "description": "AST-based security scanner for AI-generated code — inline findings in the editor",
+  "version": "0.1.0",
+  "publisher": "ai-code-security-scanner",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Linters"],
+  "activationEvents": ["onLanguage:typescript", "onLanguage:typescriptreact", "onLanguage:javascript", "onLanguage:javascriptreact"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiSecScan.scanFile",
+        "title": "AI Security: Scan Active File"
+      },
+      {
+        "command": "aiSecScan.scanWorkspace",
+        "title": "AI Security: Scan Workspace"
+      }
+    ],
+    "configuration": {
+      "title": "AI Code Security Scanner",
+      "properties": {
+        "aiSecScan.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:3001",
+          "description": "URL of the ai-code-security-scanner backend server"
+        },
+        "aiSecScan.autoScanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan the active file on save"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}
