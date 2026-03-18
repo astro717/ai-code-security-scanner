@@ -1,48 +1,23 @@
 name: AI Security Scan
 
 on:
-  workflow_call:
-    inputs:
-      path:
-        description: 'Path to scan (file or directory)'
-        required: false
-        default: '.'
-        type: string
-      fail-on:
-        description: 'Severity level that causes failure: critical | high | any'
-        required: false
-        default: 'high'
-        type: string
-    outputs:
-      findings-count:
-        description: 'Total number of findings'
-        value: ${{ jobs.scan.outputs.findings-count }}
-      critical-count:
-        description: 'Number of critical findings'
-        value: ${{ jobs.scan.outputs.critical-count }}
+  pull_request:
+    types: [opened, synchronize, reopened]
 
-  workflow_dispatch:
-    inputs:
-      path:
-        description: 'Path to scan'
-        required: false
-        default: '.'
-      fail-on:
-        description: 'Fail on: critical | high | any'
-        required: false
-        default: 'high'
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
-  scan:
-    name: Security Scan
+  security-scan:
+    name: Scan changed files for security issues
     runs-on: ubuntu-latest
-    outputs:
-      findings-count: ${{ steps.parse.outputs.findings-count }}
-      critical-count: ${{ steps.parse.outputs.critical-count }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout PR
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -56,72 +31,146 @@ jobs:
       - name: Build scanner
         run: npm run build
 
-      - name: Run security scan (SARIF output)
+      - name: Get changed JS/TS files
+        id: changed-files
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only --diff-filter=ACM "$BASE" "$HEAD" \
+            | grep -E '\.(ts|tsx|js|jsx|mjs|cjs)$' || true)
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          COUNT=$(echo "$CHANGED" | grep -c '\S' || echo 0)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Run security scan on changed files
         id: scan
+        if: steps.changed-files.outputs.count != '0'
         run: |
-          node dist/cli.js "${{ inputs.path || '.' }}" --sarif > scan-results.sarif 2>scan-stderr.txt || true
-          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          FINDINGS_JSON=$(mktemp)
+          ALL_FINDINGS="[]"
 
-      - name: Run security scan (JSON for metrics)
-        id: scan-json
-        run: |
-          node dist/cli.js "${{ inputs.path || '.' }}" --json > scan-results.json 2>/dev/null || true
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            [ -f "$file" ] || continue
+            RESULT=$(node dist/cli.js "$file" --json --severity low 2>/dev/null || true)
+            if [ -n "$RESULT" ]; then
+              FILE_FINDINGS=$(echo "$RESULT" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          print(json.dumps(data if isinstance(data, list) else data.get('findings', [])))
+          " 2>/dev/null || echo "[]")
+              ALL_FINDINGS=$(python3 -c "
+          import json
+          a = json.loads('$ALL_FINDINGS')
+          b = json.loads('''$FILE_FINDINGS''')
+          print(json.dumps(a + b))
+          " 2>/dev/null || echo "$ALL_FINDINGS")
+            fi
+          done <<< "${{ steps.changed-files.outputs.files }}"
 
-      - name: Parse findings
-        id: parse
-        run: |
-          TOTAL=$(node -e "const d=require('./scan-results.json'); console.log(d.summary.total)")
-          CRITICAL=$(node -e "const d=require('./scan-results.json'); console.log(d.summary.critical)")
-          HIGH=$(node -e "const d=require('./scan-results.json'); console.log(d.summary.high)")
-          echo "findings-count=$TOTAL" >> $GITHUB_OUTPUT
-          echo "critical-count=$CRITICAL" >> $GITHUB_OUTPUT
-          echo "high-count=$HIGH" >> $GITHUB_OUTPUT
-          echo "### Security Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
-          echo "| High | $HIGH |" >> $GITHUB_STEP_SUMMARY
-          echo "| Total | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "$ALL_FINDINGS" > "$FINDINGS_JSON"
+          echo "findings_file=$FINDINGS_JSON" >> "$GITHUB_OUTPUT"
 
-      - name: Upload SARIF to GitHub Security
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: scan-results.sarif
-        continue-on-error: true
+          HAS_CRITICAL=$(python3 -c "
+          import json
+          findings = json.load(open('$FINDINGS_JSON'))
+          bad = [f for f in findings if f.get('severity') in ('critical', 'high')]
+          print(len(bad))
+          " 2>/dev/null || echo "0")
 
-      - name: Upload SARIF as artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sarif-report
-          path: scan-results.sarif
-          retention-days: 30
+          echo "high_critical_count=$HAS_CRITICAL" >> "$GITHUB_OUTPUT"
 
-      - name: Upload JSON report as artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: json-report
-          path: scan-results.json
-          retention-days: 30
-
-      - name: Enforce fail-on threshold
-        run: |
-          FAIL_ON="${{ inputs.fail-on || 'high' }}"
-          CRITICAL=${{ steps.parse.outputs.critical-count }}
-          HIGH=${{ steps.parse.outputs.high-count }}
-          TOTAL=${{ steps.parse.outputs.findings-count }}
-
-          if [ "$FAIL_ON" = "critical" ] && [ "$CRITICAL" -gt 0 ]; then
-            echo "❌ Failing: $CRITICAL critical finding(s) found (fail-on=critical)"
+          if [ "$HAS_CRITICAL" -gt 0 ]; then
+            echo "High/critical findings detected — failing check."
             exit 1
-          elif [ "$FAIL_ON" = "high" ] && [ $((CRITICAL + HIGH)) -gt 0 ]; then
-            echo "❌ Failing: $CRITICAL critical + $HIGH high finding(s) found (fail-on=high)"
-            exit 1
-          elif [ "$FAIL_ON" = "any" ] && [ "$TOTAL" -gt 0 ]; then
-            echo "❌ Failing: $TOTAL total finding(s) found (fail-on=any)"
-            exit 1
-          else
-            echo "✅ Security scan passed (fail-on=$FAIL_ON)"
           fi
+
+      - name: Post findings summary as PR comment
+        if: always() && steps.changed-files.outputs.count != '0'
+        uses: actions/github-script@v7
+        env:
+          FINDINGS_FILE: ${{ steps.scan.outputs.findings_file }}
+          HIGH_CRITICAL_COUNT: ${{ steps.scan.outputs.high_critical_count }}
+          CHANGED_COUNT: ${{ steps.changed-files.outputs.count }}
+        with:
+          script: |
+            const fs = require('fs');
+            let findings = [];
+            try {
+              findings = JSON.parse(fs.readFileSync(process.env.FINDINGS_FILE, 'utf8'));
+            } catch (_) {}
+
+            const highCriticalCount = parseInt(process.env.HIGH_CRITICAL_COUNT || '0', 10);
+            const changedCount = parseInt(process.env.CHANGED_COUNT || '0', 10);
+            const order = { critical: 0, high: 1, medium: 2, low: 3 };
+
+            const sorted = [...findings].sort(
+              (a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3)
+            );
+
+            const bySeverity = { critical: 0, high: 0, medium: 0, low: 0 };
+            for (const f of findings) bySeverity[f.severity] = (bySeverity[f.severity] ?? 0) + 1;
+
+            const statusIcon = highCriticalCount > 0 ? '🔴' : findings.length > 0 ? '🟡' : '🟢';
+            const statusText = highCriticalCount > 0
+              ? `**${highCriticalCount} high/critical finding(s) detected — check failed**`
+              : findings.length > 0
+                ? `${findings.length} low/medium finding(s) found — check passed`
+                : 'No security findings — check passed';
+
+            const severityRows = Object.entries(bySeverity)
+              .filter(([, n]) => n > 0)
+              .map(([sev, n]) => `| ${sev.toUpperCase()} | ${n} |`)
+              .join('\n');
+
+            const detailRows = sorted
+              .map((f) => `| ${f.severity.toUpperCase()} | \`${f.type}\` | \`${f.file ?? 'unknown'}\` | ${f.line} | ${(f.message ?? '').slice(0, 120)} |`)
+              .join('\n');
+
+            const body = [
+              `## ${statusIcon} AI Security Scan Results`,
+              '',
+              `Scanned **${changedCount}** changed JS/TS file(s).  ${statusText}`,
+              '',
+              findings.length > 0 ? '### Summary by Severity' : '',
+              findings.length > 0 ? '| Severity | Count |' : '',
+              findings.length > 0 ? '|----------|-------|' : '',
+              severityRows,
+              '',
+              findings.length > 0 ? '### All Findings' : '',
+              findings.length > 0 ? '| Severity | Type | File | Line | Message |' : '',
+              findings.length > 0 ? '|----------|------|------|------|---------|' : '',
+              detailRows,
+              '',
+              '_Generated by [ai-code-security-scanner](https://github.com)_',
+            ].filter(Boolean).join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(
+              (c) => c.user?.type === 'Bot' && c.body?.includes('AI Security Scan Results')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: No supported files changed
+        if: steps.changed-files.outputs.count == '0'
+        run: echo "No JS/TS files changed in this PR — skipping scan."
