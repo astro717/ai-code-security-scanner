@@ -112,4 +112,27 @@ function listDirectory(dirPath: string) {
   _spawnSync('ls', ['-la', dirPath]);
 }
 
-export { getUserById, getProductBySlug, resizeImage, getApiClient, add, setStaticContent, getConfigFile, readStaticFile, getRandomIndex, rollDice, redirectToHome, redirectWithStatusStatic, fetchPublicData, pingHealthCheck, convertImage, listDirectory };
+// ── Safe regex (static pattern) ───────────────────────────────────────────────
+function validateEmail(email: string) {
+  // Static pattern — not a vulnerability
+  const re = new RegExp('^[^@]+@[^@]+\\.[^@]+$');
+  return re.test(email);
+}
+
+// ── Safe crypto (strong algorithm) ───────────────────────────────────────────
+import * as crypto from 'crypto';
+
+function hashToken(token: string) {
+  // SHA-256 is safe
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+// ── Safe JWT (from env) ───────────────────────────────────────────────────────
+import jwt from 'jsonwebtoken';
+
+function verifyToken(token: string) {
+  // Algorithm whitelist provided — safe
+  return jwt.verify(token, process.env.JWT_SECRET ?? '', { algorithms: ['RS256'] });
+}
+
+export { getUserById, getProductBySlug, resizeImage, getApiClient, add, setStaticContent, getConfigFile, readStaticFile, getRandomIndex, rollDice, redirectToHome, redirectWithStatusStatic, fetchPublicData, pingHealthCheck, convertImage, listDirectory, validateEmail, hashToken, verifyToken };

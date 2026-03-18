@@ -510,6 +510,21 @@ function App() {
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                     <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
                   </svg>
+              <div className="flex items-center px-3 py-2">
+                  className="flex-1 flex items-center justify-between text-xs font-mono text-[#7d8590] hover:text-[#e6edf3] transition-colors"
+                  <span className="flex items-center gap-1.5">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    Recent Scans
+                    <span className="px-1.5 py-0.5 rounded bg-[#0d1117] border border-[#30363d] text-[#7d8590]">{history.length}</span>
+                  </span>
+                  onClick={() => {
+                    localStorage.removeItem(HISTORY_KEY)
+                    setHistory([])
+                    setShowHistory(false)
+                  }}
+                  className="ml-2 px-2 py-0.5 text-xs font-mono rounded border border-[#30363d] text-[#7d8590] hover:border-red-500/60 hover:text-red-400 transition-colors"
                   Clear
                 </button>
               </div>

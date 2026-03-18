@@ -21,6 +21,9 @@ import { detectSSRF } from '../src/scanner/detectors/ssrf';
 import { detectJWTSecrets } from '../src/scanner/detectors/jwt';
 import { detectCommandInjection } from '../src/scanner/detectors/commandInjection';
 import { detectOpenRedirect } from '../src/scanner/detectors/openRedirect';
+import { detectReDoS } from '../src/scanner/detectors/redos';
+import { detectWeakCrypto } from '../src/scanner/detectors/weakCrypto';
+import { detectJWTNoneAlgorithm } from '../src/scanner/detectors/jwtNone';
 import { Finding } from '../src/scanner/reporter';
 
 // ─── Tiny test runner ─────────────────────────────────────────────────────────
@@ -151,6 +154,34 @@ test('detectJWTSecrets: ≥1 JWT_HARDCODED_SECRET or JWT_WEAK_SECRET finding', (
   }
 });
 
+test('detectJWTSecrets: ≥1 JWT_WEAK_SECRET finding from fixture', () => {
+  const findings = detectJWTSecrets(vulnerableParsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('JWT_WEAK_SECRET');
+});
+
+test('detectReDoS: ≥1 REDOS finding on vulnerable fixture', () => {
+  const findings = detectReDoS(vulnerableParsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('REDOS');
+});
+
+test('detectWeakCrypto: ≥1 WEAK_CRYPTO finding on vulnerable fixture', () => {
+  const findings = detectWeakCrypto(vulnerableParsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('WEAK_CRYPTO');
+});
+
+test('detectReDoS: 0 findings on clean code', () => {
+  const findings = detectReDoS(cleanParsed);
+  expect(findings.length).toBe(0);
+});
+
+test('detectWeakCrypto: 0 findings on clean code', () => {
+  const findings = detectWeakCrypto(cleanParsed);
+  expect(findings.length).toBe(0);
+});
+
 // ─── Tests: clean.ts — zero false positives ───────────────────────────────────
 
 console.log('\nclean.ts — should produce 0 findings (no false positives):');
@@ -243,6 +274,21 @@ test('parseCode parses a snippet with SSRF via dynamic fetch URL', () => {
   expect(findings).toContain('SSRF');
 });
 
+test('parseCode detects open redirect with dynamic URL (OPEN_REDIRECT)', () => {
+  const code = `res.redirect(req.query.next);`;
+  const parsed = parseCode(code);
+  const findings = detectOpenRedirect(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('OPEN_REDIRECT');
+});
+
+test('parseCode: no OPEN_REDIRECT when redirect target is a static string', () => {
+  const code = `res.redirect('/home');`;
+  const parsed = parseCode(code);
+  const findings = detectOpenRedirect(parsed);
+  expect(findings.length).toBe(0);
+});
+
 test('parseCode detects hardcoded JWT secret in jwt.sign() call (JWT_HARDCODED_SECRET)', () => {
   const code = `const token = jwt.sign({ userId: 123 }, 'my-super-secret-key-that-is-long-enough-here');`;
   const parsed = parseCode(code);
@@ -308,6 +354,24 @@ test('parseCode: no OPEN_REDIRECT finding when res.redirect() uses a static stri
   const findings = detectOpenRedirect(parsed);
 });
 
+test('parseCode detects PROTOTYPE_POLLUTION via Object.assign with dynamic source', () => {
+  const code = `Object.assign(target, userInput);`;
+  const parsed = parseCode(code);
+  const { detectPrototypePollution } = require('../src/scanner/detectors/prototypePollution');
+  const findings = detectPrototypePollution(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('PROTOTYPE_POLLUTION');
+});
+
+test('parseCode detects INSECURE_RANDOM via Math.random() for security token', () => {
+  const code = `const sessionId = Math.random().toString(36).slice(2);`;
+  const parsed = parseCode(code);
+  const { detectInsecureRandom } = require('../src/scanner/detectors/insecureRandom');
+  const findings = detectInsecureRandom(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('INSECURE_RANDOM');
+});
+
 // ─── Integration: scan-repo detector coverage ─────────────────────────────────
 
 console.log('\nscan-repo integration — all detector types registered:');
@@ -340,6 +404,7 @@ test('all detector types fire on a multi-vuln snippet (simulating scan-repo file
     ...detectPathTraversal(parsed),
     ...detectPrototypePollution(parsed),
     ...detectInsecureRandom(parsed),
+    ...detectOpenRedirect(parsed),
     ...detectSSRF(parsed),
     ...detectJWTSecrets(parsed),
     ...detectCommandInjection(parsed),
@@ -356,6 +421,7 @@ test('all detector types fire on a multi-vuln snippet (simulating scan-repo file
     'PATH_TRAVERSAL',
     'PROTOTYPE_POLLUTION',
     'INSECURE_RANDOM',
+    'OPEN_REDIRECT',
     'SSRF',
     'JWT_WEAK_SECRET',
     'COMMAND_INJECTION',

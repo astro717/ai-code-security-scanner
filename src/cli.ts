@@ -304,6 +304,8 @@ program
   .option('--config <path>', 'Path to .ai-sec-scan.json config file')
   .option('--watch', 'Watch for file changes and re-scan automatically, printing a diff of new/resolved findings')
   .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; ignore: string[]; config?: string; watch: boolean }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; ignore: string[]; config?: string }) => {
+    // Load config file first; CLI flags override config values
     const config = loadConfig(options.config);
 
     const effectiveIgnore = [...(config.ignore ?? []), ...options.ignore];
@@ -360,6 +362,7 @@ program
     const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
     const minSeverity = severityOrder[effectiveSeverity as keyof typeof severityOrder] ?? 3;
     const filtered = allFindings.filter((f) => severityOrder[f.severity] <= minSeverity);
+      process.stderr.write('\r\x1b[2K'); // clear the progress line
     if (effectiveFormat === 'sarif') {
       console.log(JSON.stringify(buildSARIF(filtered), null, 2));
     } else if (effectiveFormat === 'json') {

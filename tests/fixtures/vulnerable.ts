@@ -134,7 +134,34 @@ function createTokenWeak(userId: number) {
 // ── 12. UNSAFE DEPS — see package.json with "latest" versions ─────────────────
 // (deps detector reads package.json, not this file)
 
-// ── 12. COMMAND INJECTION ────────────────────────────────────────────────────
+// ── 12. REDOS ────────────────────────────────────────────────────────────────
+function validateInput(userPattern: string, input: string) {
+  // Dynamic pattern from user input — ReDoS risk
+  const regex = new RegExp(userPattern);
+  return regex.test(input);
+}
+
+// ── 13. WEAK CRYPTO ───────────────────────────────────────────────────────────
+import * as crypto from 'crypto';
+
+function hashPassword(password: string) {
+  // MD5 is cryptographically broken — do not use for passwords
+  return crypto.createHash('md5').update(password).digest('hex');
+}
+
+function checksumSHA1(data: string) {
+  return crypto.createHash('sha1').update(data).digest('hex');
+}
+
+// ── 14. JWT WEAK SECRET ───────────────────────────────────────────────────────
+import jwt from 'jsonwebtoken';
+
+function signTokenWeak(userId: number) {
+  // Short hardcoded secret — JWT_WEAK_SECRET
+  return jwt.sign({ userId }, 'secret');
+}
+
+// ── 13. COMMAND INJECTION ────────────────────────────────────────────────────
 import { spawn, spawnSync } from 'child_process';
 
 function runTool(toolName: string) {
