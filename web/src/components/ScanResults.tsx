@@ -23,6 +23,29 @@ interface ScanResultsProps {
 
 const SEVERITY_ORDER: Finding['severity'][] = ['critical', 'high', 'medium', 'low']
 
+// Human-readable labels and icons for each finding type.
+// Types not in this map fall back to the raw type string.
+const FINDING_TYPE_LABELS: Record<string, { label: string; icon: string }> = {
+  SECRET_HARDCODED:       { label: 'Hardcoded Secret',          icon: '🔑' },
+  SQL_INJECTION:          { label: 'SQL Injection',             icon: '💉' },
+  SHELL_INJECTION:        { label: 'Shell Injection',           icon: '🐚' },
+  COMMAND_INJECTION:      { label: 'Command Injection',         icon: '⚠️' },
+  EVAL_INJECTION:         { label: 'Eval Injection',            icon: '⚠️' },
+  XSS:                    { label: 'Cross-Site Scripting',      icon: '🌐' },
+  PATH_TRAVERSAL:         { label: 'Path Traversal',            icon: '📂' },
+  PROTOTYPE_POLLUTION:    { label: 'Prototype Pollution',       icon: '☣️' },
+  INSECURE_RANDOM:        { label: 'Insecure Randomness',       icon: '🎲' },
+  OPEN_REDIRECT:          { label: 'Open Redirect',             icon: '↩️' },
+  SSRF:                   { label: 'SSRF',                      icon: '🌍' },
+  JWT_HARDCODED_SECRET:   { label: 'JWT Hardcoded Secret',      icon: '🔐' },
+  JWT_WEAK_SECRET:        { label: 'JWT Weak Secret',           icon: '🔓' },
+  JWT_NONE_ALGORITHM:     { label: 'JWT None Algorithm',        icon: '⛔' },
+  JWT_DECODE_NO_VERIFY:   { label: 'JWT Decode (no verify)',    icon: '⚠️' },
+  REDOS:                  { label: 'ReDoS (Regex Injection)',   icon: '🔄' },
+  UNSAFE_DEPENDENCY:      { label: 'Unsafe Dependency',         icon: '📦' },
+  VULNERABLE_DEPENDENCY:  { label: 'Vulnerable Dependency',     icon: '🚨' },
+}
+
 const SEVERITY_STYLES: Record<string, { badge: string; border: string; sectionBg: string; label: string }> = {
   critical: {
     badge: 'bg-red-500/20 text-red-400 border-red-500/40',
@@ -193,7 +216,11 @@ export function ScanResults({ findings, onGoToLine }: ScanResultsProps) {
                     >
                       {/* Header row */}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-mono text-[#7d8590]">{finding.type}</span>
+                        <span className="text-xs font-mono text-[#7d8590]" title={finding.type}>
+                          {FINDING_TYPE_LABELS[finding.type]
+                            ? `${FINDING_TYPE_LABELS[finding.type].icon} ${FINDING_TYPE_LABELS[finding.type].label}`
+                            : finding.type}
+                        </span>
                         {finding.file && (
                           <span className="text-xs text-[#7d8590] font-mono truncate max-w-[120px]">{finding.file}</span>
                         )}

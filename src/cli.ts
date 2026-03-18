@@ -15,6 +15,10 @@ import { detectInsecureRandom } from './scanner/detectors/insecureRandom';
 import { detectOpenRedirect } from './scanner/detectors/openRedirect';
 import { detectSSRF } from './scanner/detectors/ssrf';
 import { detectCommandInjection } from './scanner/detectors/commandInjection';
+import { detectJWTSecrets } from './scanner/detectors/jwt';
+import { detectReDoS } from './scanner/detectors/redos';
+import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
+import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
 import { Finding, printFindings, formatJSON, summarize } from './scanner/reporter';
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
@@ -63,7 +67,11 @@ function scanFile(filePath: string): Finding[] {
       ...detectInsecureRandom(parsed),
       ...detectOpenRedirect(parsed),
       ...detectSSRF(parsed),
+      ...detectJWTSecrets(parsed),
+      ...detectJWTNoneAlgorithm(parsed),
       ...detectCommandInjection(parsed),
+      ...detectReDoS(parsed),
+      ...detectWeakCrypto(parsed),
     ].map((f) => ({ ...f, file: filePath }));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -102,6 +110,38 @@ function buildSARIF(findings: Finding[]): object {
   };
 }
 
+// ── Config file support ───────────────────────────────────────────────────────
+
+interface AiSecScanConfig {
+  ignore?: string[];
+  severity?: string;
+  format?: 'text' | 'json' | 'sarif';
+}
+
+function loadConfig(configPath?: string): AiSecScanConfig {
+  const candidates = configPath
+    ? [path.resolve(configPath)]
+    : [
+        path.join(process.cwd(), '.ai-sec-scan.json'),
+        path.join(process.cwd(), '.ai-sec-scan.jsonc'),
+      ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      try {
+        const raw = fs.readFileSync(candidate, 'utf8');
+        const parsed = JSON.parse(raw) as AiSecScanConfig;
+        console.error(`[config] Loaded: ${candidate}`);
+        return parsed;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[config] Warning: failed to parse ${candidate}: ${msg}`);
+      }
+    }
+  }
+  return {};
+}
+
 program
   .name('ai-sec-scan')
   .description('AST-based security scanner for AI-generated code')
@@ -111,7 +151,15 @@ program
   .option('--sarif', 'Output results as SARIF 2.1.0')
   .option('--severity <level>', 'Minimum severity to report (critical|high|medium|low)', 'low')
   .option('--ignore <glob>', 'Glob pattern to exclude (repeatable, e.g. --ignore \'**/node_modules/**\')', (val, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; ignore: string[] }) => {
+  .option('--config <path>', 'Path to .ai-sec-scan.json config file')
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; ignore: string[]; config?: string }) => {
+    // Load config file first; CLI flags override config values
+    const config = loadConfig(options.config);
+
+    const effectiveIgnore = [...(config.ignore ?? []), ...options.ignore];
+    const effectiveSeverity = options.severity !== 'low' ? options.severity : (config.severity ?? options.severity);
+    const effectiveFormat = options.sarif ? 'sarif' : options.json ? 'json' : (config.format ?? 'text');
+
     const resolved = path.resolve(targetPath);
 
     if (!fs.existsSync(resolved)) {
@@ -119,20 +167,28 @@ program
       process.exit(1);
     }
 
-    const files = collectFiles(resolved, options.ignore);
+    const files = collectFiles(resolved, effectiveIgnore);
     const allFindings: Finding[] = [];
+    const total = files.length;
 
-    for (const file of files) {
-      allFindings.push(...scanFile(file));
+    for (let i = 0; i < files.length; i++) {
+      if (total > 1) {
+        process.stderr.write(`\rScanning ${i + 1}/${total} files...`);
+      }
+      allFindings.push(...scanFile(files[i]!));
+    }
+
+    if (total > 1) {
+      process.stderr.write('\r\x1b[2K'); // clear the progress line
     }
 
     const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-    const minSeverity = severityOrder[options.severity as keyof typeof severityOrder] ?? 3;
+    const minSeverity = severityOrder[effectiveSeverity as keyof typeof severityOrder] ?? 3;
     const filtered = allFindings.filter((f) => severityOrder[f.severity] <= minSeverity);
 
-    if (options.sarif) {
+    if (effectiveFormat === 'sarif') {
       console.log(JSON.stringify(buildSARIF(filtered), null, 2));
-    } else if (options.json) {
+    } else if (effectiveFormat === 'json') {
       console.log(formatJSON(filtered));
     } else {
       await printFindings(filtered, resolved);

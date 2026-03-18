@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import https from 'https';
 import rateLimit from 'express-rate-limit';
+import { minimatch } from 'minimatch';
 import { parseCode } from './scanner/parser';
 import { detectSecrets } from './scanner/detectors/secrets';
 import { detectSQLInjection } from './scanner/detectors/sql';
@@ -15,6 +16,9 @@ import { detectOpenRedirect } from './scanner/detectors/openRedirect';
 import { detectSSRF } from './scanner/detectors/ssrf';
 import { detectJWTSecrets } from './scanner/detectors/jwt';
 import { detectCommandInjection } from './scanner/detectors/commandInjection';
+import { detectReDoS } from './scanner/detectors/redos';
+import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
+import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
 import { summarize, Finding } from './scanner/reporter';
 
 // ── Anthropic AI explain ──────────────────────────────────────────────────────
@@ -244,7 +248,10 @@ app.post('/scan', scanLimiter, async (req, res) => {
     ...detectOpenRedirect(parsed),
     ...detectSSRF(parsed),
     ...detectJWTSecrets(parsed),
+    ...detectJWTNoneAlgorithm(parsed),
     ...detectCommandInjection(parsed),
+    ...detectReDoS(parsed),
+    ...detectWeakCrypto(parsed),
   ].map((f) => ({ ...f, file: filename ?? 'input' }));
 
   // Scan package.json for unsafe deps if provided
@@ -308,12 +315,21 @@ function githubGetText(url: string): Promise<string> {
 
 interface GHItem { type: string; name: string; path: string; size: number; download_url: string | null; url: string }
 
+function isIgnoredByPatterns(filePath: string, ignorePatterns: string[]): boolean {
+  if (ignorePatterns.length === 0) return false;
+  const normalised = filePath.replace(/\\/g, '/');
+  return ignorePatterns.some((pattern) =>
+    minimatch(normalised, pattern, { matchBase: true, dot: true }),
+  );
+}
+
 async function collectFiles(
   apiBase: string,
   dirPath: string,
   branch: string,
   collected: GHItem[],
   max: number,
+  ignorePatterns: string[] = [],
 ): Promise<void> {
   if (collected.length >= max) return;
   const url = `${apiBase}/contents/${dirPath}?ref=${encodeURIComponent(branch)}`;
@@ -321,19 +337,24 @@ async function collectFiles(
   if (!Array.isArray(items)) return;
   for (const item of items) {
     if (collected.length >= max) break;
+    if (isIgnoredByPatterns(item.path, ignorePatterns)) continue;
     if (item.type === 'file') {
       const ext = item.name.split('.').pop() ?? '';
       if (['ts', 'tsx', 'js', 'jsx'].includes(ext) && item.size <= 200 * 1024) {
         collected.push(item);
       }
     } else if (item.type === 'dir') {
-      await collectFiles(apiBase, item.path, branch, collected, max);
+      await collectFiles(apiBase, item.path, branch, collected, max, ignorePatterns);
     }
   }
 }
 
 app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
-  const { repoUrl, branch = 'main' } = req.body as { repoUrl?: string; branch?: string };
+  const { repoUrl, branch = 'main', ignorePatterns = [] } = req.body as {
+    repoUrl?: string;
+    branch?: string;
+    ignorePatterns?: string[];
+  };
 
   if (!repoUrl || typeof repoUrl !== 'string') {
     res.status(400).json({ error: 'Missing required field: repoUrl (string)' });
@@ -351,8 +372,9 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
 
   try {
+    const patterns = Array.isArray(ignorePatterns) ? ignorePatterns.filter((p) => typeof p === 'string') : [];
     const collected: GHItem[] = [];
-    await collectFiles(apiBase, '', branch, collected, 50);
+    await collectFiles(apiBase, '', branch, collected, 50, patterns);
 
     if (collected.length === 0) {
       res.json({ findings: [], summary: summarize([]), filesScanned: 0 });
@@ -378,7 +400,10 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
             ...detectOpenRedirect(parsed),
             ...detectSSRF(parsed),
             ...detectJWTSecrets(parsed),
+            ...detectJWTNoneAlgorithm(parsed),
             ...detectCommandInjection(parsed),
+            ...detectReDoS(parsed),
+            ...detectWeakCrypto(parsed),
           ].map((f) => ({ ...f, file: item.path }));
           allFindings.push(...findings);
         } catch {
