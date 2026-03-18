@@ -23,6 +23,29 @@ interface ScanResultsProps {
 
 const SEVERITY_ORDER: Finding['severity'][] = ['critical', 'high', 'medium', 'low']
 
+// Human-readable labels and descriptions for each finding type.
+// Types not listed here fall back to displaying the raw type string.
+const FINDING_TYPE_META: Record<string, { label: string; description: string }> = {
+  SECRET_HARDCODED:      { label: 'Hardcoded Secret',        description: 'A secret such as an API key, token, or password is hardcoded in source code.' },
+  SQL_INJECTION:         { label: 'SQL Injection',           description: 'Untrusted input is interpolated directly into a SQL query, allowing database manipulation.' },
+  SHELL_INJECTION:       { label: 'Shell Injection',         description: 'Untrusted input is passed to a shell command, allowing arbitrary command execution.' },
+  COMMAND_INJECTION:     { label: 'Command Injection',       description: 'Dynamic values derived from user input are passed to exec/spawn without sanitization, allowing arbitrary OS command execution.' },
+  EVAL_INJECTION:        { label: 'Eval Injection',          description: 'eval() or equivalent is called with dynamic input, allowing arbitrary code execution.' },
+  XSS:                   { label: 'Cross-Site Scripting',    description: 'Untrusted data is rendered as HTML or injected into the DOM without escaping, enabling script injection.' },
+  PATH_TRAVERSAL:        { label: 'Path Traversal',          description: 'User-controlled input is used in file system paths, allowing directory traversal attacks.' },
+  PROTOTYPE_POLLUTION:   { label: 'Prototype Pollution',     description: 'Object properties are set from user-controlled keys, risking pollution of Object.prototype.' },
+  INSECURE_RANDOM:       { label: 'Insecure Randomness',     description: 'Math.random() is used in a security-sensitive context; it is not cryptographically secure.' },
+  OPEN_REDIRECT:         { label: 'Open Redirect',           description: 'A redirect URL is constructed from user input, allowing phishing via open redirect.' },
+  SSRF:                  { label: 'SSRF',                    description: 'An HTTP request is made to a URL derived from user input, potentially exposing internal services.' },
+  JWT_HARDCODED_SECRET:  { label: 'JWT Hardcoded Secret',    description: 'A JWT is signed with a hardcoded secret, making it trivial to forge tokens.' },
+  JWT_WEAK_SECRET:       { label: 'JWT Weak Secret',         description: 'A JWT is signed with a short or guessable secret.' },
+  JWT_NONE_ALGORITHM:    { label: 'JWT None Algorithm',      description: 'The JWT "none" algorithm is accepted, bypassing signature verification entirely.' },
+  REDOS:                 { label: 'ReDoS',                   description: 'A regular expression with catastrophic backtracking can be exploited for denial-of-service.' },
+  UNSAFE_DEPENDENCY:     { label: 'Unsafe Dependency',       description: 'A dependency is pinned to an unpinned or wildcard version, risking supply-chain attacks.' },
+  VULNERABLE_DEPENDENCY: { label: 'Vulnerable Dependency',   description: 'A dependency with a known CVE is in use; upgrade to the minimum safe version.' },
+  CORS_MISCONFIGURATION: { label: 'CORS Misconfiguration',   description: 'CORS is configured to allow any origin with credentials, enabling cross-site request forgery.' },
+}
+
 const SEVERITY_STYLES: Record<string, { badge: string; border: string; sectionBg: string; label: string }> = {
   critical: {
     badge: 'bg-red-500/20 text-red-400 border-red-500/40',
@@ -193,7 +216,9 @@ export function ScanResults({ findings, onGoToLine }: ScanResultsProps) {
                     >
                       {/* Header row */}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-mono text-[#7d8590]">{finding.type}</span>
+                        <span className="text-xs font-mono text-[#7d8590]" title={FINDING_TYPE_META[finding.type]?.description}>
+                          {FINDING_TYPE_META[finding.type]?.label ?? finding.type}
+                        </span>
                         {finding.file && (
                           <span className="text-xs text-[#7d8590] font-mono truncate max-w-[120px]">{finding.file}</span>
                         )}
