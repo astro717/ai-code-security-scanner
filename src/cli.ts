@@ -19,6 +19,42 @@ import { Finding, printFindings, formatJSON, summarize } from './scanner/reporte
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
+// ── .aiscanner ignore file ────────────────────────────────────────────────────
+
+/**
+ * Loads ignore patterns from a `.aiscanner` file in the given directory (or
+ * any of its ancestors up to the filesystem root).  Each non-empty line that
+ * does not start with `#` is treated as a glob pattern.
+ *
+ * Returns an empty array if no `.aiscanner` file is found.
+ */
+function loadAiScannerIgnore(startDir: string): string[] {
+  let dir = startDir;
+  while (true) {
+    const candidate = path.join(dir, '.aiscanner');
+    if (fs.existsSync(candidate)) {
+      try {
+        const lines = fs.readFileSync(candidate, 'utf8')
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0 && !l.startsWith('#'));
+        if (lines.length > 0) {
+          console.error(`[ignore] Loaded ${lines.length} pattern(s) from ${candidate}`);
+        }
+        return lines;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[ignore] Warning: could not read ${candidate}: ${msg}`);
+        return [];
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
+  }
+  return [];
+}
+
 function isIgnored(filePath: string, ignorePatterns: string[]): boolean {
   // Normalise to forward slashes for cross-platform glob matching
   const normalised = filePath.split(path.sep).join('/');
@@ -119,7 +155,14 @@ program
       process.exit(1);
     }
 
-    const files = collectFiles(resolved, options.ignore);
+    // Load .aiscanner ignore file patterns from the project root (the scan target dir, or its ancestors)
+    const scanRoot = fs.statSync(resolved).isDirectory() ? resolved : path.dirname(resolved);
+    const fileIgnorePatterns = loadAiScannerIgnore(scanRoot);
+
+    // Merge: .aiscanner patterns + --ignore flags (CLI flags take precedence by appending last)
+    const effectiveIgnore = [...fileIgnorePatterns, ...options.ignore];
+
+    const files = collectFiles(resolved, effectiveIgnore);
     const allFindings: Finding[] = [];
 
     for (const file of files) {
