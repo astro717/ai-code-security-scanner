@@ -77,14 +77,132 @@ function isSsrfCall(call: TSESTree.CallExpression): boolean {
   return false;
 }
 
+// ── Taint sources ─────────────────────────────────────────────────────────────
+
+/**
+ * Returns true if the node represents a tainted source — i.e. a value that
+ * originates from user-controlled request input:
+ *   req.query.xxx  / req.query['xxx']
+ *   req.body.xxx   / req.body['xxx']
+ *   req.params.xxx / req.params['xxx']
+ *   req.headers.xxx
+ */
+function isTaintSource(node: TSESTree.Node): boolean {
+  if (node.type !== 'MemberExpression') return false;
+  const mem = node as TSESTree.MemberExpression;
+
+  // req.query / req.body / req.params / req.headers  (depth 1 — e.g. req.body itself)
+  if (
+    mem.object.type === 'Identifier' &&
+    (mem.object as TSESTree.Identifier).name === 'req' &&
+    mem.property.type === 'Identifier'
+  ) {
+    const propName = (mem.property as TSESTree.Identifier).name;
+    if (['query', 'body', 'params', 'headers'].includes(propName)) {
+      return true;
+    }
+  }
+
+  // req.query.xxx / req.body.xxx / req.params.xxx / req.headers.xxx  (depth 2)
+  if (mem.object.type === 'MemberExpression') {
+    const parent = mem.object as TSESTree.MemberExpression;
+    if (
+      parent.object.type === 'Identifier' &&
+      (parent.object as TSESTree.Identifier).name === 'req' &&
+      parent.property.type === 'Identifier'
+    ) {
+      const parentProp = (parent.property as TSESTree.Identifier).name;
+      if (['query', 'body', 'params', 'headers'].includes(parentProp)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Builds a taint map: variable name -> true if that variable was assigned from
+ * a taint source (req.query/req.body/req.params/req.headers) anywhere in the AST.
+ *
+ * Handles:
+ *   const url = req.query.url;
+ *   let target = req.body.target;
+ *   url = req.query.url;             (reassignment)
+ *   const { url } = req.query;       (destructuring)
+ */
+function buildTaintMap(ast: TSESTree.Node): Set<string> {
+  const tainted = new Set<string>();
+
+  walkNode(ast, (node) => {
+    // const/let/var x = <taint>
+    if (node.type === 'VariableDeclarator') {
+      const decl = node as TSESTree.VariableDeclarator;
+      if (!decl.init) return;
+
+      // Simple: const url = req.query.url
+      if (decl.id.type === 'Identifier' && isTaintSource(decl.init)) {
+        tainted.add((decl.id as TSESTree.Identifier).name);
+      }
+
+      // Destructuring: const { url } = req.query
+      if (decl.id.type === 'ObjectPattern' && isTaintSource(decl.init)) {
+        const pat = decl.id as TSESTree.ObjectPattern;
+        for (const prop of pat.properties) {
+          if (prop.type === 'Property' && prop.value.type === 'Identifier') {
+            tainted.add((prop.value as TSESTree.Identifier).name);
+          } else if (prop.type === 'RestElement' && prop.argument.type === 'Identifier') {
+            tainted.add((prop.argument as TSESTree.Identifier).name);
+          }
+        }
+      }
+    }
+
+    // x = <taint>  (assignment expression)
+    if (node.type === 'AssignmentExpression') {
+      const assign = node as TSESTree.AssignmentExpression;
+      if (assign.left.type === 'Identifier' && isTaintSource(assign.right)) {
+        tainted.add((assign.left as TSESTree.Identifier).name);
+      }
+    }
+  });
+
+  return tainted;
+}
+
+/**
+ * Returns true if a node is tainted — either it's a direct taint source or
+ * it's an Identifier whose name is in the taint map.
+ */
+function isTainted(node: TSESTree.Node, taintMap: Set<string>): boolean {
+  if (isTaintSource(node)) return true;
+  if (node.type === 'Identifier') {
+    return taintMap.has((node as TSESTree.Identifier).name);
+  }
+  // Template literal: `${taintedVar}/path` — tainted if any expression is tainted
+  if (node.type === 'TemplateLiteral') {
+    return (node as TSESTree.TemplateLiteral).expressions.some((e) => isTainted(e, taintMap));
+  }
+  return false;
+}
+
+// ── Main detector ─────────────────────────────────────────────────────────────
+
 /**
  * Detects SSRF (Server-Side Request Forgery): calls to fetch(), axios.get/post(),
  * http.get(), https.get(), etc. where the URL argument is dynamic (a variable
  * or a template literal with expressions) rather than a static string.
+ *
+ * Additionally performs single-scope taint tracking: if the URL variable was
+ * assigned from req.query / req.body / req.params / req.headers (including
+ * multi-hop assignments), a higher-confidence SSRF finding is emitted.
  */
 export function detectSSRF(result: ParseResult): Finding[] {
   const findings: Finding[] = [];
   const reported = new Set<number>();
+
+  // Build taint map once for the entire file
+  const taintMap = buildTaintMap(result.ast);
 
   walkNode(result.ast, (node) => {
     if (node.type !== 'CallExpression') return;
@@ -98,8 +216,10 @@ export function detectSSRF(result: ParseResult): Finding[] {
     const firstArg = args[0];
     if (firstArg.type === 'SpreadElement') return;
 
+    const argNode = firstArg as TSESTree.Node;
+
     // Only flag if the URL is dynamic (non-static)
-    if (!isStaticUrl(firstArg as TSESTree.Node)) {
+    if (!isStaticUrl(argNode)) {
       const line = node.loc!.start.line;
       if (!reported.has(line)) {
         reported.add(line);
@@ -117,16 +237,22 @@ export function detectSSRF(result: ParseResult): Finding[] {
           fnLabel = `${objStr}.${propStr}()`;
         }
 
+        // Check whether the URL can be traced back to user-controlled input
+        const userControlled = isTainted(argNode, taintMap);
+
         findings.push({
           type: 'SSRF',
           severity: 'high',
           line,
           column: node.loc!.start.column,
           snippet: result.lines[line - 1]?.trim() ?? '',
-          message:
-            `${fnLabel} called with a dynamic URL. If the URL originates from user input, ` +
-            `an attacker can force the server to make requests to internal services (SSRF). ` +
-            `Validate and whitelist allowed URL origins before making outbound requests.`,
+          message: userControlled
+            ? `${fnLabel} called with a URL derived from user-controlled request input (req.query/req.body). ` +
+              `An attacker can force the server to make requests to internal services (SSRF). ` +
+              `Validate and whitelist allowed URL origins before making outbound requests.`
+            : `${fnLabel} called with a dynamic URL. If the URL originates from user input, ` +
+              `an attacker can force the server to make requests to internal services (SSRF). ` +
+              `Validate and whitelist allowed URL origins before making outbound requests.`,
         });
       }
     }
