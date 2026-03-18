@@ -20,6 +20,7 @@ import { detectInsecureRandom } from '../src/scanner/detectors/insecureRandom';
 import { detectSSRF } from '../src/scanner/detectors/ssrf';
 import { detectJWTSecrets } from '../src/scanner/detectors/jwt';
 import { detectCommandInjection } from '../src/scanner/detectors/commandInjection';
+import { detectOpenRedirect } from '../src/scanner/detectors/openRedirect';
 import { Finding } from '../src/scanner/reporter';
 
 // ─── Tiny test runner ─────────────────────────────────────────────────────────
@@ -298,6 +299,13 @@ test('parseCode detects INSECURE_RANDOM via Math.random() for token generation',
   const code = `const sessionToken = Math.random().toString(36).slice(2);`;
   const findings = detectInsecureRandom(parsed);
   expect(findings).toContain('INSECURE_RANDOM');
+test('parseCode detects OPEN_REDIRECT when res.redirect() receives dynamic URL', () => {
+  const code = `res.redirect(req.query.next);`;
+  const findings = detectOpenRedirect(parsed);
+  expect(findings).toContain('OPEN_REDIRECT');
+test('parseCode: no OPEN_REDIRECT finding when res.redirect() uses a static string', () => {
+  const code = `res.redirect('/dashboard');`;
+  const findings = detectOpenRedirect(parsed);
 });
 
 // ─── Integration: scan-repo detector coverage ─────────────────────────────────
