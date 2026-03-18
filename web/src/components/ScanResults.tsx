@@ -44,6 +44,22 @@ const FINDING_TYPE_META: Record<string, { label: string; description: string }> 
   UNSAFE_DEPENDENCY:     { label: 'Unsafe Dependency',       description: 'A dependency is pinned to an unpinned or wildcard version, risking supply-chain attacks.' },
   VULNERABLE_DEPENDENCY: { label: 'Vulnerable Dependency',   description: 'A dependency with a known CVE is in use; upgrade to the minimum safe version.' },
   CORS_MISCONFIGURATION: { label: 'CORS Misconfiguration',   description: 'CORS is configured to allow any origin with credentials, enabling cross-site request forgery.' },
+/**
+ * Human-readable labels and descriptions for each finding type.
+ * Types not listed here fall back to using the raw type string as label.
+ */
+  SQL_INJECTION:        { label: 'SQL Injection',          description: 'Unsanitized user input passed directly into a SQL query.' },
+  XSS:                 { label: 'Cross-Site Scripting',    description: 'Dynamic content rendered without escaping, enabling script injection.' },
+  SHELL_INJECTION:     { label: 'Shell Injection',         description: 'User-controlled input passed to a shell command without sanitization.' },
+  SSRF:                { label: 'Server-Side Request Forgery', description: 'HTTP call made with a dynamic URL that may originate from user input, allowing attackers to reach internal services.' },
+  PATH_TRAVERSAL:      { label: 'Path Traversal',          description: 'File path constructed from user input, potentially accessing files outside the intended directory.' },
+  OPEN_REDIRECT:       { label: 'Open Redirect',           description: 'Redirect target derived from user input, enabling phishing attacks.' },
+  PROTOTYPE_POLLUTION: { label: 'Prototype Pollution',     description: 'Object prototype modified via user-controlled keys, potentially affecting all objects.' },
+  INSECURE_RANDOM:     { label: 'Insecure Randomness',     description: 'Math.random() used in a security-sensitive context — not cryptographically secure.' },
+  HARDCODED_SECRET:    { label: 'Hardcoded Secret',        description: 'Credential or secret key appears to be hardcoded in source code.' },
+  EVAL_INJECTION:      { label: 'Eval Injection',          description: 'eval() or similar called with a dynamic argument, enabling arbitrary code execution.' },
+  VULNERABLE_DEP:      { label: 'Vulnerable Dependency',   description: 'A dependency with a known security vulnerability was detected.' },
+  JWT_NONE_ALG:        { label: 'JWT None Algorithm',      description: 'JWT verification accepts the "none" algorithm, bypassing signature checks.' },
 }
 
 const SEVERITY_STYLES: Record<string, { badge: string; border: string; sectionBg: string; label: string }> = {
@@ -217,6 +233,7 @@ export function ScanResults({ findings, onGoToLine }: ScanResultsProps) {
                       {/* Header row */}
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-mono text-[#7d8590]" title={FINDING_TYPE_META[finding.type]?.description}>
+                        <span className="text-xs font-mono text-[#7d8590]" title={finding.type}>
                           {FINDING_TYPE_META[finding.type]?.label ?? finding.type}
                         </span>
                         {finding.file && (
