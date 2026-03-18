@@ -16,6 +16,10 @@ import { detectOpenRedirect } from './scanner/detectors/openRedirect';
 import { detectSSRF } from './scanner/detectors/ssrf';
 import { detectCommandInjection } from './scanner/detectors/commandInjection';
 import { detectCORSMisconfiguration } from './scanner/detectors/cors';
+import { detectJWTSecrets } from './scanner/detectors/jwt';
+import { detectReDoS } from './scanner/detectors/redos';
+import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
+import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
 import { Finding, printFindings, formatJSON, summarize } from './scanner/reporter';
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
@@ -57,7 +61,6 @@ function loadAiScannerIgnore(startDir: string): string[] {
 }
 
 function isIgnored(filePath: string, ignorePatterns: string[]): boolean {
-  // Normalise to forward slashes for cross-platform glob matching
   const normalised = filePath.split(path.sep).join('/');
   return ignorePatterns.some((pattern) =>
     minimatch(normalised, pattern, { matchBase: true, dot: true }),
@@ -100,8 +103,12 @@ function scanFile(filePath: string): Finding[] {
       ...detectInsecureRandom(parsed),
       ...detectOpenRedirect(parsed),
       ...detectSSRF(parsed),
+      ...detectJWTSecrets(parsed),
+      ...detectJWTNoneAlgorithm(parsed),
       ...detectCommandInjection(parsed),
       ...detectCORSMisconfiguration(parsed),
+      ...detectReDoS(parsed),
+      ...detectWeakCrypto(parsed),
     ].map((f) => ({ ...f, file: filePath }));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -140,6 +147,143 @@ function buildSARIF(findings: Finding[]): object {
   };
 }
 
+// ── Config file support ───────────────────────────────────────────────────────
+
+interface AiSecScanConfig {
+  ignore?: string[];
+  severity?: string;
+  format?: 'text' | 'json' | 'sarif';
+}
+
+function loadConfig(configPath?: string): AiSecScanConfig {
+  const candidates = configPath
+    ? [path.resolve(configPath)]
+    : [
+        path.join(process.cwd(), '.ai-sec-scan.json'),
+        path.join(process.cwd(), '.ai-sec-scan.jsonc'),
+      ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      try {
+        const raw = fs.readFileSync(candidate, 'utf8');
+        const parsed = JSON.parse(raw) as AiSecScanConfig;
+        console.error(`[config] Loaded: ${candidate}`);
+        return parsed;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[config] Warning: failed to parse ${candidate}: ${msg}`);
+      }
+    }
+  }
+  return {};
+}
+
+// ── Watch mode ────────────────────────────────────────────────────────────────
+
+/**
+ * Diffs two sets of findings by a stable key, returning added and resolved sets.
+ */
+function diffFindings(
+  prev: Finding[],
+  next: Finding[],
+): { added: Finding[]; resolved: Finding[] } {
+  function key(f: Finding): string {
+    return `${f.file ?? ''}:${f.line}:${f.column}:${f.type}`;
+  }
+  const prevKeys = new Set(prev.map(key));
+  const nextKeys = new Set(next.map(key));
+  return {
+    added: next.filter((f) => !prevKeys.has(key(f))),
+    resolved: prev.filter((f) => !nextKeys.has(key(f))),
+  };
+}
+
+function printWatchDiff(filePath: string, added: Finding[], resolved: Finding[]): void {
+  const rel = path.relative(process.cwd(), filePath);
+  const ts = new Date().toLocaleTimeString();
+
+  if (added.length === 0 && resolved.length === 0) {
+    process.stdout.write(`[${ts}] ${rel} — no changes\n`);
+    return;
+  }
+
+  console.log(`\n[${ts}] ${rel}`);
+  for (const f of added) {
+    console.log(`  + [${f.severity.toUpperCase()}] ${f.type} at line ${f.line}: ${f.message}`);
+  }
+  for (const f of resolved) {
+    console.log(`  - [resolved] ${f.type} at line ${f.line}`);
+  }
+}
+
+function startWatchMode(
+  targetPath: string,
+  ignorePatterns: string[],
+  severity: string,
+): void {
+  const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+  const minSeverity = severityOrder[severity as keyof typeof severityOrder] ?? 3;
+
+  // Cache: file path -> last known filtered findings
+  const cache = new Map<string, Finding[]>();
+
+  function scanAndUpdate(filePath: string): void {
+    const raw = scanFile(filePath);
+    const filtered = raw.filter((f) => severityOrder[f.severity] <= minSeverity);
+    const prev = cache.get(filePath) ?? [];
+    cache.set(filePath, filtered);
+    const { added, resolved } = diffFindings(prev, filtered);
+    printWatchDiff(filePath, added, resolved);
+  }
+
+  // Seed cache with initial scan (silent)
+  const initialFiles = collectFiles(targetPath, ignorePatterns);
+  console.error(`[watch] Watching ${initialFiles.length} file(s) in ${targetPath}`);
+  console.error('[watch] Press Ctrl+C to stop.\n');
+  for (const f of initialFiles) {
+    const raw = scanFile(f);
+    cache.set(f, raw.filter((fi) => severityOrder[fi.severity] <= minSeverity));
+  }
+
+  const watchers: fs.FSWatcher[] = [];
+
+  try {
+    const watcher = fs.watch(targetPath, { recursive: true }, (_event, filename) => {
+      if (!filename) return;
+      const full = path.isAbsolute(filename) ? filename : path.join(targetPath, filename);
+      if (!SUPPORTED_EXTENSIONS.has(path.extname(full))) return;
+      if (isIgnored(full, ignorePatterns)) return;
+
+      if (!fs.existsSync(full)) {
+        // File deleted — treat as all findings resolved
+        const prev = cache.get(full);
+        if (prev && prev.length > 0) printWatchDiff(full, [], prev);
+        cache.delete(full);
+        return;
+      }
+
+      scanAndUpdate(full);
+    });
+    watchers.push(watcher);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[watch] Could not watch ${targetPath}: ${msg}`);
+    process.exit(1);
+  }
+
+  process.on('SIGINT', () => {
+    console.log('\n[watch] Stopping.');
+    watchers.forEach((w) => w.close());
+    process.exit(0);
+  });
+
+  // Keep the process alive
+  setInterval(() => { /* heartbeat */ }, 10_000).unref();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 program
   .name('ai-sec-scan')
   .description('AST-based security scanner for AI-generated code')
@@ -157,6 +301,15 @@ program
   .option('--ignore <glob>', 'Glob pattern to exclude (repeatable, e.g. --ignore \'**/node_modules/**\')', (val, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
   .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; minSeverity?: string; ignore: string[] }) => {
   .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; ignore: string[] }) => {
+  .option('--config <path>', 'Path to .ai-sec-scan.json config file')
+  .option('--watch', 'Watch for file changes and re-scan automatically, printing a diff of new/resolved findings')
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; ignore: string[]; config?: string; watch: boolean }) => {
+    const config = loadConfig(options.config);
+
+    const effectiveIgnore = [...(config.ignore ?? []), ...options.ignore];
+    const effectiveSeverity = options.severity !== 'low' ? options.severity : (config.severity ?? options.severity);
+    const effectiveFormat = options.sarif ? 'sarif' : options.json ? 'json' : (config.format ?? 'text');
+
     const resolved = path.resolve(targetPath);
 
     if (!fs.existsSync(resolved)) {
@@ -173,9 +326,26 @@ program
 
     const files = collectFiles(resolved, effectiveIgnore);
     const allFindings: Finding[] = [];
+    // ── Watch mode ──────────────────────────────────────────────────────────
+    if (options.watch) {
+      startWatchMode(resolved, effectiveIgnore, effectiveSeverity);
+      return;
+    }
 
-    for (const file of files) {
-      allFindings.push(...scanFile(file));
+    // ── One-shot scan ───────────────────────────────────────────────────────
+    const files = collectFiles(resolved, effectiveIgnore);
+    const allFindings: Finding[] = [];
+    const total = files.length;
+
+    for (let i = 0; i < files.length; i++) {
+      if (total > 1) {
+        process.stderr.write(`\rScanning ${i + 1}/${total} files...`);
+      }
+      allFindings.push(...scanFile(files[i]!));
+    }
+
+    if (total > 1) {
+      process.stderr.write('\r\x1b[2K');
     }
 
     const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -187,6 +357,9 @@ program
     // --format takes highest precedence; --sarif / --json are convenience aliases
     const effectiveFormat = options.format ?? (options.sarif ? 'sarif' : options.json ? 'json' : 'text');
 
+    const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+    const minSeverity = severityOrder[effectiveSeverity as keyof typeof severityOrder] ?? 3;
+    const filtered = allFindings.filter((f) => severityOrder[f.severity] <= minSeverity);
     if (effectiveFormat === 'sarif') {
       console.log(JSON.stringify(buildSARIF(filtered), null, 2));
     } else if (effectiveFormat === 'json') {
