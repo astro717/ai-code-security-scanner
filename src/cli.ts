@@ -147,6 +147,7 @@ program
   .argument('[path]', 'File or directory to scan', '.')
   .option('--json', 'Output results as JSON')
   .option('--sarif', 'Output results as SARIF 2.1.0')
+  .option('--format <format>', 'Output format: text | json | sarif (overrides --json / --sarif flags)')
   .option('--severity <level>', 'Minimum severity to report (critical|high|medium|low)', 'low')
   .option(
     '--min-severity <level>',
@@ -155,6 +156,7 @@ program
   )
   .option('--ignore <glob>', 'Glob pattern to exclude (repeatable, e.g. --ignore \'**/node_modules/**\')', (val, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
   .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; minSeverity?: string; ignore: string[] }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; ignore: string[] }) => {
     const resolved = path.resolve(targetPath);
 
     if (!fs.existsSync(resolved)) {
@@ -182,9 +184,12 @@ program
     const minReport = severityOrder[options.severity] ?? 3;
     const filtered = allFindings.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
 
-    if (options.sarif) {
+    // --format takes highest precedence; --sarif / --json are convenience aliases
+    const effectiveFormat = options.format ?? (options.sarif ? 'sarif' : options.json ? 'json' : 'text');
+
+    if (effectiveFormat === 'sarif') {
       console.log(JSON.stringify(buildSARIF(filtered), null, 2));
-    } else if (options.json) {
+    } else if (effectiveFormat === 'json') {
       console.log(formatJSON(filtered));
     } else {
       await printFindings(filtered, resolved);
