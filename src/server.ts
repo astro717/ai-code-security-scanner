@@ -15,6 +15,7 @@ import { detectOpenRedirect } from './scanner/detectors/openRedirect';
 import { detectSSRF } from './scanner/detectors/ssrf';
 import { detectJWTSecrets } from './scanner/detectors/jwt';
 import { detectCommandInjection } from './scanner/detectors/commandInjection';
+import { detectCORSMisconfiguration } from './scanner/detectors/cors';
 import { summarize, Finding } from './scanner/reporter';
 
 // ── Anthropic AI explain ──────────────────────────────────────────────────────
@@ -261,6 +262,7 @@ app.post('/scan', scanLimiter, async (req, res) => {
     ...detectSSRF(parsed),
     ...detectJWTSecrets(parsed),
     ...detectCommandInjection(parsed),
+    ...detectCORSMisconfiguration(parsed),
   ].map((f) => ({ ...f, file: filename ?? 'input' }));
 
   // Scan package.json for unsafe deps if provided

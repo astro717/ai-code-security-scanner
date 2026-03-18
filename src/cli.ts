@@ -15,6 +15,7 @@ import { detectInsecureRandom } from './scanner/detectors/insecureRandom';
 import { detectOpenRedirect } from './scanner/detectors/openRedirect';
 import { detectSSRF } from './scanner/detectors/ssrf';
 import { detectCommandInjection } from './scanner/detectors/commandInjection';
+import { detectCORSMisconfiguration } from './scanner/detectors/cors';
 import { Finding, printFindings, formatJSON, summarize } from './scanner/reporter';
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
@@ -100,6 +101,7 @@ function scanFile(filePath: string): Finding[] {
       ...detectOpenRedirect(parsed),
       ...detectSSRF(parsed),
       ...detectCommandInjection(parsed),
+      ...detectCORSMisconfiguration(parsed),
     ].map((f) => ({ ...f, file: filePath }));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
