@@ -25,7 +25,9 @@ import { detectReDoS } from '../src/scanner/detectors/redos';
 import { detectWeakCrypto } from '../src/scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from '../src/scanner/detectors/jwtNone';
 import { detectCORSMisconfiguration } from '../src/scanner/detectors/cors';
+import { detectUnsafeDeps } from '../src/scanner/detectors/deps';
 import { Finding } from '../src/scanner/reporter';
+import * as os from 'os';
 
 // ─── Tiny test runner ─────────────────────────────────────────────────────────
 
@@ -597,6 +599,70 @@ test('detectWeakCrypto: case-insensitive match — flags "MD5" uppercase input',
   const findings = detectWeakCrypto(parsed);
   expect(findings.length).toBeGreaterThanOrEqual(1);
   expect(findings).toContain('WEAK_CRYPTO');
+});
+
+// ─── Unsafe dependency detector ───────────────────────────────────────────────
+
+console.log('\nUnsafe dependency detector:');
+
+test('detectUnsafeDeps: flags wildcard version "*" in dependencies', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-deps-'));
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ dependencies: { lodash: '*' } }),
+  );
+  // Create a lockfile so only the wildcard finding fires
+  fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+  const findings = detectUnsafeDeps(dir);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('UNSAFE_DEPENDENCY');
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('detectUnsafeDeps: flags "latest" version in devDependencies', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-deps-'));
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ devDependencies: { typescript: 'latest' } }),
+  );
+  fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+  const findings = detectUnsafeDeps(dir);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('UNSAFE_DEPENDENCY');
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('detectUnsafeDeps: flags missing lockfile when deps are present', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-deps-'));
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ dependencies: { express: '^4.18.0' } }),
+  );
+  // No lockfile written
+  const findings = detectUnsafeDeps(dir);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('UNSAFE_DEPENDENCY');
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('detectUnsafeDeps: no finding for pinned semver version with lockfile present', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-deps-'));
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ dependencies: { express: '4.18.2', lodash: '4.17.21' } }),
+  );
+  fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+  const findings = detectUnsafeDeps(dir);
+  expect(findings.length).toBe(0);
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('detectUnsafeDeps: no finding when package.json is absent', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-deps-'));
+  // No package.json written
+  const findings = detectUnsafeDeps(dir);
+  expect(findings.length).toBe(0);
+  fs.rmSync(dir, { recursive: true });
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
