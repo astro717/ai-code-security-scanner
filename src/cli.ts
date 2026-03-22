@@ -300,43 +300,40 @@ program
     'Defaults to high when omitted (only critical/high cause failure).',
   )
   .option('--ignore <glob>', 'Glob pattern to exclude (repeatable, e.g. --ignore \'**/node_modules/**\')', (val, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; minSeverity?: string; ignore: string[] }) => {
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; ignore: string[] }) => {
   .option('--config <path>', 'Path to .ai-sec-scan.json config file')
   .option('--watch', 'Watch for file changes and re-scan automatically, printing a diff of new/resolved findings')
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; ignore: string[]; config?: string; watch: boolean }) => {
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; severity: string; ignore: string[]; config?: string }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; ignore: string[]; config?: string; watch: boolean }) => {
     // Load config file first; CLI flags override config values
     const config = loadConfig(options.config);
 
-    const effectiveIgnore = [...(config.ignore ?? []), ...options.ignore];
-    const effectiveSeverity = options.severity !== 'low' ? options.severity : (config.severity ?? options.severity);
-    const effectiveFormat = options.sarif ? 'sarif' : options.json ? 'json' : (config.format ?? 'text');
+    const scanRoot = path.resolve(targetPath);
 
-    const resolved = path.resolve(targetPath);
-
-    if (!fs.existsSync(resolved)) {
-      console.error(`Error: path not found: ${resolved}`);
+    if (!fs.existsSync(scanRoot)) {
+      console.error(`Error: path not found: ${scanRoot}`);
       process.exit(1);
     }
 
     // Load .aiscanner ignore file patterns from the project root (the scan target dir, or its ancestors)
-    const scanRoot = fs.statSync(resolved).isDirectory() ? resolved : path.dirname(resolved);
-    const fileIgnorePatterns = loadAiScannerIgnore(scanRoot);
+    const scanRootDir = fs.statSync(scanRoot).isDirectory() ? scanRoot : path.dirname(scanRoot);
+    const fileIgnorePatterns = loadAiScannerIgnore(scanRootDir);
 
-    // Merge: .aiscanner patterns + --ignore flags (CLI flags take precedence by appending last)
-    const effectiveIgnore = [...fileIgnorePatterns, ...options.ignore];
+    // Merge: config ignore + .aiscanner patterns + --ignore flags
+    const effectiveIgnore = [...(config.ignore ?? []), ...fileIgnorePatterns, ...options.ignore];
 
-    const files = collectFiles(resolved, effectiveIgnore);
-    const allFindings: Finding[] = [];
+    // --format takes highest precedence; --sarif / --json are convenience aliases; then config
+    const effectiveFormat = options.format ?? (options.sarif ? 'sarif' : options.json ? 'json' : (config.format ?? 'text'));
+
+    // --severity controls which findings are reported; config is fallback
+    const effectiveSeverity = options.severity !== 'low' ? options.severity : (config.severity ?? options.severity);
+
     // ── Watch mode ──────────────────────────────────────────────────────────
     if (options.watch) {
-      startWatchMode(resolved, effectiveIgnore, effectiveSeverity);
+      startWatchMode(scanRoot, effectiveIgnore, effectiveSeverity);
       return;
     }
 
     // ── One-shot scan ───────────────────────────────────────────────────────
-    const files = collectFiles(resolved, effectiveIgnore);
+    const files = collectFiles(scanRoot, effectiveIgnore);
     const allFindings: Finding[] = [];
     const total = files.length;
 
@@ -348,33 +345,26 @@ program
     }
 
     if (total > 1) {
-      process.stderr.write('\r\x1b[2K');
+      process.stderr.write('\r\x1b[2K'); // clear the progress line
     }
 
     // ── Dependency scanning (directory targets only) ─────────────────────────
-    if (fs.statSync(resolved).isDirectory()) {
-      allFindings.push(...detectUnsafeDeps(resolved));
+    if (fs.statSync(scanRoot).isDirectory()) {
+      allFindings.push(...detectUnsafeDeps(scanRoot));
     }
 
     const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
     // --severity controls which findings are reported
-    const minReport = severityOrder[options.severity] ?? 3;
+    const minReport = severityOrder[effectiveSeverity] ?? 3;
     const filtered = allFindings.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
 
-    // --format takes highest precedence; --sarif / --json are convenience aliases
-    const effectiveFormat = options.format ?? (options.sarif ? 'sarif' : options.json ? 'json' : 'text');
-
-    const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-    const minSeverity = severityOrder[effectiveSeverity as keyof typeof severityOrder] ?? 3;
-    const filtered = allFindings.filter((f) => severityOrder[f.severity] <= minSeverity);
-      process.stderr.write('\r\x1b[2K'); // clear the progress line
     if (effectiveFormat === 'sarif') {
       console.log(JSON.stringify(buildSARIF(filtered), null, 2));
     } else if (effectiveFormat === 'json') {
       console.log(formatJSON(filtered));
     } else {
-      await printFindings(filtered, resolved);
+      await printFindings(filtered, scanRoot);
     }
 
     const summary = summarize(filtered);
