@@ -302,7 +302,8 @@ program
   .option('--ignore <glob>', 'Glob pattern to exclude (repeatable, e.g. --ignore \'**/node_modules/**\')', (val, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
   .option('--config <path>', 'Path to .ai-sec-scan.json config file')
   .option('--watch', 'Watch for file changes and re-scan automatically, printing a diff of new/resolved findings')
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; ignore: string[]; config?: string; watch: boolean }) => {
+  .option('--output <path>', 'Write output to a file instead of stdout (creates or overwrites the file)')
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; ignore: string[]; config?: string; watch: boolean; output?: string }) => {
     // Load config file first; CLI flags override config values
     const config = loadConfig(options.config);
 
@@ -359,12 +360,31 @@ program
     const minReport = severityOrder[effectiveSeverity] ?? 3;
     const filtered = allFindings.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
 
+    // --output routes output to a file; otherwise use stdout
+    const outputPath = options.output ? path.resolve(options.output) : undefined;
+    function emit(text: string): void {
+      if (outputPath) {
+        fs.writeFileSync(outputPath, text + '\n', 'utf8');
+        console.error(`[output] Written to ${outputPath}`);
+      } else {
+        console.log(text);
+      }
+    }
+
     if (effectiveFormat === 'sarif') {
-      console.log(JSON.stringify(buildSARIF(filtered), null, 2));
+      emit(JSON.stringify(buildSARIF(filtered), null, 2));
     } else if (effectiveFormat === 'json') {
-      console.log(formatJSON(filtered));
+      emit(formatJSON(filtered));
     } else {
-      await printFindings(filtered, scanRoot);
+      if (outputPath) {
+        // For text format, collect the output and write to file
+        const lines: string[] = filtered.map((f) =>
+          `[${f.severity.toUpperCase()}] ${f.type} at ${f.file ?? 'unknown'}:${f.line}:${f.column} — ${f.message}`,
+        );
+        emit(lines.join('\n'));
+      } else {
+        await printFindings(filtered, scanRoot);
+      }
     }
 
     const summary = summarize(filtered);

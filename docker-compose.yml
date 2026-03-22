@@ -1,0 +1,34 @@
+version: '3.9'
+
+services:
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: ai-code-security-scanner:latest
+    container_name: ai-code-security-scanner
+    restart: unless-stopped
+    ports:
+      - '${PORT:-3001}:${PORT:-3001}'
+    environment:
+      # Port the server listens on inside the container
+      PORT: '${PORT:-3001}'
+
+      # Set this to a strong random string to require Bearer token auth on all
+      # scan requests. Leave unset to run in open-access dev mode (not for production).
+      SERVER_API_KEY: '${SERVER_API_KEY:-}'
+
+      # Anthropic API key — enables AI explanations via the aiExplain flag.
+      # Leave unset to disable AI enrichment.
+      ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:-}'
+
+      # GitHub token — used when scanning GitHub repositories via the API.
+      # The default GITHUB_TOKEN from Actions is sufficient for public repos.
+      GITHUB_TOKEN: '${GITHUB_TOKEN:-}'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:${PORT:-3001}/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
