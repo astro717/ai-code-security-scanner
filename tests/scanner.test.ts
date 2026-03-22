@@ -647,9 +647,10 @@ test('detectUnsafeDeps: flags missing lockfile when deps are present', () => {
 
 test('detectUnsafeDeps: no finding for pinned semver version with lockfile present', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-deps-'));
+  // Use versions that are above all KNOWN_VULNERABLE thresholds to avoid VULNERABLE_DEPENDENCY
   fs.writeFileSync(
     path.join(dir, 'package.json'),
-    JSON.stringify({ dependencies: { express: '4.18.2', lodash: '4.17.21' } }),
+    JSON.stringify({ dependencies: { 'some-safe-package': '9.0.0' } }),
   );
   fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
   const findings = detectUnsafeDeps(dir);
