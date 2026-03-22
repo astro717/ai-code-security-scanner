@@ -1,0 +1,26 @@
+# ── Development & tooling ──────────────────────────────────────────────────────
+node_modules
+dist
+*.log
+*.tgz
+
+# ── Non-runtime source trees ──────────────────────────────────────────────────
+tests
+web
+vscode-extension
+
+# ── Documentation & repo metadata ─────────────────────────────────────────────
+*.md
+LICENSE
+.github
+.gitignore
+.aiscanner
+.ai-sec-scan.json
+.ai-sec-scan.jsonc
+
+# ── OS / editor artefacts ─────────────────────────────────────────────────────
+.DS_Store
+.env
+.env.*
+*.swp
+*.swo
