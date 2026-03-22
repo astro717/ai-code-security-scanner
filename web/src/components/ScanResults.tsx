@@ -44,43 +44,6 @@ const FINDING_TYPE_META: Record<string, { label: string; description: string }> 
   UNSAFE_DEPENDENCY:     { label: 'Unsafe Dependency',       description: 'A dependency is pinned to an unpinned or wildcard version, risking supply-chain attacks.' },
   VULNERABLE_DEPENDENCY: { label: 'Vulnerable Dependency',   description: 'A dependency with a known CVE is in use; upgrade to the minimum safe version.' },
   CORS_MISCONFIGURATION: { label: 'CORS Misconfiguration',   description: 'CORS is configured to allow any origin with credentials, enabling cross-site request forgery.' },
-/**
- * Human-readable labels and descriptions for each finding type.
- * Types not listed here fall back to using the raw type string as label.
- */
-  SQL_INJECTION:        { label: 'SQL Injection',          description: 'Unsanitized user input passed directly into a SQL query.' },
-  XSS:                 { label: 'Cross-Site Scripting',    description: 'Dynamic content rendered without escaping, enabling script injection.' },
-  SHELL_INJECTION:     { label: 'Shell Injection',         description: 'User-controlled input passed to a shell command without sanitization.' },
-  SSRF:                { label: 'Server-Side Request Forgery', description: 'HTTP call made with a dynamic URL that may originate from user input, allowing attackers to reach internal services.' },
-  PATH_TRAVERSAL:      { label: 'Path Traversal',          description: 'File path constructed from user input, potentially accessing files outside the intended directory.' },
-  OPEN_REDIRECT:       { label: 'Open Redirect',           description: 'Redirect target derived from user input, enabling phishing attacks.' },
-  PROTOTYPE_POLLUTION: { label: 'Prototype Pollution',     description: 'Object prototype modified via user-controlled keys, potentially affecting all objects.' },
-  INSECURE_RANDOM:     { label: 'Insecure Randomness',     description: 'Math.random() used in a security-sensitive context — not cryptographically secure.' },
-  HARDCODED_SECRET:    { label: 'Hardcoded Secret',        description: 'Credential or secret key appears to be hardcoded in source code.' },
-  EVAL_INJECTION:      { label: 'Eval Injection',          description: 'eval() or similar called with a dynamic argument, enabling arbitrary code execution.' },
-  VULNERABLE_DEP:      { label: 'Vulnerable Dependency',   description: 'A dependency with a known security vulnerability was detected.' },
-  JWT_NONE_ALG:        { label: 'JWT None Algorithm',      description: 'JWT verification accepts the "none" algorithm, bypassing signature checks.' },
-// Human-readable labels and icons for each finding type.
-// Types not in this map fall back to the raw type string.
-const FINDING_TYPE_LABELS: Record<string, { label: string; icon: string }> = {
-  SECRET_HARDCODED:       { label: 'Hardcoded Secret',          icon: '🔑' },
-  SQL_INJECTION:          { label: 'SQL Injection',             icon: '💉' },
-  SHELL_INJECTION:        { label: 'Shell Injection',           icon: '🐚' },
-  COMMAND_INJECTION:      { label: 'Command Injection',         icon: '⚠️' },
-  EVAL_INJECTION:         { label: 'Eval Injection',            icon: '⚠️' },
-  XSS:                    { label: 'Cross-Site Scripting',      icon: '🌐' },
-  PATH_TRAVERSAL:         { label: 'Path Traversal',            icon: '📂' },
-  PROTOTYPE_POLLUTION:    { label: 'Prototype Pollution',       icon: '☣️' },
-  INSECURE_RANDOM:        { label: 'Insecure Randomness',       icon: '🎲' },
-  OPEN_REDIRECT:          { label: 'Open Redirect',             icon: '↩️' },
-  SSRF:                   { label: 'SSRF',                      icon: '🌍' },
-  JWT_HARDCODED_SECRET:   { label: 'JWT Hardcoded Secret',      icon: '🔐' },
-  JWT_WEAK_SECRET:        { label: 'JWT Weak Secret',           icon: '🔓' },
-  JWT_NONE_ALGORITHM:     { label: 'JWT None Algorithm',        icon: '⛔' },
-  JWT_DECODE_NO_VERIFY:   { label: 'JWT Decode (no verify)',    icon: '⚠️' },
-  REDOS:                  { label: 'ReDoS (Regex Injection)',   icon: '🔄' },
-  UNSAFE_DEPENDENCY:      { label: 'Unsafe Dependency',         icon: '📦' },
-  VULNERABLE_DEPENDENCY:  { label: 'Vulnerable Dependency',     icon: '🚨' },
 }
 
 const SEVERITY_STYLES: Record<string, { badge: string; border: string; sectionBg: string; label: string }> = {
@@ -181,17 +144,44 @@ function EmptyState() {
   )
 }
 
+type SeverityFilter = 'all' | Finding['severity']
+
+const FILTER_OPTIONS: { value: SeverityFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'critical', label: 'Critical' },
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+]
+
+const FILTER_STYLES: Record<SeverityFilter, { active: string; inactive: string }> = {
+  all:      { active: 'bg-[#30363d] text-white border-[#6e7681]', inactive: 'text-[#7d8590] border-[#30363d] hover:border-[#6e7681] hover:text-[#c9d1d9]' },
+  critical: { active: 'bg-red-500/20 text-red-400 border-red-500/40', inactive: 'text-[#7d8590] border-[#30363d] hover:border-red-500/30 hover:text-red-400' },
+  high:     { active: 'bg-orange-500/20 text-orange-400 border-orange-500/40', inactive: 'text-[#7d8590] border-[#30363d] hover:border-orange-500/30 hover:text-orange-400' },
+  medium:   { active: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40', inactive: 'text-[#7d8590] border-[#30363d] hover:border-yellow-500/30 hover:text-yellow-400' },
+  low:      { active: 'bg-gray-500/20 text-gray-400 border-gray-500/40', inactive: 'text-[#7d8590] border-[#30363d] hover:border-gray-500/30 hover:text-gray-400' },
+}
+
 export function ScanResults({ findings, onGoToLine }: ScanResultsProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all')
 
   if (findings.length === 0) {
     return <EmptyState />
   }
 
+  const visibleFindings = severityFilter === 'all'
+    ? findings
+    : findings.filter((f) => f.severity === severityFilter)
+
+  // Count per severity for filter button badges
+  const counts: Record<Finding['severity'], number> = { critical: 0, high: 0, medium: 0, low: 0 }
+  for (const f of findings) counts[f.severity]++
+
   // Group by severity in fixed order
   const grouped: Record<string, Finding[]> = {}
   for (const sev of SEVERITY_ORDER) {
-    const group = findings.filter((f) => f.severity === sev)
+    const group = visibleFindings.filter((f) => f.severity === sev)
     if (group.length > 0) grouped[sev] = group
   }
 
@@ -208,6 +198,31 @@ export function ScanResults({ findings, onGoToLine }: ScanResultsProps) {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Severity filter bar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {FILTER_OPTIONS.map(({ value, label }) => {
+          const isActive = severityFilter === value
+          const style = FILTER_STYLES[value]
+          const count = value === 'all' ? findings.length : counts[value as Finding['severity']]
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setSeverityFilter(value)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-mono font-medium transition-colors ${isActive ? style.active : style.inactive}`}
+            >
+              {label}
+              {count > 0 && (
+                <span className="opacity-70">{count}</span>
+              )}
+            </button>
+          )
+        })}
+        {severityFilter !== 'all' && visibleFindings.length === 0 && (
+          <span className="text-xs text-[#7d8590] ml-2">No {severityFilter} findings</span>
+        )}
+      </div>
+
       {Object.entries(grouped).map(([sev, items]) => {
         const styles = SEVERITY_STYLES[sev] ?? SEVERITY_STYLES.low
         const isCollapsed = collapsedGroups.has(sev)
@@ -253,12 +268,8 @@ export function ScanResults({ findings, onGoToLine }: ScanResultsProps) {
                     >
                       {/* Header row */}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-mono text-[#7d8590]" title={FINDING_TYPE_META[finding.type]?.description}>
-                        <span className="text-xs font-mono text-[#7d8590]" title={finding.type}>
+                        <span className="text-xs font-mono text-[#7d8590]" title={FINDING_TYPE_META[finding.type]?.description ?? finding.type}>
                           {FINDING_TYPE_META[finding.type]?.label ?? finding.type}
-                          {FINDING_TYPE_LABELS[finding.type]
-                            ? `${FINDING_TYPE_LABELS[finding.type].icon} ${FINDING_TYPE_LABELS[finding.type].label}`
-                            : finding.type}
                         </span>
                         {finding.file && (
                           <span className="text-xs text-[#7d8590] font-mono truncate max-w-[120px]">{finding.file}</span>
