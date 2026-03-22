@@ -31,3 +31,18 @@ jobs:
       - name: Run tests with coverage (c8)
         run: npx c8 --reporter=text --reporter=lcov npx ts-node --transpile-only tests/scanner.test.ts
         continue-on-error: true
+
+      - name: Run security scan (SARIF)
+        # Always produce the SARIF artifact even when findings exist (exit-code 0)
+        run: node dist/cli.js . --format sarif --exit-code 0 --output results.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+          category: ai-code-security-scanner
+        # Requires the repo to have GitHub Advanced Security enabled.
+        # On public repos this is free; on private repos it requires GHAS.
+        continue-on-error: true
