@@ -303,7 +303,11 @@ program
   .option('--config <path>', 'Path to .ai-sec-scan.json config file')
   .option('--watch', 'Watch for file changes and re-scan automatically, printing a diff of new/resolved findings')
   .option('--output <path>', 'Write output to a file instead of stdout (creates or overwrites the file)')
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; ignore: string[]; config?: string; watch: boolean; output?: string }) => {
+  .option(
+    '--exit-code <code>',
+    'Force the process to exit with this code regardless of findings (e.g. --exit-code 0 for advisory-only scans in CI).',
+  )
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; ignore: string[]; config?: string; watch: boolean; output?: string; exitCode?: string }) => {
     // Load config file first; CLI flags override config values
     const config = loadConfig(options.config);
 
@@ -388,6 +392,17 @@ program
     }
 
     const summary = summarize(filtered);
+
+    // --exit-code <N>: force process to exit with the given code, bypassing all
+    // severity-based exit logic. Useful for advisory-only CI scans.
+    if (options.exitCode !== undefined) {
+      const forced = parseInt(options.exitCode, 10);
+      if (!isNaN(forced)) {
+        process.exit(forced);
+      }
+      // Invalid value — warn and fall through to normal exit logic
+      console.error(`[exit-code] Invalid value "${options.exitCode}" — ignoring.`);
+    }
 
     // --min-severity controls which severity triggers a non-zero exit code.
     // If not set, fall back to the legacy behaviour (exit 1 on critical or high).
