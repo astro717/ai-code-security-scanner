@@ -1,20 +1,7 @@
 import { TSESTree } from '@typescript-eslint/types';
 import { ParseResult } from '../parser';
 import { Finding } from '../reporter';
-
-function walkNode(node: TSESTree.Node, callback: (n: TSESTree.Node) => void): void {
-  callback(node);
-  for (const key of Object.keys(node)) {
-    const child = (node as unknown as Record<string, unknown>)[key];
-    if (child && typeof child === 'object') {
-      if (Array.isArray(child)) {
-        child.forEach((c) => { if (c && typeof c === 'object' && 'type' in c) walkNode(c as TSESTree.Node, callback); });
-      } else if ('type' in child) {
-        walkNode(child as TSESTree.Node, callback);
-      }
-    }
-  }
-}
+import { walkNode } from '../utils';
 
 function isStringLiteral(node: TSESTree.Node): node is TSESTree.Literal {
   return node.type === 'Literal' && typeof (node as TSESTree.Literal).value === 'string';
