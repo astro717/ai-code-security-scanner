@@ -200,6 +200,40 @@ const PAYLOAD_LIMIT_BYTES = 500 * 1024;
 
 app.use(express.json({ limit: PAYLOAD_LIMIT }));
 
+// ── API key auth ──────────────────────────────────────────────────────────────
+// Protect all non-health endpoints with a Bearer token check.
+// Set SERVER_API_KEY in the environment to enable; if unset, the server starts
+// but logs a warning and all requests are allowed (dev-friendly default).
+
+const SERVER_API_KEY = process.env.SERVER_API_KEY;
+
+if (!SERVER_API_KEY) {
+  console.warn(
+    '[auth] WARNING: SERVER_API_KEY is not set. ' +
+    'All endpoints are publicly accessible — set this variable in production.',
+  );
+}
+
+app.use((req, res, next) => {
+  // /health is always open so uptime monitors and Docker HEALTHCHECK work
+  if (req.path === '/health') return next();
+
+  if (!SERVER_API_KEY) {
+    // No key configured → open access (dev mode)
+    return next();
+  }
+
+  const authHeader = req.headers['authorization'] ?? '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+
+  if (token !== SERVER_API_KEY) {
+    res.status(401).json({ error: 'Unauthorized — valid Bearer token required.' });
+    return;
+  }
+
+  next();
+});
+
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 
 const scanLimiter = rateLimit({

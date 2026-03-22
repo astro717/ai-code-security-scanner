@@ -102,6 +102,28 @@ After the job completes:
 |----------|-------------|
 | `GITHUB_TOKEN` | Used for GitHub Contents API when scanning repos (auto-provided by Actions) |
 | `ANTHROPIC_API_KEY` | Optional — enables AI explanations and fix suggestions via `aiExplain` flag |
+| `SERVER_API_KEY` | **Required in production** — Bearer token that callers must include in `Authorization: Bearer <key>`. If unset, the server runs in open-access dev mode and logs a warning. |
+
+### API authentication
+
+When `SERVER_API_KEY` is set, every request (except `GET /health`) must include:
+
+```
+Authorization: Bearer <your-server-api-key>
+```
+
+Example:
+
+```bash
+export SERVER_API_KEY=my-secret-key
+
+curl -X POST http://localhost:3001/scan \
+  -H "Authorization: Bearer $SERVER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "const pw = \"hunter2\""}'
+```
+
+Requests without a valid token receive `401 Unauthorized`.
 
 ## Publish to npm
 
