@@ -220,11 +220,85 @@ async function scanWorkspace(
   );
 }
 
+// ── Status bar ────────────────────────────────────────────────────────────────
+
+type StatusBarState = 'idle' | 'scanning' | 'issues' | 'clean' | 'offline';
+
+function createStatusBarItem(): vscode.StatusBarItem {
+  const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  item.command = 'aiSecScan.scanFile';
+  item.tooltip = 'AI Security Scanner — click to scan active file';
+  item.text = '$(shield) AI Sec';
+  item.show();
+  return item;
+}
+
+function updateStatusBar(
+  item: vscode.StatusBarItem,
+  state: StatusBarState,
+  detail?: string,
+): void {
+  switch (state) {
+    case 'idle':
+      item.text = '$(shield) AI Sec';
+      item.color = undefined;
+      item.backgroundColor = undefined;
+      break;
+    case 'scanning':
+      item.text = '$(loading~spin) AI Sec: scanning…';
+      item.color = undefined;
+      item.backgroundColor = undefined;
+      break;
+    case 'issues':
+      item.text = `$(warning) AI Sec: ${detail ?? 'issues found'}`;
+      item.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+      item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+      break;
+    case 'clean':
+      item.text = '$(pass) AI Sec: clean';
+      item.color = undefined;
+      item.backgroundColor = undefined;
+      break;
+    case 'offline':
+      item.text = '$(plug) AI Sec: offline';
+      item.color = new vscode.ThemeColor('statusBarItem.errorForeground');
+      item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+      break;
+  }
+}
+
 // ── Extension lifecycle ───────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext): void {
   const collection = vscode.languages.createDiagnosticCollection('ai-security-scanner');
   context.subscriptions.push(collection);
+
+  const statusBar = createStatusBarItem();
+  context.subscriptions.push(statusBar);
+
+  // Wrap scanDocument to update status bar
+  async function scanDocumentWithStatus(document: vscode.TextDocument): Promise<void> {
+    updateStatusBar(statusBar, 'scanning');
+    const config = vscode.workspace.getConfiguration('aiSecScan');
+    const serverUrl: string = config.get('serverUrl') ?? 'http://localhost:3001';
+
+    let response: ScanResponse;
+    try {
+      response = await postJSON(serverUrl, { code: document.getText(), filename: document.fileName });
+    } catch {
+      updateStatusBar(statusBar, 'offline');
+      return;
+    }
+
+    const diagnostics = findingsToDiagnostics(response.findings);
+    collection.set(document.uri, diagnostics);
+
+    if (diagnostics.length > 0) {
+      updateStatusBar(statusBar, 'issues', `${response.findings.length} issue${response.findings.length !== 1 ? 's' : ''}`);
+    } else {
+      updateStatusBar(statusBar, 'clean');
+    }
+  }
 
   // Scan active file on save
   context.subscriptions.push(
@@ -235,7 +309,7 @@ export function activate(context: vscode.ExtensionContext): void {
         'typescript', 'typescriptreact', 'javascript', 'javascriptreact',
       ];
       if (autoScan && supported.includes(document.languageId)) {
-        void scanDocument(document, collection);
+        void scanDocumentWithStatus(document);
       }
     }),
   );
@@ -248,7 +322,7 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showWarningMessage('AI Security Scanner: no active editor.');
         return;
       }
-      void scanDocument(editor.document, collection);
+      void scanDocumentWithStatus(editor.document);
     }),
   );
 
@@ -263,7 +337,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const active = vscode.window.activeTextEditor;
   const supportedLangs = ['typescript', 'typescriptreact', 'javascript', 'javascriptreact'];
   if (active && supportedLangs.includes(active.document.languageId)) {
-    void scanDocument(active.document, collection);
+    void scanDocumentWithStatus(active.document);
   }
 }
 
