@@ -46,6 +46,42 @@ const SEVERITY_LABELS: Record<Severity, string> = {
   low: 'LOW',
 };
 
+/**
+ * Returns the same structured text that `printFindings` writes to the
+ * terminal, but without ANSI colour codes so it is suitable for writing to a
+ * file via --output.
+ */
+export function formatFindingsText(findings: Finding[], targetPath: string): string {
+  const lines: string[] = [];
+  lines.push(`\nScanning: ${targetPath}\n`);
+
+  if (findings.length === 0) {
+    lines.push('No vulnerabilities found.\n');
+    return lines.join('\n');
+  }
+
+  for (const f of findings) {
+    const fileRef = f.file ? `${f.file}:` : '';
+    lines.push(`  [${SEVERITY_LABELS[f.severity]}] [${f.type}] ${fileRef}line ${f.line}`);
+    lines.push(`  -> ${f.message}`);
+    if (f.snippet) {
+      lines.push(`     ${f.snippet.slice(0, 80)}`);
+    }
+    lines.push('');
+  }
+
+  const summary = summarize(findings);
+  const parts = [];
+  if (summary.critical) parts.push(`${summary.critical} critical`);
+  if (summary.high) parts.push(`${summary.high} high`);
+  if (summary.medium) parts.push(`${summary.medium} medium`);
+  if (summary.low) parts.push(`${summary.low} low`);
+
+  lines.push(`Found ${summary.total} issue(s): ${parts.join(' · ')}`);
+  lines.push('');
+  return lines.join('\n');
+}
+
 export async function printFindings(findings: Finding[], targetPath: string): Promise<void> {
   const chalk = await getChalk();
 
