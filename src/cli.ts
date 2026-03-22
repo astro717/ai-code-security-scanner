@@ -20,7 +20,7 @@ import { detectJWTSecrets } from './scanner/detectors/jwt';
 import { detectReDoS } from './scanner/detectors/redos';
 import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
-import { Finding, printFindings, formatJSON, summarize } from './scanner/reporter';
+import { Finding, printFindings, formatFindingsText, formatJSON, summarize } from './scanner/reporter';
 import { detectUnsafeDeps } from './scanner/detectors/deps';
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
@@ -377,11 +377,8 @@ program
       emit(formatJSON(filtered));
     } else {
       if (outputPath) {
-        // For text format, collect the output and write to file
-        const lines: string[] = filtered.map((f) =>
-          `[${f.severity.toUpperCase()}] ${f.type} at ${f.file ?? 'unknown'}:${f.line}:${f.column} — ${f.message}`,
-        );
-        emit(lines.join('\n'));
+        // Write the same structured text as the terminal output (no ANSI codes)
+        emit(formatFindingsText(filtered, scanRoot));
       } else {
         await printFindings(filtered, scanRoot);
       }
