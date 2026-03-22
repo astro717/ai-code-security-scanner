@@ -3,6 +3,8 @@ import { CodeEditor, type CodeEditorHandle } from './components/CodeEditor'
 import { ScanResults, type Finding } from './components/ScanResults'
 import { SummaryCards, type ScanSummary } from './components/SummaryCards'
 
+const SCANNER_URL = import.meta.env.VITE_SCANNER_URL || 'http://localhost:3001'
+
 type ScanStatus = 'idle' | 'loading' | 'success' | 'error'
 type EditorTab = 'editor' | 'repo'
 
@@ -60,7 +62,7 @@ async function scanCode(
   packageJson?: string,
   aiExplain?: boolean,
 ): Promise<{ findings: Finding[]; summary: ScanSummary }> {
-  const res = await fetch('http://localhost:3001/scan', {
+  const res = await fetch(`${SCANNER_URL}/scan`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, filename: 'editor.ts', packageJson: packageJson || undefined, aiExplain: aiExplain || false }),
@@ -126,7 +128,7 @@ async function scanRepo(
   repoUrl: string,
   branch: string,
 ): Promise<{ findings: Finding[]; summary: ScanSummary; filesScanned?: number }> {
-  const res = await fetch('http://localhost:3001/scan-repo', {
+  const res = await fetch(`${SCANNER_URL}/scan-repo`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoUrl, branch: branch || 'main' }),
