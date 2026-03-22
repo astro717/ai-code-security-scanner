@@ -2,12 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
-  test:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,5 +22,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: TypeScript build
+        run: npm run build
+
       - name: Run tests
         run: npm test
+
+      - name: Run tests with coverage (c8)
+        run: npx c8 --reporter=text --reporter=lcov npx ts-node --transpile-only tests/scanner.test.ts
+        continue-on-error: true
