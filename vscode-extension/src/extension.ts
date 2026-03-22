@@ -1,7 +1,65 @@
 import * as vscode from 'vscode';
 import * as https from 'https';
 import * as http from 'http';
+import * as fs from 'fs';
+import * as path from 'path';
 import { URL } from 'url';
+
+// ── .aiscanner ignore support ─────────────────────────────────────────────────
+
+/**
+ * Loads ignore patterns from the nearest `.aiscanner` file in the workspace
+ * root or any ancestor directory.  Each non-comment, non-empty line is a glob
+ * pattern.  Returns an empty array when no file is found.
+ */
+function loadAiScannerIgnore(workspaceRoot: string): string[] {
+  let dir = workspaceRoot;
+  while (true) {
+    const candidate = path.join(dir, '.aiscanner');
+    if (fs.existsSync(candidate)) {
+      try {
+        const lines = fs.readFileSync(candidate, 'utf8')
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0 && !l.startsWith('#'));
+        return lines;
+      } catch {
+        return [];
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return [];
+}
+
+/**
+ * Returns true if `filePath` matches `pattern` using a minimatch-compatible
+ * subset (supports `**` wildcards, `*`, and `?`).
+ */
+function matchesGlob(filePath: string, pattern: string): boolean {
+  // Normalise to forward slashes for consistent matching
+  const normalised = filePath.split(path.sep).join('/');
+  // Convert glob to a RegExp
+  const regexStr = pattern
+    .split('/')
+    .map((seg) =>
+      seg === '**'
+        ? '.*'
+        : seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]'),
+    )
+    .join('(/|$|.*/)');
+  try {
+    return new RegExp(`(^|/)${regexStr}(/|$)`).test(normalised);
+  } catch {
+    return false;
+  }
+}
+
+function isIgnoredByAiScanner(filePath: string, patterns: string[]): boolean {
+  return patterns.some((p) => matchesGlob(filePath, p));
+}
 
 interface Finding {
   type: string;
@@ -130,6 +188,13 @@ async function scanWorkspace(
   const supportedGlob = '**/*.{ts,tsx,js,jsx,mjs,cjs}';
   const files = await vscode.workspace.findFiles(supportedGlob, '**/node_modules/**');
 
+  // Load .aiscanner ignore patterns from the workspace root
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const ignorePatterns = workspaceRoot ? loadAiScannerIgnore(workspaceRoot) : [];
+  const filteredFiles = ignorePatterns.length > 0
+    ? files.filter((uri: vscode.Uri) => !isIgnoredByAiScanner(uri.fsPath, ignorePatterns))
+    : files;
+
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -137,10 +202,10 @@ async function scanWorkspace(
       cancellable: true,
     },
     async (progress, token) => {
-      progress.report({ message: `Scanning ${files.length} files...`, increment: 0 });
-      const step = 100 / Math.max(files.length, 1);
+      progress.report({ message: `Scanning ${filteredFiles.length} files...`, increment: 0 });
+      const step = 100 / Math.max(filteredFiles.length, 1);
 
-      for (const fileUri of files) {
+      for (const fileUri of filteredFiles) {
         if (token.isCancellationRequested) break;
         progress.report({ message: vscode.workspace.asRelativePath(fileUri), increment: step });
         try {
