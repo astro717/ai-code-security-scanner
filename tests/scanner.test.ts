@@ -666,6 +666,100 @@ test('detectUnsafeDeps: no finding when package.json is absent', () => {
   fs.rmSync(dir, { recursive: true });
 });
 
+// ─── Known-CVE (VULNERABLE_DEPENDENCY) detector ───────────────────────────────
+
+console.log('\nVulnerable dependency detector (known CVEs):');
+
+import { isBelow, KNOWN_VULNERABLE } from '../src/scanner/detectors/deps';
+
+test('isBelow: lodash 4.17.20 is below 4.17.21', () => {
+  expect(isBelow('4.17.20', '4.17.21')).toBe(true);
+});
+
+test('isBelow: lodash 4.17.21 is NOT below 4.17.21 (equal = safe)', () => {
+  expect(isBelow('4.17.21', '4.17.21')).toBe(false);
+});
+
+test('isBelow: lodash 4.18.0 is NOT below 4.17.21', () => {
+  expect(isBelow('4.18.0', '4.17.21')).toBe(false);
+});
+
+test('detectUnsafeDeps: flags lodash 4.17.20 as VULNERABLE_DEPENDENCY (positive CVE case)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-vuln-'));
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ dependencies: { lodash: '4.17.20' } }),
+  );
+  fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+  const findings = detectUnsafeDeps(dir);
+  const types = findings.map((f) => f.type);
+  if (!types.includes('VULNERABLE_DEPENDENCY')) {
+    throw new Error(`Expected VULNERABLE_DEPENDENCY, got: [${types.join(', ')}]`);
+  }
+  const vulnFinding = findings.find((f) => f.type === 'VULNERABLE_DEPENDENCY')!;
+  if (vulnFinding.severity !== 'critical') {
+    throw new Error(`Expected severity critical for lodash CVE, got: ${vulnFinding.severity}`);
+  }
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('detectUnsafeDeps: no VULNERABLE_DEPENDENCY for lodash 4.17.21 (patched version)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-vuln-'));
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ dependencies: { lodash: '4.17.21' } }),
+  );
+  fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+  const findings = detectUnsafeDeps(dir);
+  const vulnFindings = findings.filter((f) => f.type === 'VULNERABLE_DEPENDENCY');
+  if (vulnFindings.length > 0) {
+    throw new Error(`Expected 0 VULNERABLE_DEPENDENCY for lodash 4.17.21, got ${vulnFindings.length}`);
+  }
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('detectUnsafeDeps: flags axios 1.5.0 as VULNERABLE_DEPENDENCY (CSRF CVE)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-vuln-'));
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ dependencies: { axios: '1.5.0' } }),
+  );
+  fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+  const findings = detectUnsafeDeps(dir);
+  const types = findings.map((f) => f.type);
+  if (!types.includes('VULNERABLE_DEPENDENCY')) {
+    throw new Error(`Expected VULNERABLE_DEPENDENCY for axios 1.5.0, got: [${types.join(', ')}]`);
+  }
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('detectUnsafeDeps: no VULNERABLE_DEPENDENCY for axios 1.6.0 (patched version)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-vuln-'));
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ dependencies: { axios: '1.6.0' } }),
+  );
+  fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+  const findings = detectUnsafeDeps(dir);
+  const vulnFindings = findings.filter((f) => f.type === 'VULNERABLE_DEPENDENCY');
+  if (vulnFindings.length > 0) {
+    throw new Error(`Expected 0 VULNERABLE_DEPENDENCY for axios 1.6.0, got ${vulnFindings.length}`);
+  }
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('KNOWN_VULNERABLE map: all entries have required fields', () => {
+  for (const [name, entry] of Object.entries(KNOWN_VULNERABLE)) {
+    if (!entry.below || !entry.severity || !entry.cve) {
+      throw new Error(`KNOWN_VULNERABLE["${name}"] is missing required fields`);
+    }
+    if (!['critical', 'high', 'medium'].includes(entry.severity)) {
+      throw new Error(`KNOWN_VULNERABLE["${name}"] has invalid severity: ${entry.severity}`);
+    }
+  }
+  expect(Object.keys(KNOWN_VULNERABLE).length).toBeGreaterThanOrEqual(1);
+});
+
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log(`\n${'─'.repeat(50)}`);
