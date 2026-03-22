@@ -261,12 +261,27 @@ function startWatchMode(
   targetPath: string,
   ignorePatterns: string[],
   severity: string,
+  outputPath?: string,
 ): void {
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
   const minSeverity = severityOrder[severity as keyof typeof severityOrder] ?? 3;
 
   // Cache: file path -> last known filtered findings
   const cache = new Map<string, Finding[]>();
+
+  function appendToOutput(filePath: string, added: Finding[], resolved: Finding[]): void {
+    if (!outputPath) return;
+    const ts = new Date().toISOString();
+    const lines: string[] = [`[${ts}] ${filePath}`];
+    for (const f of added) {
+      lines.push(`  + [${f.severity.toUpperCase()}] ${f.type} at line ${f.line}: ${f.message}`);
+    }
+    for (const f of resolved) {
+      lines.push(`  - [resolved] ${f.type} at line ${f.line}`);
+    }
+    lines.push('');
+    fs.appendFileSync(outputPath, lines.join('\n'), 'utf8');
+  }
 
   function scanAndUpdate(filePath: string): void {
     const raw = scanFile(filePath);
@@ -275,6 +290,9 @@ function startWatchMode(
     cache.set(filePath, filtered);
     const { added, resolved } = diffFindings(prev, filtered);
     printWatchDiff(filePath, added, resolved);
+    if (added.length > 0 || resolved.length > 0) {
+      appendToOutput(filePath, added, resolved);
+    }
   }
 
   // Seed cache with initial scan (silent)
@@ -372,7 +390,13 @@ program
 
     // ── Watch mode ──────────────────────────────────────────────────────────
     if (options.watch) {
-      startWatchMode(scanRoot, effectiveIgnore, effectiveSeverity);
+      const watchOutputPath = options.output ? path.resolve(options.output) : undefined;
+      if (watchOutputPath) {
+        // Initialise the output file (clear on start so the file reflects this session only)
+        fs.writeFileSync(watchOutputPath, `# ai-sec-scan watch session started ${new Date().toISOString()}\n`, 'utf8');
+        console.error(`[output] Watch mode: appending diff entries to ${watchOutputPath}`);
+      }
+      startWatchMode(scanRoot, effectiveIgnore, effectiveSeverity, watchOutputPath);
       return;
     }
 
