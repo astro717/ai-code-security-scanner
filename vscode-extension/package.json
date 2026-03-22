@@ -46,6 +46,11 @@
           "default": "http://localhost:3001",
           "description": "URL of the ai-code-security-scanner backend server"
         },
+        "aiSecScan.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Bearer token sent as `Authorization: Bearer <key>` on all scan requests. Required when `SERVER_API_KEY` is set on the scanner server. Leave empty for open-access / local dev servers."
+        },
         "aiSecScan.autoScanOnSave": {
           "type": "boolean",
           "default": true,

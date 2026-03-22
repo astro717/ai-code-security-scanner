@@ -78,11 +78,19 @@ interface ScanResponse {
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
-function postJSON(serverUrl: string, body: object): Promise<ScanResponse> {
+function postJSON(serverUrl: string, body: object, apiKey?: string): Promise<ScanResponse> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const parsed = new URL(serverUrl + '/scan');
     const lib = parsed.protocol === 'https:' ? https : http;
+
+    const headers: Record<string, string | number> = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+    };
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    }
 
     const req = lib.request(
       {
@@ -90,10 +98,7 @@ function postJSON(serverUrl: string, body: object): Promise<ScanResponse> {
         port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
         path: parsed.pathname,
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(payload),
-        },
+        headers,
       },
       (res) => {
         let data = '';
@@ -149,13 +154,14 @@ async function scanDocument(
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration('aiSecScan');
   const serverUrl: string = config.get('serverUrl') ?? 'http://localhost:3001';
+  const apiKey: string = config.get('apiKey') ?? '';
 
   const code = document.getText();
   const filename = document.fileName;
 
   let response: ScanResponse;
   try {
-    response = await postJSON(serverUrl, { code, filename });
+    response = await postJSON(serverUrl, { code, filename }, apiKey || undefined);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // Show a subtle warning but don't spam the user
@@ -281,10 +287,11 @@ export function activate(context: vscode.ExtensionContext): void {
     updateStatusBar(statusBar, 'scanning');
     const config = vscode.workspace.getConfiguration('aiSecScan');
     const serverUrl: string = config.get('serverUrl') ?? 'http://localhost:3001';
+    const apiKey: string = config.get('apiKey') ?? '';
 
     let response: ScanResponse;
     try {
-      response = await postJSON(serverUrl, { code: document.getText(), filename: document.fileName });
+      response = await postJSON(serverUrl, { code: document.getText(), filename: document.fileName }, apiKey || undefined);
     } catch {
       updateStatusBar(statusBar, 'offline');
       return;
