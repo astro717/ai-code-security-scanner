@@ -21,6 +21,7 @@ import { detectReDoS } from './scanner/detectors/redos';
 import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
 import { Finding, printFindings, formatJSON, summarize } from './scanner/reporter';
+import { detectUnsafeDeps } from './scanner/detectors/deps';
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -348,6 +349,11 @@ program
 
     if (total > 1) {
       process.stderr.write('\r\x1b[2K');
+    }
+
+    // ── Dependency scanning (directory targets only) ─────────────────────────
+    if (fs.statSync(resolved).isDirectory()) {
+      allFindings.push(...detectUnsafeDeps(resolved));
     }
 
     const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
