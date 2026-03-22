@@ -3,10 +3,29 @@
   "displayName": "AI Code Security Scanner",
   "description": "AST-based security scanner for AI-generated code — inline findings in the editor",
   "version": "0.1.0",
-  "publisher": "ai-code-security-scanner",
+  "publisher": "rouco-industries",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rouco-industries/ai-code-security-scanner"
+  },
+  "bugs": {
+    "url": "https://github.com/rouco-industries/ai-code-security-scanner/issues"
+  },
+  "homepage": "https://github.com/rouco-industries/ai-code-security-scanner#readme",
+  "license": "MIT",
+  "galleryBanner": {
+    "color": "#0a0a0f",
+    "theme": "dark"
+  },
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Linters"],
-  "activationEvents": ["onLanguage:typescript", "onLanguage:typescriptreact", "onLanguage:javascript", "onLanguage:javascriptreact"],
+  "keywords": ["security", "scanner", "ai", "vulnerability", "linter", "typescript", "javascript"],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
