@@ -38,6 +38,14 @@
         "title": "AI Security: Scan Workspace"
       }
     ],
+    "keybindings": [
+      {
+        "command": "aiSecScan.scanWorkspace",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+shift+s",
+        "when": "editorFocus"
+      }
+    ],
     "configuration": {
       "title": "AI Code Security Scanner",
       "properties": {
