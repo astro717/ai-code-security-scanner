@@ -24,6 +24,7 @@ import { detectOpenRedirect } from '../src/scanner/detectors/openRedirect';
 import { detectReDoS } from '../src/scanner/detectors/redos';
 import { detectWeakCrypto } from '../src/scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from '../src/scanner/detectors/jwtNone';
+import { detectCORSMisconfiguration } from '../src/scanner/detectors/cors';
 import { Finding } from '../src/scanner/reporter';
 
 // ─── Tiny test runner ─────────────────────────────────────────────────────────
@@ -146,6 +147,8 @@ test('detectCommandInjection: ≥1 COMMAND_INJECTION finding', () => {
   const findings = detectCommandInjection(vulnerableParsed);
   expect(findings.length).toBeGreaterThanOrEqual(1);
   expect(findings).toContain('COMMAND_INJECTION');
+});
+
 test('detectJWTSecrets: ≥1 JWT_HARDCODED_SECRET or JWT_WEAK_SECRET finding', () => {
   const findings = detectJWTSecrets(vulnerableParsed);
   const types = findings.map((f) => f.type);
@@ -233,6 +236,9 @@ test('detectSSRF: 0 findings on clean code', () => {
 
 test('detectCommandInjection: 0 findings on clean code', () => {
   const findings = detectCommandInjection(cleanParsed);
+  expect(findings.length).toBe(0);
+});
+
 test('detectJWTSecrets: 0 findings on clean code', () => {
   const findings = detectJWTSecrets(cleanParsed);
   expect(findings.length).toBe(0);
@@ -333,25 +339,6 @@ test('parseCode: no COMMAND_INJECTION when spawn uses hardcoded command string',
   const parsed = parseCode(code);
   const findings = detectCommandInjection(parsed);
   expect(findings.length).toBe(0);
-test('parseCode detects PROTOTYPE_POLLUTION via Object.assign with dynamic source', () => {
-  const code = `Object.assign(target, userPayload);`;
-  const findings = detectPrototypePollution(parsed);
-  expect(findings).toContain('PROTOTYPE_POLLUTION');
-test('parseCode detects PROTOTYPE_POLLUTION via __proto__ assignment', () => {
-  const code = `(obj as any).__proto__ = attackerPayload;`;
-  const findings = detectPrototypePollution(parsed);
-  expect(findings).toContain('PROTOTYPE_POLLUTION');
-test('parseCode detects INSECURE_RANDOM via Math.random() for token generation', () => {
-  const code = `const sessionToken = Math.random().toString(36).slice(2);`;
-  const findings = detectInsecureRandom(parsed);
-  expect(findings).toContain('INSECURE_RANDOM');
-test('parseCode detects OPEN_REDIRECT when res.redirect() receives dynamic URL', () => {
-  const code = `res.redirect(req.query.next);`;
-  const findings = detectOpenRedirect(parsed);
-  expect(findings).toContain('OPEN_REDIRECT');
-test('parseCode: no OPEN_REDIRECT finding when res.redirect() uses a static string', () => {
-  const code = `res.redirect('/dashboard');`;
-  const findings = detectOpenRedirect(parsed);
 });
 
 test('parseCode detects PROTOTYPE_POLLUTION via Object.assign with dynamic source', () => {
@@ -432,6 +419,184 @@ test('all detector types fire on a multi-vuln snippet (simulating scan-repo file
       throw new Error(`Missing detector type in scan-repo pipeline: ${t}. Got: [${[...types].join(', ')}]`);
     }
   }
+});
+
+// ─── CORS misconfiguration detector ──────────────────────────────────────────
+
+console.log('\nCORS misconfiguration detector:');
+
+test('detectCORSMisconfiguration: flags cors({ origin: "*", credentials: true })', () => {
+  const code = `app.use(cors({ origin: '*', credentials: true }));`;
+  const parsed = parseCode(code);
+  const findings = detectCORSMisconfiguration(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('CORS_MISCONFIGURATION');
+});
+
+test('detectCORSMisconfiguration: flags reflected req.headers.origin in setHeader', () => {
+  const code = `res.setHeader('Access-Control-Allow-Origin', req.headers.origin);`;
+  const parsed = parseCode(code);
+  const findings = detectCORSMisconfiguration(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('CORS_MISCONFIGURATION');
+});
+
+test('detectCORSMisconfiguration: no finding for cors({ origin: "*" }) without credentials', () => {
+  const code = `app.use(cors({ origin: '*' }));`;
+  const parsed = parseCode(code);
+  const findings = detectCORSMisconfiguration(parsed);
+  expect(findings.length).toBe(0);
+});
+
+test('detectCORSMisconfiguration: no finding for cors({ origin: "https://trusted.com", credentials: true })', () => {
+  const code = `app.use(cors({ origin: 'https://trusted.com', credentials: true }));`;
+  const parsed = parseCode(code);
+  const findings = detectCORSMisconfiguration(parsed);
+  expect(findings.length).toBe(0);
+});
+
+test('detectCORSMisconfiguration: flags reflected origin via computed bracket notation', () => {
+  const code = `res.setHeader('Access-Control-Allow-Origin', req.headers['origin']);`;
+  const parsed = parseCode(code);
+  const findings = detectCORSMisconfiguration(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('CORS_MISCONFIGURATION');
+});
+
+// ─── JWT none-algorithm detector ──────────────────────────────────────────────
+
+console.log('\nJWT none-algorithm detector:');
+
+test('detectJWTNoneAlgorithm: flags jwt.verify() without options (missing algorithms whitelist)', () => {
+  const code = `const payload = jwt.verify(token, secret);`;
+  const parsed = parseCode(code);
+  const findings = detectJWTNoneAlgorithm(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('JWT_NONE_ALGORITHM');
+});
+
+test('detectJWTNoneAlgorithm: flags jwt.verify() with algorithms: ["none"]', () => {
+  const code = `jwt.verify(token, secret, { algorithms: ['none'] });`;
+  const parsed = parseCode(code);
+  const findings = detectJWTNoneAlgorithm(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('JWT_NONE_ALGORITHM');
+});
+
+test('detectJWTNoneAlgorithm: flags jwt.decode() (bypasses signature verification)', () => {
+  const code = `const data = jwt.decode(token);`;
+  const parsed = parseCode(code);
+  const findings = detectJWTNoneAlgorithm(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('JWT_DECODE_NO_VERIFY');
+});
+
+test('detectJWTNoneAlgorithm: no JWT_NONE_ALGORITHM finding for jwt.verify() with RS256', () => {
+  const code = `jwt.verify(token, publicKey, { algorithms: ['RS256'] });`;
+  const parsed = parseCode(code);
+  const findings = detectJWTNoneAlgorithm(parsed);
+  const noneFindings = findings.filter((f) => f.type === 'JWT_NONE_ALGORITHM');
+  expect(noneFindings.length).toBe(0);
+});
+
+test('detectJWTNoneAlgorithm: flags jwt.verify() with algorithm: "none" (singular key)', () => {
+  const code = `jwt.verify(token, secret, { algorithm: 'none' });`;
+  const parsed = parseCode(code);
+  const findings = detectJWTNoneAlgorithm(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('JWT_NONE_ALGORITHM');
+});
+
+// ─── ReDoS detector ───────────────────────────────────────────────────────────
+
+console.log('\nReDoS detector:');
+
+test('detectReDoS: flags new RegExp(userInput) with dynamic variable pattern', () => {
+  const code = `const re = new RegExp(userInput);`;
+  const parsed = parseCode(code);
+  const findings = detectReDoS(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('REDOS');
+});
+
+test('detectReDoS: flags new RegExp(req.body.pattern, "i") with member expression pattern', () => {
+  const code = `const re = new RegExp(req.body.pattern, 'i');`;
+  const parsed = parseCode(code);
+  const findings = detectReDoS(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('REDOS');
+});
+
+test('detectReDoS: no finding for new RegExp("^[a-z]+$") with static string literal', () => {
+  const code = `const re = new RegExp('^[a-z]+$');`;
+  const parsed = parseCode(code);
+  const findings = detectReDoS(parsed);
+  expect(findings.length).toBe(0);
+});
+
+test('detectReDoS: no finding for static template literal with no interpolation', () => {
+  const code = 'const re = new RegExp(`^\\\\d+$`);';
+  const parsed = parseCode(code);
+  const findings = detectReDoS(parsed);
+  expect(findings.length).toBe(0);
+});
+
+test('detectReDoS: flags new RegExp() with template literal containing expressions', () => {
+  const code = 'const re = new RegExp(`prefix-${userValue}-suffix`);';
+  const parsed = parseCode(code);
+  const findings = detectReDoS(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('REDOS');
+});
+
+// ─── Weak crypto detector ─────────────────────────────────────────────────────
+
+console.log('\nWeak crypto detector:');
+
+test('detectWeakCrypto: flags crypto.createHash("md5")', () => {
+  const code = `const hash = crypto.createHash('md5').update(data).digest('hex');`;
+  const parsed = parseCode(code);
+  const findings = detectWeakCrypto(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('WEAK_CRYPTO');
+});
+
+test('detectWeakCrypto: flags crypto.createHash("sha1")', () => {
+  const code = `const sig = crypto.createHash('sha1').update(payload).digest('hex');`;
+  const parsed = parseCode(code);
+  const findings = detectWeakCrypto(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('WEAK_CRYPTO');
+});
+
+test('detectWeakCrypto: flags bare createHash("md4") after destructuring import', () => {
+  const code = `const { createHash } = require('crypto'); const h = createHash('md4');`;
+  const parsed = parseCode(code);
+  const findings = detectWeakCrypto(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('WEAK_CRYPTO');
+});
+
+test('detectWeakCrypto: no finding for crypto.createHash("sha256")', () => {
+  const code = `const hash = crypto.createHash('sha256').update(data).digest('hex');`;
+  const parsed = parseCode(code);
+  const findings = detectWeakCrypto(parsed);
+  expect(findings.length).toBe(0);
+});
+
+test('detectWeakCrypto: no finding for crypto.createHash("sha512")', () => {
+  const code = `const hash = crypto.createHash('sha512').update(data).digest('hex');`;
+  const parsed = parseCode(code);
+  const findings = detectWeakCrypto(parsed);
+  expect(findings.length).toBe(0);
+});
+
+test('detectWeakCrypto: case-insensitive match — flags "MD5" uppercase input', () => {
+  const code = `crypto.createHash('MD5');`;
+  const parsed = parseCode(code);
+  const findings = detectWeakCrypto(parsed);
+  expect(findings.length).toBeGreaterThanOrEqual(1);
+  expect(findings).toContain('WEAK_CRYPTO');
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────
