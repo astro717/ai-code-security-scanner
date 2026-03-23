@@ -403,6 +403,16 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+export const server = app.listen(PORT, () => {
   console.log(`AI Security Scanner server running on http://localhost:${PORT}`);
+});
+
+// Graceful shutdown: drain connections before process exit so tests close
+// cleanly and production process managers can do zero-downtime restarts.
+process.on('SIGTERM', () => {
+  console.log('[server] SIGTERM received — closing HTTP server...');
+  server.close(() => {
+    console.log('[server] HTTP server closed. Exiting.');
+    process.exit(0);
+  });
 });
