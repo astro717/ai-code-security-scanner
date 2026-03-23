@@ -20,7 +20,7 @@ import { detectJWTSecrets } from './scanner/detectors/jwt';
 import { detectReDoS } from './scanner/detectors/redos';
 import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
-import { Finding, printFindings, formatFindingsText, formatJSON, summarize } from './scanner/reporter';
+import { Finding, printFindings, formatFindingsText, formatJSON, summarize, deduplicateFindings } from './scanner/reporter';
 import { detectUnsafeDeps } from './scanner/detectors/deps';
 import { buildSARIF } from './scanner/sarif';
 import { buildHTMLReport } from './scanner/htmlReport';
@@ -438,11 +438,16 @@ program
       allFindings.push(...detectUnsafeDeps(scanRoot));
     }
 
+    // Deduplicate by (type, file, line, column) before reporting.
+    // Multiple detectors can flag the same location; deduplication eliminates
+    // noise in large scans without losing any unique signals.
+    const deduped = deduplicateFindings(allFindings);
+
     const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
     // --severity controls which findings are reported
     const minReport = severityOrder[effectiveSeverity] ?? 3;
-    const filtered = allFindings.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
+    const filtered = deduped.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
 
     // --output routes output to a file; otherwise use stdout
     const outputPath = options.output ? path.resolve(options.output) : undefined;
