@@ -30,6 +30,7 @@ import { detectWeakCrypto } from '../../src/scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from '../../src/scanner/detectors/jwtNone';
 import { detectCORSMisconfiguration } from '../../src/scanner/detectors/cors';
 import { buildSARIF, SARIF_RULE_DESCRIPTIONS } from '../../src/scanner/sarif';
+import { buildHTMLReport } from '../../src/scanner/htmlReport';
 import type { Finding } from '../../src/scanner/reporter';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -245,5 +246,107 @@ describe('buildSARIF — output structure', () => {
     for (const type of knownTypes) {
       expect(SARIF_RULE_DESCRIPTIONS[type], `Missing description for ${type}`).toBeTruthy();
     }
+  });
+});
+
+// ── buildHTMLReport — unit tests ──────────────────────────────────────────────
+
+describe('buildHTMLReport — output structure', () => {
+  test('returns a string starting with <!DOCTYPE html>', () => {
+    const html = buildHTMLReport([], '/some/root');
+    expect(typeof html).toBe('string');
+    expect(html.trimStart().startsWith('<!DOCTYPE html>')).toBe(true);
+  });
+
+  test('empty findings renders no-findings state and no file cards', () => {
+    const html = buildHTMLReport([], '/some/root');
+    expect(html).toContain('No findings');
+    expect(html).not.toContain('class="finding"');
+  });
+
+  test('findings appear in output grouped under their file path', () => {
+    const findings: Finding[] = [
+      makeFinding({ file: '/root/src/foo.ts', message: 'Hardcoded password', severity: 'high' }),
+      makeFinding({ file: '/root/src/foo.ts', message: 'SQL concat', type: 'SQL_INJECTION', severity: 'critical' }),
+      makeFinding({ file: '/root/src/bar.ts', message: 'Eval call', type: 'EVAL_INJECTION', severity: 'medium' }),
+    ];
+    const html = buildHTMLReport(findings, '/root');
+    // All three messages must appear
+    expect(html).toContain('Hardcoded password');
+    expect(html).toContain('SQL concat');
+    expect(html).toContain('Eval call');
+    // Relative paths are rendered (scan root stripped)
+    expect(html).toContain('src/foo.ts');
+    expect(html).toContain('src/bar.ts');
+  });
+
+  test('severity badges are rendered for each severity level', () => {
+    const findings: Finding[] = [
+      makeFinding({ severity: 'critical', message: 'crit finding' }),
+      makeFinding({ severity: 'high',     message: 'high finding' }),
+      makeFinding({ severity: 'medium',   message: 'med finding' }),
+      makeFinding({ severity: 'low',      message: 'low finding' }),
+    ];
+    const html = buildHTMLReport(findings, '/root');
+    // Each severity label must appear at least once as an uppercased badge
+    expect(html).toContain('critical');
+    expect(html).toContain('high');
+    expect(html).toContain('medium');
+    expect(html).toContain('low');
+  });
+
+  test('summary bar counts are correct', () => {
+    const findings: Finding[] = [
+      makeFinding({ severity: 'high' }),
+      makeFinding({ severity: 'high' }),
+      makeFinding({ severity: 'medium' }),
+    ];
+    const html = buildHTMLReport(findings, '/root');
+    // Summary bar should mention the count 2 for high and 1 for medium
+    expect(html).toContain('>2<');
+    expect(html).toContain('>1<');
+  });
+
+  test('total findings count appears in the report header', () => {
+    const findings: Finding[] = [makeFinding(), makeFinding(), makeFinding()];
+    const html = buildHTMLReport(findings, '/root');
+    expect(html).toContain('Total findings: <strong>3</strong>');
+  });
+
+  test('generatedAt timestamp appears in the report', () => {
+    const ts = '2026-01-15T12:00:00.000Z';
+    const html = buildHTMLReport([], '/root', ts);
+    expect(html).toContain(ts);
+  });
+
+  test('escapeHtml prevents XSS via malicious finding messages', () => {
+    const malicious = '<script>alert("xss")</script>';
+    const findings: Finding[] = [
+      makeFinding({ message: malicious, file: 'evil.ts' }),
+    ];
+    const html = buildHTMLReport(findings, '/root');
+    // Raw script tag must NOT appear
+    expect(html).not.toContain('<script>alert("xss")</script>');
+    // Escaped version must appear instead
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  test('escapeHtml prevents XSS in file path', () => {
+    const findings: Finding[] = [
+      makeFinding({ file: '/root/<evil>.ts', message: 'test finding' }),
+    ];
+    const html = buildHTMLReport(findings, '/root');
+    expect(html).not.toContain('<evil>');
+    expect(html).toContain('&lt;evil&gt;');
+  });
+
+  test('scan root is stripped from file paths in output', () => {
+    const findings: Finding[] = [
+      makeFinding({ file: '/project/src/auth.ts' }),
+    ];
+    const html = buildHTMLReport(findings, '/project');
+    expect(html).toContain('src/auth.ts');
+    // Absolute path should not appear verbatim as a leading path
+    expect(html).not.toContain('/project/src/auth.ts');
   });
 });
