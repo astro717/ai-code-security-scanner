@@ -166,6 +166,74 @@ describe('Detectors — clean.ts produces no false positives', () => {
   test('detectXSS: 0 findings on clean.ts', () => {
     expect(detectXSS(cleanParsed).length).toBe(0);
   });
+
+  test('detectCommandInjection: 0 findings on clean.ts (static spawn commands are safe)', () => {
+    // clean.ts uses _spawn('convert', [...]) and _spawnSync('ls', [...]) — both
+    // have fully hardcoded command strings. The detector must not flag these.
+    expect(detectCommandInjection(cleanParsed).length).toBe(0);
+  });
+
+  test('detectWeakCrypto: 0 findings on clean.ts (sha256 is safe)', () => {
+    // clean.ts uses crypto.createHash('sha256') — a strong algorithm.
+    // The detector must not flag sha256 or any other non-weak algorithm.
+    expect(detectWeakCrypto(cleanParsed).length).toBe(0);
+  });
+});
+
+// ── commandInjection: targeted positive + negative unit tests ─────────────────
+
+describe('detectCommandInjection — positive and negative cases', () => {
+  test('flags spawn() with a variable as the command (dynamic command)', () => {
+    const parsed = parseCode(`spawn(userCmd, ['arg1']);`);
+    const findings = detectCommandInjection(parsed);
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.map((f) => f.type)).toContain('COMMAND_INJECTION');
+  });
+
+  test('flags spawnSync() with a template literal containing an expression', () => {
+    const parsed = parseCode('spawnSync(`${req.body.tool}`, []);');
+    const findings = detectCommandInjection(parsed);
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.map((f) => f.type)).toContain('COMMAND_INJECTION');
+  });
+
+  test('does NOT flag spawn() with a static string literal command', () => {
+    const parsed = parseCode(`spawn('ls', ['-la', userPath]);`);
+    expect(detectCommandInjection(parsed).length).toBe(0);
+  });
+
+  test('does NOT flag spawnSync() with a static template literal (no expressions)', () => {
+    const parsed = parseCode('spawnSync(`convert`, [input, output]);');
+    expect(detectCommandInjection(parsed).length).toBe(0);
+  });
+});
+
+// ── weakCrypto: targeted positive + negative unit tests ───────────────────────
+
+describe('detectWeakCrypto — positive and negative cases', () => {
+  test('flags createHash("md5") as WEAK_CRYPTO', () => {
+    const parsed = parseCode(`import crypto from 'crypto'; crypto.createHash('md5').update(data).digest('hex');`);
+    const findings = detectWeakCrypto(parsed);
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.map((f) => f.type)).toContain('WEAK_CRYPTO');
+  });
+
+  test('flags createHash("sha1") as WEAK_CRYPTO', () => {
+    const parsed = parseCode(`createHash('sha1').update(token).digest('hex');`);
+    const findings = detectWeakCrypto(parsed);
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.map((f) => f.type)).toContain('WEAK_CRYPTO');
+  });
+
+  test('does NOT flag createHash("sha256") — strong algorithm', () => {
+    const parsed = parseCode(`crypto.createHash('sha256').update(data).digest('hex');`);
+    expect(detectWeakCrypto(parsed).length).toBe(0);
+  });
+
+  test('does NOT flag createHash("sha3-256") — strong algorithm', () => {
+    const parsed = parseCode(`createHash('sha3-256').update(data).digest('hex');`);
+    expect(detectWeakCrypto(parsed).length).toBe(0);
+  });
 });
 
 // ── buildSARIF: direct unit tests ─────────────────────────────────────────────
