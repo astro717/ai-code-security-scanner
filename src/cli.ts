@@ -22,6 +22,7 @@ import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
 import { Finding, printFindings, formatFindingsText, formatJSON, summarize } from './scanner/reporter';
 import { detectUnsafeDeps } from './scanner/detectors/deps';
+import { buildHTMLReport } from './scanner/htmlReport';
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -192,7 +193,7 @@ function buildSARIF(findings: Finding[]): object {
 interface AiSecScanConfig {
   ignore?: string[];
   severity?: string;
-  format?: 'text' | 'json' | 'sarif';
+  format?: 'text' | 'json' | 'sarif' | 'html';
 }
 
 function loadConfig(configPath?: string): AiSecScanConfig {
@@ -349,7 +350,7 @@ program
   .argument('[path]', 'File or directory to scan', '.')
   .option('--json', 'Output results as JSON')
   .option('--sarif', 'Output results as SARIF 2.1.0')
-  .option('--format <format>', 'Output format: text | json | sarif (overrides --json / --sarif flags)')
+  .option('--format <format>', 'Output format: text | json | sarif | html (overrides --json / --sarif flags)')
   .option('--severity <level>', 'Minimum severity to report (critical|high|medium|low)', 'low')
   .option(
     '--min-severity <level>',
@@ -442,6 +443,11 @@ program
       emit(JSON.stringify(buildSARIF(filtered), null, 2));
     } else if (effectiveFormat === 'json') {
       emit(formatJSON(filtered));
+    } else if (effectiveFormat === 'html') {
+      emit(buildHTMLReport(filtered, scanRoot));
+      if (outputPath) {
+        console.error('[html] Self-contained HTML report written. Open in a browser to review.');
+      }
     } else {
       if (outputPath) {
         // Write the same structured text as the terminal output (no ANSI codes)
