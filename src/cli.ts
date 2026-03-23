@@ -195,6 +195,63 @@ interface AiSecScanConfig {
   format?: 'text' | 'json' | 'sarif';
 }
 
+/** Validates a parsed config object against the AiSecScanConfig schema.
+ *  Returns an array of human-readable error strings (empty = valid). */
+function validateConfig(obj: unknown): string[] {
+  const errors: string[] = [];
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return ['Config root must be a JSON object, got: ' + (Array.isArray(obj) ? 'array' : typeof obj)];
+  }
+
+  const allowed = new Set(['ignore', 'severity', 'format']);
+  const knownSeverities = new Set(['critical', 'high', 'medium', 'low']);
+  const knownFormats = new Set(['text', 'json', 'sarif']);
+
+  // Check for unknown keys — a typo here silently dropped config before this fix
+  for (const key of Object.keys(obj as Record<string, unknown>)) {
+    if (!allowed.has(key)) {
+      const suggestions = [...allowed].filter((k) => k.startsWith(key[0] ?? ''));
+      const hint = suggestions.length > 0 ? ` (did you mean "${suggestions[0]}"?)` : '';
+      errors.push(`Unknown config key "${key}"${hint}. Allowed keys: ${[...allowed].join(', ')}`);
+    }
+  }
+
+  const record = obj as Record<string, unknown>;
+
+  // ignore: must be an array of strings
+  if ('ignore' in record) {
+    if (!Array.isArray(record['ignore'])) {
+      errors.push(`"ignore" must be an array of strings, got: ${typeof record['ignore']}`);
+    } else {
+      (record['ignore'] as unknown[]).forEach((item, i) => {
+        if (typeof item !== 'string') {
+          errors.push(`"ignore[${i}]" must be a string, got: ${typeof item}`);
+        }
+      });
+    }
+  }
+
+  // severity: must be one of the known values
+  if ('severity' in record) {
+    if (typeof record['severity'] !== 'string') {
+      errors.push(`"severity" must be a string, got: ${typeof record['severity']}`);
+    } else if (!knownSeverities.has(record['severity'])) {
+      errors.push(`"severity" must be one of: ${[...knownSeverities].join(', ')}. Got: "${record['severity']}"`);
+    }
+  }
+
+  // format: must be one of the known values
+  if ('format' in record) {
+    if (typeof record['format'] !== 'string') {
+      errors.push(`"format" must be a string, got: ${typeof record['format']}`);
+    } else if (!knownFormats.has(record['format'])) {
+      errors.push(`"format" must be one of: ${[...knownFormats].join(', ')}. Got: "${record['format']}"`);
+    }
+  }
+
+  return errors;
+}
+
 function loadConfig(configPath?: string): AiSecScanConfig {
   const candidates = configPath
     ? [path.resolve(configPath)]
@@ -207,9 +264,16 @@ function loadConfig(configPath?: string): AiSecScanConfig {
     if (fs.existsSync(candidate)) {
       try {
         const raw = fs.readFileSync(candidate, 'utf8');
-        const parsed = JSON.parse(raw) as AiSecScanConfig;
+        const parsed = JSON.parse(raw);
+        const validationErrors = validateConfig(parsed);
+        if (validationErrors.length > 0) {
+          console.error(`[config] Warning: ${candidate} has schema errors — some settings may be ignored:`);
+          for (const err of validationErrors) {
+            console.error(`  [config]   - ${err}`);
+          }
+        }
         console.error(`[config] Loaded: ${candidate}`);
-        return parsed;
+        return parsed as AiSecScanConfig;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[config] Warning: failed to parse ${candidate}: ${msg}`);
