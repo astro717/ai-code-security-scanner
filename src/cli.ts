@@ -368,7 +368,20 @@ program
     (val: string, acc: string[]) => { acc.push(...val.split(',').map((t) => t.trim().toUpperCase())); return acc; },
     [] as string[],
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; ignore: string[]; config?: string; watch: boolean; output?: string; exitCode?: string; failOn: string[] }) => {
+  .option(
+    '--severity-exit <level>',
+    'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
+    'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
+  )
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; exitCode?: string; failOn: string[] }) => {
+    // --severity-exit <level>: convenience shorthand that sets both --severity
+    // and --min-severity to the same level. Explicit --severity / --min-severity
+    // flags take precedence if also supplied.
+    if (options.severityExit) {
+      if (!options.minSeverity) options.minSeverity = options.severityExit;
+      if (options.severity === 'low') options.severity = options.severityExit;
+    }
+
     // Load config file first; CLI flags override config values
     const config = loadConfig(options.config);
 
