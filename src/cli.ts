@@ -364,7 +364,14 @@ program
     '--exit-code <code>',
     'Force the process to exit with this code regardless of findings (e.g. --exit-code 0 for advisory-only scans in CI).',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; ignore: string[]; config?: string; watch: boolean; output?: string; exitCode?: string }) => {
+  .option(
+    '--fail-on <types>',
+    'Comma-separated list of finding types that trigger a non-zero exit code (e.g. --fail-on SQL_INJECTION,XSS). ' +
+    'When set, only these types cause failure — all other findings are advisory only.',
+    (val: string, acc: string[]) => { acc.push(...val.split(',').map((t) => t.trim().toUpperCase())); return acc; },
+    [] as string[],
+  )
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; ignore: string[]; config?: string; watch: boolean; output?: string; exitCode?: string; failOn: string[] }) => {
     // Load config file first; CLI flags override config values
     const config = loadConfig(options.config);
 
@@ -464,9 +471,18 @@ program
       console.error(`[exit-code] Invalid value "${options.exitCode}" — ignoring.`);
     }
 
-    // --min-severity controls which severity triggers a non-zero exit code.
-    // If not set, fall back to the legacy behaviour (exit 1 on critical or high).
-    if (options.minSeverity) {
+    // --fail-on <types>: exit non-zero only when specific finding types are present.
+    // Takes priority over --min-severity when both are supplied.
+    if (options.failOn.length > 0) {
+      const failTypes = new Set(options.failOn);
+      const hasTargetedViolation = filtered.some((f) => failTypes.has(f.type));
+      if (hasTargetedViolation) {
+        const matched = [...new Set(filtered.filter((f) => failTypes.has(f.type)).map((f) => f.type))];
+        console.error(`[fail-on] Failing because targeted finding type(s) found: ${matched.join(', ')}`);
+        process.exit(1);
+      }
+    } else if (options.minSeverity) {
+      // --min-severity controls which severity triggers a non-zero exit code.
       const exitThreshold = severityOrder[options.minSeverity] ?? 1;
       const hasViolation = filtered.some((f) => (severityOrder[f.severity] ?? 3) <= exitThreshold);
       if (hasViolation) {
