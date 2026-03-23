@@ -28,8 +28,8 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Run tests with coverage (c8)
-        run: npx c8 --reporter=text --reporter=lcov npx ts-node --transpile-only tests/scanner.test.ts
+      - name: Run tests with coverage (vitest + v8)
+        run: npm run test:coverage
         continue-on-error: true
 
       - name: Run security scan (SARIF)
