@@ -166,6 +166,90 @@ describe('Detectors — clean.ts produces no false positives', () => {
   test('detectXSS: 0 findings on clean.ts', () => {
     expect(detectXSS(cleanParsed).length).toBe(0);
   });
+
+  test('detectShellInjection: 0 findings on clean.ts (no exec/execSync with dynamic arg)', () => {
+    // clean.ts only uses execFile (not exec/execSync) and spawn/spawnSync with
+    // static command strings. Neither pattern should trigger SHELL_INJECTION.
+    expect(detectShellInjection(cleanParsed).length).toBe(0);
+  });
+
+  test('detectPathTraversal: 0 findings on clean.ts (all paths are static)', () => {
+    // clean.ts only calls path.join and fs.readFileSync with string literals —
+    // no dynamic user-supplied path arguments. Zero findings expected.
+    expect(detectPathTraversal(cleanParsed).length).toBe(0);
+  });
+});
+
+// ── shellInjection: targeted positive + negative unit tests ───────────────────
+
+describe('detectShellInjection — positive and negative cases', () => {
+  test('flags exec() with a variable as the command', () => {
+    const parsed = parseCode(`exec(userInput);`);
+    const findings = detectShellInjection(parsed);
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.map((f) => f.type)).toContain('SHELL_INJECTION');
+  });
+
+  test('flags execSync() with a template literal containing an expression', () => {
+    const parsed = parseCode('execSync(`rm -rf ${req.body.path}`);');
+    const findings = detectShellInjection(parsed);
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.map((f) => f.type)).toContain('SHELL_INJECTION');
+  });
+
+  test('does NOT flag exec() with a static string literal', () => {
+    const parsed = parseCode(`exec('ls -la');`);
+    expect(detectShellInjection(parsed).length).toBe(0);
+  });
+
+  test('does NOT flag spawn() — spawn is NOT a shell-invoking function', () => {
+    // spawn() does not invoke a shell; it is handled by commandInjection.ts.
+    // Ensuring shell.ts does not produce duplicate SHELL_INJECTION findings.
+    const parsed = parseCode(`spawn(userCmd, ['arg']);`);
+    const findings = detectShellInjection(parsed);
+    expect(findings.map((f) => f.type)).not.toContain('SHELL_INJECTION');
+  });
+
+  test('does NOT flag spawnSync() — spawnSync is NOT a shell-invoking function', () => {
+    const parsed = parseCode(`spawnSync(cmd, ['-r', file]);`);
+    const findings = detectShellInjection(parsed);
+    expect(findings.map((f) => f.type)).not.toContain('SHELL_INJECTION');
+  });
+});
+
+// ── pathTraversal: targeted positive + negative unit tests ────────────────────
+
+describe('detectPathTraversal — positive and negative cases', () => {
+  test('flags fs.readFileSync() with a dynamic path argument', () => {
+    const parsed = parseCode(`import * as fs from 'fs'; fs.readFileSync(req.params.file);`);
+    const findings = detectPathTraversal(parsed);
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.map((f) => f.type)).toContain('PATH_TRAVERSAL');
+  });
+
+  test('flags path.join() with a dynamic argument', () => {
+    const parsed = parseCode(`import * as path from 'path'; path.join('/uploads', req.body.name);`);
+    const findings = detectPathTraversal(parsed);
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.map((f) => f.type)).toContain('PATH_TRAVERSAL');
+  });
+
+  test('flags path.resolve() with a dynamic argument', () => {
+    const parsed = parseCode(`import * as path from 'path'; path.resolve('/base', userPath);`);
+    const findings = detectPathTraversal(parsed);
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.map((f) => f.type)).toContain('PATH_TRAVERSAL');
+  });
+
+  test('does NOT flag fs.readFileSync() with a static string literal path', () => {
+    const parsed = parseCode(`import * as fs from 'fs'; fs.readFileSync('/etc/config.json', 'utf8');`);
+    expect(detectPathTraversal(parsed).length).toBe(0);
+  });
+
+  test('does NOT flag path.join() with all static string arguments', () => {
+    const parsed = parseCode(`import * as path from 'path'; path.join('/var', 'app', 'data.json');`);
+    expect(detectPathTraversal(parsed).length).toBe(0);
+  });
 });
 
 // ── buildSARIF: direct unit tests ─────────────────────────────────────────────
