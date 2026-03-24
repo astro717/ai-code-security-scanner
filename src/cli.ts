@@ -381,6 +381,11 @@ program
     'written regardless of whether the scan exits 0 or 1. Identical to --output in behaviour — provided for clarity.',
   )
   .option(
+    '--baseline <path>',
+    'Path to a previous JSON scan result. Only findings that are NEW relative to the baseline are reported. ' +
+    'Use this in PR workflows to gate on net-new vulnerabilities without blocking on legacy debt.',
+  )
+  .option(
     '--exit-code <code>',
     'Force the process to exit with this code regardless of findings (e.g. --exit-code 0 for advisory-only scans in CI).',
   )
@@ -396,7 +401,7 @@ program
     'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; exitCode?: string; failOn: string[] }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[] }) => {
     // --output-on-exit is an alias for --output with explicit always-write
     // semantics. If both are provided, --output takes precedence.
     if (!options.output && options.outputOnExit) {
@@ -476,7 +481,38 @@ program
 
     // --severity controls which findings are reported
     const minReport = severityOrder[effectiveSeverity] ?? 3;
-    const filtered = deduped.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
+    let filtered = deduped.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
+
+    // ── Baseline diffing ─────────────────────────────────────────────────────
+    // --baseline <file>: load a previous JSON scan result and filter out any
+    // findings that are already present in the baseline. Only net-new findings
+    // are reported, which is ideal for PR-gating workflows.
+    if (options.baseline) {
+      const baselinePath = path.resolve(options.baseline);
+      if (!fs.existsSync(baselinePath)) {
+        console.error(`[baseline] Error: file not found: ${baselinePath}`);
+        process.exit(1);
+      }
+      try {
+        const raw = JSON.parse(fs.readFileSync(baselinePath, 'utf8')) as { findings?: Finding[] };
+        const baselineFindings: Finding[] = raw.findings ?? [];
+        const baselineKeys = new Set(
+          baselineFindings.map((f) => `${f.type}|${f.file ?? ''}|${f.line}|${f.column}`),
+        );
+        const beforeCount = filtered.length;
+        filtered = filtered.filter((f) => {
+          const key = `${f.type}|${f.file ?? ''}|${f.line}|${f.column}`;
+          return !baselineKeys.has(key);
+        });
+        const suppressed = beforeCount - filtered.length;
+        if (suppressed > 0) {
+          console.error(`[baseline] ${suppressed} finding(s) suppressed as pre-existing (baseline: ${baselinePath})`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[baseline] Warning: could not load baseline file: ${msg}`);
+      }
+    }
 
     // --output routes output to a file; otherwise use stdout
     const outputPath = options.output ? path.resolve(options.output) : undefined;
