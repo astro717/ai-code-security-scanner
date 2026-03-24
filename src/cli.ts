@@ -356,7 +356,12 @@ program
   .option('--ignore <glob>', 'Glob pattern to exclude (repeatable, e.g. --ignore \'**/node_modules/**\')', (val, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
   .option('--config <path>', 'Path to .ai-sec-scan.json config file')
   .option('--watch', 'Watch for file changes and re-scan automatically, printing a diff of new/resolved findings')
-  .option('--output <path>', 'Write output to a file instead of stdout (creates or overwrites the file)')
+  .option('--output <path>', 'Write output to a file instead of stdout (creates or overwrites the file). Output is always written before the process exits, even when findings cause a non-zero exit code.')
+  .option(
+    '--output-on-exit <path>',
+    'Alias for --output with explicit always-write semantics. Use this in CI pipelines to guarantee the results file is ' +
+    'written regardless of whether the scan exits 0 or 1. Identical to --output in behaviour — provided for clarity.',
+  )
   .option(
     '--exit-code <code>',
     'Force the process to exit with this code regardless of findings (e.g. --exit-code 0 for advisory-only scans in CI).',
@@ -373,7 +378,13 @@ program
     'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; exitCode?: string; failOn: string[] }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; exitCode?: string; failOn: string[] }) => {
+    // --output-on-exit is an alias for --output with explicit always-write
+    // semantics. If both are provided, --output takes precedence.
+    if (!options.output && options.outputOnExit) {
+      options.output = options.outputOnExit;
+    }
+
     // --severity-exit <level>: convenience shorthand that sets both --severity
     // and --min-severity to the same level. Explicit --severity / --min-severity
     // flags take precedence if also supplied.
