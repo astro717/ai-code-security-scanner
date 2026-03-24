@@ -2,11 +2,12 @@ import { TSESTree } from '@typescript-eslint/types';
 import { ParseResult } from '../parser';
 import { Finding } from '../reporter';
 
-// spawn/spawnSync are intentionally excluded: they do NOT invoke a shell, so the
+// execFile/execFileSync and spawn/spawnSync are intentionally excluded: they do
+// NOT invoke a shell — they take a file path and an args array directly, so the
 // risk profile is COMMAND_INJECTION (handled by commandInjection.ts), not
-// SHELL_INJECTION. Including them here would produce duplicate findings with the
+// SHELL_INJECTION. Including them here would produce false positives with the
 // wrong vulnerability type.
-const SHELL_FUNCTIONS = new Set(['exec', 'execSync', 'execFile', 'execFileSync']);
+const SHELL_FUNCTIONS = new Set(['exec', 'execSync']);
 
 function walkNode(node: TSESTree.Node, callback: (n: TSESTree.Node) => void): void {
   callback(node);
@@ -53,7 +54,7 @@ export function detectShellInjection(result: ParseResult): Finding[] {
     const firstArg = call.arguments[0];
     if (firstArg.type === 'SpreadElement') return;
 
-    // exec/execSync/execFile/execFileSync: first arg should be a plain string literal
+    // exec/execSync: first arg should be a plain string literal
     if (!isSimpleStringLiteral(firstArg)) {
       const line = node.loc!.start.line;
       const snippet = result.lines[line - 1]?.trim() ?? '';
