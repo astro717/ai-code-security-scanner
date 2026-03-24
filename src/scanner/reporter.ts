@@ -18,6 +18,21 @@ export interface ScanSummary {
   total: number;
 }
 
+/**
+ * Removes duplicate findings based on a stable key of (type, file, line, column).
+ * When multiple detectors independently flag the same code location with the same
+ * finding type, only the first occurrence is kept. Preserves original order.
+ */
+export function deduplicateFindings(findings: Finding[]): Finding[] {
+  const seen = new Set<string>();
+  return findings.filter((f) => {
+    const key = `${f.type}|${f.file ?? ''}|${f.line}|${f.column}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function summarize(findings: Finding[]): ScanSummary {
   return {
     critical: findings.filter((f) => f.severity === 'critical').length,

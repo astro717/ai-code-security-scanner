@@ -20,7 +20,7 @@ import { detectCORSMisconfiguration } from './scanner/detectors/cors';
 import { detectReDoS } from './scanner/detectors/redos';
 import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
-import { summarize, Finding } from './scanner/reporter';
+import { summarize, Finding, deduplicateFindings } from './scanner/reporter';
 import { detectUnsafeDepsFromJson } from './scanner/detectors/deps';
 
 // ── Anthropic AI explain ──────────────────────────────────────────────────────
@@ -241,6 +241,9 @@ app.post('/scan', scanLimiter, async (req, res) => {
     const depsFindings = detectUnsafeDepsFromJson(packageJson);
     findings.push(...depsFindings);
   }
+
+  // Deduplicate by (type, file, line, column) before reporting.
+  findings = deduplicateFindings(findings) as FindingWithAI[];
 
   // AI explain enrichment
   if (aiExplain && findings.length > 0) {
