@@ -7,6 +7,10 @@ export default defineConfig({
     // test() / expect() API and calls process.exit() — it is kept for
     // `npm test` (ts-node) but is not compatible with vitest's runner.
     include: ['tests/vitest/**/*.vitest.ts'],
+    // Explicitly exclude the custom ts-node runner regardless of include glob
+    // changes. scanner.test.ts calls process.exit() which crashes vitest's
+    // fork pool — a single accidental inclusion breaks the entire suite.
+    exclude: ['tests/scanner.test.ts', '**/node_modules/**'],
     // Use the v8 coverage provider (built-in, no external instrumentation).
     coverage: {
       provider: 'v8',
