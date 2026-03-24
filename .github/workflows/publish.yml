@@ -1,6 +1,11 @@
 name: Publish to npm
 
 on:
+  # Trigger on v* version tags pushed directly (e.g. git tag v1.0.0 && git push --tags)
+  push:
+    tags:
+      - 'v*'
+  # Also trigger when a GitHub Release is published via the UI
   release:
     types: [published]
 
@@ -26,8 +31,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build
+        run: npm run build
+
       - name: Run tests
-        run: npx ts-node --transpile-only tests/scanner.test.ts
+        run: npm run test:vitest
 
       - name: Publish to npm
         run: npm publish --provenance --access public
