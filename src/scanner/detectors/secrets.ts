@@ -93,10 +93,12 @@ export function detectSecrets(result: ParseResult): Finding[] {
     }
   });
 
-  // Deduplicate by line
+  // Deduplicate by (line, type) to match the server-level dedup key (file, line, type).
+  // Using (line, column) was overly granular and could let through duplicate findings
+  // of different types on the same line, or miss duplicates at different columns.
   const seen = new Set<string>();
   return findings.filter((f) => {
-    const key = `${f.line}:${f.column}`;
+    const key = `${f.line}:${f.type}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
