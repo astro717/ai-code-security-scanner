@@ -1,6 +1,7 @@
 import { TSESTree } from '@typescript-eslint/types';
 import { ParseResult } from '../parser';
 import { Finding } from '../reporter';
+import { getSnippet } from '../utils';
 
 // spawn/spawnSync are intentionally excluded: they do NOT invoke a shell, so the
 // risk profile is COMMAND_INJECTION (handled by commandInjection.ts), not
@@ -56,7 +57,7 @@ export function detectShellInjection(result: ParseResult): Finding[] {
     // exec/execSync/execFile/execFileSync: first arg should be a plain string literal
     if (!isSimpleStringLiteral(firstArg)) {
       const line = node.loc!.start.line;
-      const snippet = result.lines[line - 1]?.trim() ?? '';
+      const snippet = getSnippet(result, line);
       findings.push({
         type: 'SHELL_INJECTION',
         severity: 'high',

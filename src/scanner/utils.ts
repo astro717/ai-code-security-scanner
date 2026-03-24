@@ -1,4 +1,19 @@
 import { TSESTree } from '@typescript-eslint/types';
+import type { ParseResult } from './parser';
+
+/**
+ * Extracts the trimmed source line at the given 1-based line number from a
+ * ParseResult. Returns an empty string when the line is out of range (e.g.
+ * for synthetic or generated code). Use this in every detector instead of the
+ * inline pattern `result.lines[line - 1]?.trim() ?? ''` so snippet extraction
+ * is consistent and easy to update in one place.
+ *
+ * @param result - The ParseResult whose `lines` array holds the source lines.
+ * @param line   - 1-based line number (matching AST node.loc.start.line).
+ */
+export function getSnippet(result: ParseResult, line: number): string {
+  return result.lines[line - 1]?.trim() ?? '';
+}
 
 /**
  * Recursively walks an AST node, invoking callback for every node in the tree.
