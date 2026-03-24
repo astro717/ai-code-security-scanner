@@ -364,6 +364,11 @@ program
   .argument('[path]', 'File or directory to scan', '.')
   .option('--json', 'Output results as JSON')
   .option('--sarif', 'Output results as SARIF 2.1.0')
+  .option(
+    '--html <output-path>',
+    'Write a self-contained HTML report to <output-path>. Shorthand for --format html --output <output-path>. ' +
+    'The file can be opened directly in a browser without a server.',
+  )
   .option('--format <format>', 'Output format: text | json | sarif | html (overrides --json / --sarif flags)')
   .option('--severity <level>', 'Minimum severity to report (critical|high|medium|low)', 'low')
   .option(
@@ -401,7 +406,13 @@ program
     'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[] }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[] }) => {
+    // --html <path>: shorthand for --format html --output <path>.
+    // Explicit --format / --output take precedence if both are provided.
+    if (options.html) {
+      if (!options.format) options.format = 'html';
+      if (!options.output) options.output = options.html;
+    }
     // --output-on-exit is an alias for --output with explicit always-write
     // semantics. If both are provided, --output takes precedence.
     if (!options.output && options.outputOnExit) {
