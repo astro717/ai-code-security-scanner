@@ -156,7 +156,29 @@ describe('Detectors — vulnerable.ts produces findings', () => {
 
 describe('Detectors — clean.ts produces no false positives', () => {
   test('detectSecrets: 0 findings on clean.ts', () => {
+    // clean.ts contains patterns that could cause false positives if the
+    // SENSITIVE_VAR_NAMES regex or SECRET_VALUE_PATTERNS ever regress:
+    //   - a variable named "secret" assigned from process.env.APP_SECRET
+    //   - a jwt.verify() call with process.env.JWT_SECRET
+    // Both must produce zero SECRET_HARDCODED findings because the values
+    // come from environment variables, not hardcoded literals.
     expect(detectSecrets(cleanParsed).length).toBe(0);
+  });
+
+  test('detectSecrets: env-var secret assignment does not trigger SECRET_HARDCODED', () => {
+    // Regression guard: "secret = process.env.APP_SECRET" is safe — the value
+    // is read at runtime from the environment, not hardcoded in source.
+    const parsed = parseCode(`const secret = process.env.APP_SECRET;`);
+    expect(detectSecrets(parsed).length).toBe(0);
+  });
+
+  test('detectSecrets: jwt.verify with env-var key does not trigger SECRET_HARDCODED', () => {
+    // Regression guard: jwt.verify with a process.env key is safe. If the
+    // SECRET_VALUE_PATTERNS ever match "process.env.*" this test catches it.
+    const parsed = parseCode(
+      `import jwt from 'jsonwebtoken'; jwt.verify(token, process.env.JWT_SECRET ?? '', { algorithms: ['RS256'] });`,
+    );
+    expect(detectSecrets(parsed).length).toBe(0);
   });
 
   test('detectSQLInjection: 0 findings on clean.ts', () => {
