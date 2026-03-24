@@ -1,5 +1,33 @@
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
+/**
+ * The canonical set of finding type strings emitted by the built-in detectors.
+ * Export this constant so consumers (e.g. CLI --ignore-type validation) can
+ * check whether a user-supplied type string is recognised.
+ */
+export const KNOWN_TYPES = new Set([
+  'COMMAND_INJECTION',
+  'CORS_MISCONFIGURATION',
+  'EVAL_INJECTION',
+  'INSECURE_RANDOM',
+  'JWT_DECODE_NO_VERIFY',
+  'JWT_HARDCODED_SECRET',
+  'JWT_NONE_ALGORITHM',
+  'JWT_WEAK_SECRET',
+  'OPEN_REDIRECT',
+  'PATH_TRAVERSAL',
+  'PROTOTYPE_POLLUTION',
+  'REDOS',
+  'SECRET_HARDCODED',
+  'SHELL_INJECTION',
+  'SQL_INJECTION',
+  'SSRF',
+  'UNSAFE_DEPENDENCY',
+  'VULNERABLE_DEPENDENCY',
+  'WEAK_CRYPTO',
+  'XSS',
+]);
+
 export interface Finding {
   type: string;
   severity: Severity;

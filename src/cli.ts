@@ -20,7 +20,7 @@ import { detectJWTSecrets } from './scanner/detectors/jwt';
 import { detectReDoS } from './scanner/detectors/redos';
 import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
-import { Finding, printFindings, formatFindingsText, formatJSON, summarize, deduplicateFindings } from './scanner/reporter';
+import { Finding, printFindings, formatFindingsText, formatJSON, summarize, deduplicateFindings, KNOWN_TYPES } from './scanner/reporter';
 import { detectUnsafeDeps } from './scanner/detectors/deps';
 import { buildSARIF } from './scanner/sarif';
 import { buildHTMLReport } from './scanner/htmlReport';
@@ -507,6 +507,17 @@ program
     // truly global and consistent across all downstream steps.
     if (options.ignoreType.length > 0) {
       const suppressedTypes = new Set(options.ignoreType);
+      // Warn for any type strings not in the built-in KNOWN_TYPES set.
+      // We do not exit — teams may use custom types from plugins, but a typo
+      // would silently suppress nothing, so the warning is important.
+      for (const t of suppressedTypes) {
+        if (!KNOWN_TYPES.has(t)) {
+          console.error(
+            `[ignore-type] Warning: "${t}" is not a known finding type and will suppress nothing. ` +
+            `Known types: ${[...KNOWN_TYPES].sort().join(', ')}`,
+          );
+        }
+      }
       const before = filtered.length;
       filtered = filtered.filter((f) => !suppressedTypes.has(f.type));
       const suppressed = before - filtered.length;
