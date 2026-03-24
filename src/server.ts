@@ -118,6 +118,17 @@ async function enrichWithAI(findings: Finding[]): Promise<FindingWithAI[]> {
   return findings.map((f) => enriched.get(f) ?? f);
 }
 
+// ── Structured logging ───────────────────────────────────────────────────────
+
+/**
+ * Emits a single structured JSON log line to stdout.
+ * Using JSON ensures log aggregators (Datadog, CloudWatch, etc.) can parse
+ * all fields without regex extraction.
+ */
+function logScan(fields: Record<string, unknown>): void {
+  console.log(JSON.stringify({ ...fields, ts: new Date().toISOString() }));
+}
+
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 
@@ -271,7 +282,17 @@ app.post('/scan', scanLimiter, async (req, res) => {
     findings = await enrichWithAI(findings);
   }
 
-  console.log(`[scan] ${filename ?? 'input'} → ${findings.length} findings${aiExplain ? ' (AI enriched)' : ''}`);
+  const scanSummary = findings.reduce<Record<string, number>>((acc, f) => {
+    acc[f.severity] = (acc[f.severity] ?? 0) + 1;
+    return acc;
+  }, {});
+  logScan({
+    event: 'scan',
+    file: filename ?? 'input',
+    findings_total: findings.length,
+    findings_by_severity: scanSummary,
+    ai_enriched: !!aiExplain,
+  });
 
   res.json({ findings, summary: summarize(findings) });
 });
@@ -419,7 +440,20 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       }),
     );
 
-    console.log(`[scan-repo] ${owner}/${repo}@${branch} — ${collected.length} files → ${allFindings.length} findings`);
+    const repoScanDurationMs = Date.now() - repoScanStart;
+    const repoScanSummary = allFindings.reduce<Record<string, number>>((acc, f) => {
+      acc[f.severity] = (acc[f.severity] ?? 0) + 1;
+      return acc;
+    }, {});
+    logScan({
+      event: 'scan_repo',
+      repo: `${owner}/${repo}`,
+      branch,
+      files_scanned: collected.length,
+      findings_total: allFindings.length,
+      findings_by_severity: repoScanSummary,
+      duration_ms: repoScanDurationMs,
+    });
     res.json({ findings: allFindings, summary: summarize(allFindings), filesScanned: collected.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
