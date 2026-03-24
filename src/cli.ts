@@ -377,6 +377,15 @@ program
     'Defaults to high when omitted (only critical/high cause failure).',
   )
   .option('--ignore <glob>', 'Glob pattern to exclude (repeatable, e.g. --ignore \'**/node_modules/**\')', (val, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
+  .option(
+    '--exclude-pattern <glob>',
+    'Glob pattern to skip matching paths during recursive scan (repeatable, uses minimatch). ' +
+    'Useful for excluding generated artefacts such as dist/, build/, or coverage/. ' +
+    'Example: --exclude-pattern \'dist/**\' --exclude-pattern \'**/*.min.js\'. ' +
+    'Functionally equivalent to --ignore but provided as a more discoverable, industry-standard name.',
+    (val: string, acc: string[]) => { acc.push(val); return acc; },
+    [] as string[],
+  )
   .option('--config <path>', 'Path to .ai-sec-scan.json config file')
   .option('--watch', 'Watch for file changes and re-scan automatically, printing a diff of new/resolved findings')
   .option('--output <path>', 'Write output to a file instead of stdout (creates or overwrites the file). Output is always written before the process exits, even when findings cause a non-zero exit code.')
@@ -406,7 +415,7 @@ program
     'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[] }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[] }) => {
     // --html <path>: shorthand for --format html --output <path>.
     // Explicit --format / --output take precedence if both are provided.
     if (options.html) {
@@ -441,8 +450,9 @@ program
     const scanRootDir = fs.statSync(scanRoot).isDirectory() ? scanRoot : path.dirname(scanRoot);
     const fileIgnorePatterns = loadAiScannerIgnore(scanRootDir);
 
-    // Merge: config ignore + .aiscanner patterns + --ignore flags
-    const effectiveIgnore = [...(config.ignore ?? []), ...fileIgnorePatterns, ...options.ignore];
+    // Merge: config ignore + .aiscanner patterns + --ignore flags + --exclude-pattern flags
+    // --exclude-pattern is merged here so all downstream code (scan, watch) benefits.
+    const effectiveIgnore = [...(config.ignore ?? []), ...fileIgnorePatterns, ...options.ignore, ...options.excludePattern];
 
     // --format takes highest precedence; --sarif / --json are convenience aliases; then config
     const effectiveFormat = options.format ?? (options.sarif ? 'sarif' : options.json ? 'json' : (config.format ?? 'text'));
