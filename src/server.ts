@@ -408,6 +408,7 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
             ...detectJWTSecrets(parsed),
             ...detectJWTNoneAlgorithm(parsed),
             ...detectCommandInjection(parsed),
+            ...detectCORSMisconfiguration(parsed),
             ...detectReDoS(parsed),
             ...detectWeakCrypto(parsed),
           ].map((f) => ({ ...f, file: item.path }));
