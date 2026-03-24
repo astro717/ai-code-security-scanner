@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import https from 'https';
+import path from 'path';
 import rateLimit from 'express-rate-limit';
 import { minimatch } from 'minimatch';
 import { parseCode } from './scanner/parser';
@@ -196,7 +197,7 @@ app.post('/scan', scanLimiter, async (req, res) => {
     return;
   }
 
-  const { code, filename, packageJson, aiExplain } = req.body as {
+  const { code, filename: rawFilename, packageJson, aiExplain } = req.body as {
     code?: string;
     filename?: string;
     packageJson?: string;
@@ -206,6 +207,26 @@ app.post('/scan', scanLimiter, async (req, res) => {
   if (!code || typeof code !== 'string') {
     res.status(400).json({ error: 'Missing required field: code (string)' });
     return;
+  }
+
+  // Sanitize filename: strip path components and reject null bytes / traversal sequences
+  // before the value is used for display, parsing, or logging.
+  let filename: string | undefined;
+  if (rawFilename !== undefined) {
+    if (typeof rawFilename !== 'string') {
+      res.status(400).json({ error: 'Invalid field: filename must be a string' });
+      return;
+    }
+    if (rawFilename.includes('\0')) {
+      res.status(400).json({ error: 'Invalid filename: null bytes are not allowed' });
+      return;
+    }
+    if (rawFilename.includes('..') || rawFilename.startsWith('/') || rawFilename.startsWith('\\')) {
+      res.status(400).json({ error: 'Invalid filename: path traversal sequences are not allowed' });
+      return;
+    }
+    // Strip any remaining path components — only keep the base name
+    filename = path.basename(rawFilename);
   }
 
   let parsed;
