@@ -378,6 +378,7 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
 
   try {
+    const repoScanStart = Date.now();
     const patterns = Array.isArray(ignorePatterns) ? ignorePatterns.filter((p) => typeof p === 'string') : [];
     const collected: GHItem[] = [];
     await collectFiles(apiBase, '', branch, collected, 50, patterns);
