@@ -409,11 +409,22 @@ program
     [] as string[],
   )
   .option(
+    '--max-findings <n>',
+    'Truncate the findings list to at most <n> findings before output and exit-code evaluation. ' +
+    'Findings are sorted by severity (critical → high → medium → low) so the most important ones ' +
+    'are always retained. Useful in legacy codebases where the full output overwhelms CI logs.',
+    (val: string) => {
+      const n = parseInt(val, 10);
+      if (isNaN(n) || n < 0) throw new Error('--max-findings must be a non-negative integer');
+      return n;
+    },
+  )
+  .option(
     '--severity-exit <level>',
     'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[] }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number }) => {
     // --html <path>: shorthand for --format html --output <path>.
     // Explicit --format / --output take precedence if both are provided.
     if (options.html) {
@@ -524,6 +535,21 @@ program
       if (suppressed > 0) {
         console.error(`[ignore-type] ${suppressed} finding(s) suppressed for type(s): ${[...suppressedTypes].join(', ')}`);
       }
+    }
+
+    // ── --max-findings truncation ──────────────────────────────────────────
+    // Apply AFTER ignore-type suppression (so suppressed types don't count
+    // toward the cap) and BEFORE baseline diffing so the cap is consistent
+    // regardless of whether a baseline is configured.
+    if (options.maxFindings !== undefined && filtered.length > options.maxFindings) {
+      const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+      filtered = [...filtered]
+        .sort((a, b) => (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3))
+        .slice(0, options.maxFindings);
+      console.error(
+        `[max-findings] Output truncated to ${options.maxFindings} highest-severity finding(s). ` +
+        'Use a higher --max-findings value or fix issues to see all results.',
+      );
     }
 
     // ── Baseline diffing ─────────────────────────────────────────────────────
