@@ -18,6 +18,16 @@ export default defineConfig({
       // Only measure coverage of source files, not tests or build output.
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.d.ts', 'dist/**'],
+      // Fail CI if coverage drops below these baselines (based on current
+      // actual coverage: lines ~49%, functions ~49%, branches ~46%).
+      // Thresholds are set 5% below actuals to give headroom while still
+      // catching significant coverage regressions.
+      thresholds: {
+        lines: 45,
+        functions: 45,
+        branches: 40,
+        statements: 42,
+      },
     },
     // TypeScript support is built-in via Vite's esbuild transform.
     environment: 'node',
