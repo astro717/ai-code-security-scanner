@@ -14,8 +14,8 @@ jobs:
     name: Build and publish
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write  # required for npm provenance
+      contents: write   # required to upload release assets
+      id-token: write   # required for npm provenance
 
     steps:
       - name: Checkout
@@ -36,6 +36,25 @@ jobs:
 
       - name: Run tests
         run: npm run test:vitest
+
+      - name: Generate CycloneDX SBOM
+        # npm sbom --omit dev produces a CycloneDX JSON SBOM for production
+        # dependencies only. Attaching it as a release asset makes the
+        # supply-chain provenance auditable by downstream consumers.
+        run: npm sbom --omit dev --sbom-format cyclonedx > sbom.cyclonedx.json
+
+      - name: Upload SBOM as release asset
+        # Only runs when the workflow was triggered by a published GitHub Release.
+        # On tag-push triggers there is no release object to attach assets to.
+        if: github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./sbom.cyclonedx.json
+          asset_name: sbom.cyclonedx.json
+          asset_content_type: application/json
 
       - name: Publish to npm
         run: npm publish --provenance --access public
