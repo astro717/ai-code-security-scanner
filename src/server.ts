@@ -263,6 +263,17 @@ app.post('/scan', scanLimiter, async (req, res) => {
     findings.push(...depsFindings);
   }
 
+  // Deduplicate findings across detectors keyed on (file, line, type).
+  // When multiple detectors flag the same location with the same type, keep
+  // only the first occurrence so severity counts in the summary are accurate.
+  const seen = new Set<string>();
+  findings = findings.filter((f) => {
+    const key = `${f.file}:${f.line}:${f.type}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
   // AI explain enrichment
   if (aiExplain && findings.length > 0) {
     findings = await enrichWithAI(findings);
