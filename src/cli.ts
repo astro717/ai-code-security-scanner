@@ -402,11 +402,18 @@ program
     [] as string[],
   )
   .option(
+    '--ignore-type <type>',
+    'Suppress all findings of the given type globally (repeatable, e.g. --ignore-type WEAK_CRYPTO --ignore-type REDOS). ' +
+    'Useful for suppressing known-accepted findings without modifying source. Mirrors the pattern used by --fail-on.',
+    (val: string, acc: string[]) => { acc.push(val.trim().toUpperCase()); return acc; },
+    [] as string[],
+  )
+  .option(
     '--severity-exit <level>',
     'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[] }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[] }) => {
     // --html <path>: shorthand for --format html --output <path>.
     // Explicit --format / --output take precedence if both are provided.
     if (options.html) {
@@ -493,6 +500,20 @@ program
     // --severity controls which findings are reported
     const minReport = severityOrder[effectiveSeverity] ?? 3;
     let filtered = deduped.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
+
+    // ── --ignore-type suppression ────────────────────────────────────────────
+    // Remove findings whose type matches any --ignore-type value before
+    // baseline diffing, output, and exit-code logic so the suppression is
+    // truly global and consistent across all downstream steps.
+    if (options.ignoreType.length > 0) {
+      const suppressedTypes = new Set(options.ignoreType);
+      const before = filtered.length;
+      filtered = filtered.filter((f) => !suppressedTypes.has(f.type));
+      const suppressed = before - filtered.length;
+      if (suppressed > 0) {
+        console.error(`[ignore-type] ${suppressed} finding(s) suppressed for type(s): ${[...suppressedTypes].join(', ')}`);
+      }
+    }
 
     // ── Baseline diffing ─────────────────────────────────────────────────────
     // --baseline <file>: load a previous JSON scan result and filter out any
