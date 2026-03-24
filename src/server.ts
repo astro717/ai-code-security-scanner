@@ -418,8 +418,13 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       }),
     );
 
-    console.log(`[scan-repo] ${owner}/${repo}@${branch} — ${collected.length} files → ${allFindings.length} findings`);
-    res.json({ findings: allFindings, summary: summarize(allFindings), filesScanned: collected.length });
+    // Deduplicate by (type, file, line, column) across all scanned files — same
+    // logic as the /scan endpoint — so parallel file scans don't produce duplicate
+    // findings for the same location when detectors overlap.
+    const dedupedFindings = deduplicateFindings(allFindings);
+
+    console.log(`[scan-repo] ${owner}/${repo}@${branch} — ${collected.length} files → ${dedupedFindings.length} findings (${allFindings.length - dedupedFindings.length} deduped)`);
+    res.json({ findings: dedupedFindings, summary: summarize(dedupedFindings), filesScanned: collected.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[scan-repo] error: ${msg}`);
