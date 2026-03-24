@@ -153,6 +153,92 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'Server bound to 0.0.0.0. This exposes the service on all network interfaces. ' +
       'In production, bind to a specific interface or use a reverse proxy.',
   },
+
+  // ── XSS / template injection ────────────────────────────────────────────────
+
+  // Jinja2 / Mako render_template_string with user input (SSTI risk)
+  {
+    type: 'XSS',
+    severity: 'high',
+    pattern: /render_template_string\s*\(/,
+    message:
+      'render_template_string() renders a template from a string, which can lead to ' +
+      'Server-Side Template Injection (SSTI) if any part of the template string is ' +
+      'user-controlled. Use render_template() with a static template file instead.',
+  },
+
+  // Django mark_safe with variable content
+  {
+    type: 'XSS',
+    severity: 'high',
+    pattern: /mark_safe\s*\([^)"'\n]*(?:request|input|param|data|body|query|get|post)/i,
+    message:
+      'mark_safe() called with a value that appears to include user input. This bypasses ' +
+      "Django's auto-escaping and allows XSS. Ensure content is sanitised before marking safe.",
+  },
+
+  // ── Insecure random ──────────────────────────────────────────────────────────
+
+  {
+    type: 'INSECURE_RANDOM',
+    severity: 'medium',
+    pattern: /\brandom\.(?:random|randint|randrange|choice|shuffle|sample)\s*\(/,
+    message:
+      'Python random module is not cryptographically secure. For security-sensitive values ' +
+      '(tokens, passwords, salts, session IDs) use secrets.token_bytes(), ' +
+      'secrets.token_hex(), or secrets.token_urlsafe() instead.',
+  },
+
+  // ── Open redirect ────────────────────────────────────────────────────────────
+
+  // Flask / Django redirect with user-controlled URL
+  {
+    type: 'OPEN_REDIRECT',
+    severity: 'medium',
+    pattern: /(?:redirect|HttpResponseRedirect)\s*\([^)\n]*(?:request\.(?:GET|POST|args|form|values)|params|url|next)\b/,
+    message:
+      'Redirect target appears to include user-controlled input. Without validation ' +
+      'this allows open redirect attacks. Validate that the destination is a relative URL ' +
+      'or belongs to a trusted domain before redirecting.',
+  },
+
+  // ── SQL injection (additional patterns) ──────────────────────────────────────
+
+  // ORM raw() / extra() with string formatting
+  {
+    type: 'SQL_INJECTION',
+    severity: 'critical',
+    pattern: /\.(?:raw|extra)\s*\([^)\n]*(?:%s|%d|\{|f['"'])/,
+    message:
+      'ORM raw() or extra() query built with string formatting. User input in the query ' +
+      'string leads to SQL injection. Use parameterised queries or ORM filters.',
+  },
+
+  // ── Path traversal (additional pattern) ──────────────────────────────────────
+
+  // os.path.join with user-controlled first argument
+  {
+    type: 'PATH_TRAVERSAL',
+    severity: 'high',
+    pattern: /os\.path\.join\s*\([^)\n]*(?:request|input|param|data|body|query|get|post|args|form)/i,
+    message:
+      'os.path.join() called with what appears to be user-controlled input. A path like ' +
+      '"/etc/passwd" as a component overrides earlier segments. Validate and sanitise ' +
+      'all user-supplied path components.',
+  },
+
+  // ── Shell injection (additional patterns) ─────────────────────────────────────
+
+  // os.system with variable (not a string literal)
+  {
+    type: 'COMMAND_INJECTION',
+    severity: 'critical',
+    pattern: /os\.system\s*\([^)\n]*(?:request|input|param|data|body|query|get|post|args|form|\+|%|f['"'])/i,
+    message:
+      'os.system() called with a value that appears to include user input. User-controlled ' +
+      'shell commands allow arbitrary code execution. Use subprocess with a list of arguments ' +
+      'and shell=False.',
+  },
 ];
 
 /**
