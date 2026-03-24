@@ -28,9 +28,19 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Run tests with coverage (vitest + v8)
+      - name: Run vitest suite
+        run: npm run test:vitest
+
+      - name: Run vitest with coverage (v8)
         run: npm run test:coverage
-        continue-on-error: true
+
+      - name: Upload coverage report as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
 
       - name: Run security scan (SARIF)
         # Always produce the SARIF artifact even when findings exist (exit-code 0)
