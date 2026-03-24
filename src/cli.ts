@@ -24,8 +24,11 @@ import { Finding, printFindings, formatFindingsText, formatJSON, summarize, dedu
 import { detectUnsafeDeps } from './scanner/detectors/deps';
 import { buildSARIF } from './scanner/sarif';
 import { buildHTMLReport } from './scanner/htmlReport';
+import { parsePythonFile, scanPython } from './scanner/python-parser';
 
-const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+// JS/TS extensions use the TypeScript ESLint AST parser.
+// Python files use the regex-based python-parser module.
+const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py']);
 
 // ── .aiscanner ignore file ────────────────────────────────────────────────────
 
@@ -93,6 +96,21 @@ function collectFiles(targetPath: string, ignorePatterns: string[] = []): string
 }
 
 function scanFile(filePath: string): Finding[] {
+  const ext = path.extname(filePath).toLowerCase();
+
+  // Python files use the dedicated regex-based scanner (no AST parser needed).
+  if (ext === '.py') {
+    try {
+      const parsed = parsePythonFile(filePath);
+      return scanPython(parsed);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  [skip] ${filePath}: ${msg}`);
+      return [];
+    }
+  }
+
+  // JS/TS files use the TypeScript ESLint AST pipeline.
   try {
     const parsed = parseFile(filePath);
     return [
