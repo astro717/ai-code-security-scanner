@@ -398,7 +398,30 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
 
   try {
-    const patterns = Array.isArray(ignorePatterns) ? ignorePatterns.filter((p) => typeof p === 'string') : [];
+    // Base patterns from the request body (explicit caller-provided list).
+    const bodyPatterns = Array.isArray(ignorePatterns) ? ignorePatterns.filter((p) => typeof p === 'string') : [];
+
+    // Attempt to fetch .aiscanner from the repo root via the GitHub Contents API.
+    // This mirrors the CLI behaviour where .aiscanner patterns are loaded from the
+    // local filesystem. We fail silently so a missing file never blocks the scan.
+    let dotAiScannerPatterns: string[] = [];
+    try {
+      const aiScannerUrl = `${apiBase}/contents/.aiscanner?ref=${encodeURIComponent(branch)}`;
+      const rawContent = await githubGetText(aiScannerUrl);
+      dotAiScannerPatterns = rawContent
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith('#'));
+      if (dotAiScannerPatterns.length > 0) {
+        console.log(
+          `[scan-repo] Loaded ${dotAiScannerPatterns.length} pattern(s) from ${owner}/${repo}/.aiscanner`,
+        );
+      }
+    } catch {
+      // .aiscanner file not present or unreadable — ignore
+    }
+
+    const patterns = [...bodyPatterns, ...dotAiScannerPatterns];
     const collected: GHItem[] = [];
     await collectFiles(apiBase, '', branch, collected, 50, patterns);
 
