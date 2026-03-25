@@ -25,10 +25,12 @@ import { detectUnsafeDeps } from './scanner/detectors/deps';
 import { buildSARIF } from './scanner/sarif';
 import { buildHTMLReport } from './scanner/htmlReport';
 import { parsePythonFile, scanPython } from './scanner/python-parser';
+import { parseJavaFile, scanJava } from './scanner/java-parser';
 
 // JS/TS extensions use the TypeScript ESLint AST parser.
 // Python files use the regex-based python-parser module.
-const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py']);
+// Java files use the regex-based java-parser module.
+const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.java']);
 
 // ── .aiscanner ignore file ────────────────────────────────────────────────────
 
@@ -103,6 +105,18 @@ function scanFile(filePath: string): Finding[] {
     try {
       const parsed = parsePythonFile(filePath);
       return scanPython(parsed);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  [skip] ${filePath}: ${msg}`);
+      return [];
+    }
+  }
+
+  // Java files use the dedicated regex-based scanner (no Java parser needed).
+  if (ext === '.java') {
+    try {
+      const parsed = parseJavaFile(filePath);
+      return scanJava(parsed);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  [skip] ${filePath}: ${msg}`);
