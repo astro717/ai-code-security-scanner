@@ -30,6 +30,8 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   UNSAFE_DESERIALIZATION:'Untrusted data deserialized via pickle or equivalent — arbitrary code execution risk.',
   INSECURE_ASSERT:       'Security check implemented with assert, which is stripped in optimized mode.',
   INSECURE_BINDING:      'Server bound to 0.0.0.0, exposing the service on all network interfaces.',
+  XML_INJECTION:         'XML parser configured without disabling external entities — XXE attack surface.',
+  LDAP_INJECTION:        'LDAP query built with string concatenation from user-controlled input.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';

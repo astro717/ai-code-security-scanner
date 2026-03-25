@@ -28,6 +28,7 @@ import { buildSARIF } from './scanner/sarif';
 import { detectUnsafeDepsFromJson } from './scanner/detectors/deps';
 import { parsePythonCode, scanPython } from './scanner/python-parser';
 import { parseGoCode, scanGo } from './scanner/go-parser';
+import { parseJavaCode, scanJava } from './scanner/java-parser';
 
 // ── Anthropic AI explain ──────────────────────────────────────────────────────
 
@@ -403,33 +404,53 @@ app.post('/scan', scanLimiter, async (req, res) => {
     filename = path.basename(rawFilename);
   }
 
-  let parsed;
-  try {
-    parsed = parseCode(code, filename ?? 'input.tsx');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(400).json({ error: `Parse error: ${msg}` });
-    return;
-  }
+  const effectiveFilename = filename ?? 'input.tsx';
+  const ext = path.extname(effectiveFilename).toLowerCase();
 
-  let findings: FindingWithAI[] = [
-    ...detectSecrets(parsed),
-    ...detectSQLInjection(parsed),
-    ...detectShellInjection(parsed),
-    ...detectEval(parsed),
-    ...detectXSS(parsed),
-    ...detectPathTraversal(parsed),
-    ...detectPrototypePollution(parsed),
-    ...detectInsecureRandom(parsed),
-    ...detectOpenRedirect(parsed),
-    ...detectSSRF(parsed),
-    ...detectJWTSecrets(parsed),
-    ...detectJWTNoneAlgorithm(parsed),
-    ...detectCommandInjection(parsed),
-    ...detectCORSMisconfiguration(parsed),
-    ...detectReDoS(parsed),
-    ...detectWeakCrypto(parsed),
-  ].map((f) => ({ ...f, file: filename ?? 'input' }));
+  let findings: FindingWithAI[];
+
+  if (ext === '.java') {
+    // Java files use the dedicated regex-based Java scanner
+    const javaResult = parseJavaCode(code, effectiveFilename);
+    findings = scanJava(javaResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+  } else if (ext === '.py') {
+    // Python files use the dedicated regex-based Python scanner
+    const pyResult = parsePythonCode(code, effectiveFilename);
+    findings = scanPython(pyResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+  } else if (ext === '.go') {
+    // Go files use the dedicated regex-based Go scanner
+    const goResult = parseGoCode(code, effectiveFilename);
+    findings = scanGo(goResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+  } else {
+    // JS/TS files use the AST-based parser and detector suite
+    let parsed;
+    try {
+      parsed = parseCode(code, effectiveFilename);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(400).json({ error: `Parse error: ${msg}` });
+      return;
+    }
+
+    findings = [
+      ...detectSecrets(parsed),
+      ...detectSQLInjection(parsed),
+      ...detectShellInjection(parsed),
+      ...detectEval(parsed),
+      ...detectXSS(parsed),
+      ...detectPathTraversal(parsed),
+      ...detectPrototypePollution(parsed),
+      ...detectInsecureRandom(parsed),
+      ...detectOpenRedirect(parsed),
+      ...detectSSRF(parsed),
+      ...detectJWTSecrets(parsed),
+      ...detectJWTNoneAlgorithm(parsed),
+      ...detectCommandInjection(parsed),
+      ...detectCORSMisconfiguration(parsed),
+      ...detectReDoS(parsed),
+      ...detectWeakCrypto(parsed),
+    ].map((f) => ({ ...f, file: filename ?? 'input' }));
+  }
 
   // Scan package.json for unsafe deps if provided
   if (packageJson && typeof packageJson === 'string') {
@@ -563,7 +584,7 @@ async function collectFiles(
     if (isIgnoredByPatterns(item.path, ignorePatterns)) continue;
     if (item.type === 'file') {
       const ext = item.name.split('.').pop() ?? '';
-      if (['ts', 'tsx', 'js', 'jsx', 'py', 'go'].includes(ext) && item.size <= 200 * 1024) {
+      if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'java'].includes(ext) && item.size <= 200 * 1024) {
         collected.push(item);
       }
     } else if (item.type === 'dir') {
@@ -651,6 +672,9 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
           } else if (ext === '.go') {
             const parsed = parseGoCode(code, item.path);
             findings = scanGo(parsed);
+          } else if (ext === '.java') {
+            const parsed = parseJavaCode(code, item.path);
+            findings = scanJava(parsed);
           } else {
             // JS/TS — use AST-based detectors
             const parsed = parseCode(code, item.path);
