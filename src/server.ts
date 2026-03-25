@@ -35,7 +35,13 @@ interface FindingWithAI extends Finding {
 // the maximum time a single /scan?aiExplain=true request can block the server.
 const ANTHROPIC_REQUEST_TIMEOUT_MS = 30_000;
 
-async function anthropicRequest(body: object): Promise<unknown> {
+/**
+ * Makes a request to the Anthropic Messages API.
+ * @param body      - JSON request body
+ * @param apiKey    - Anthropic API key to use; falls back to ANTHROPIC_API_KEY env var
+ */
+async function anthropicRequest(body: object, apiKey?: string): Promise<unknown> {
+  const effectiveKey = apiKey ?? process.env.ANTHROPIC_API_KEY ?? '';
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const req = https.request({
@@ -45,7 +51,7 @@ async function anthropicRequest(body: object): Promise<unknown> {
       headers: {
         'Content-Type': 'application/json',
         'anthropic-version': '2023-06-01',
-        'x-api-key': process.env.ANTHROPIC_API_KEY ?? '',
+        'x-api-key': effectiveKey,
         'Content-Length': Buffer.byteLength(payload),
       },
     }, (res) => {
@@ -65,7 +71,7 @@ async function anthropicRequest(body: object): Promise<unknown> {
   });
 }
 
-async function explainFinding(finding: Finding): Promise<{ explanation: string; fixSuggestion: string }> {
+async function explainFinding(finding: Finding, apiKey?: string): Promise<{ explanation: string; fixSuggestion: string }> {
   const response = await anthropicRequest({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 512,
@@ -83,7 +89,7 @@ Respond with exactly this JSON structure:
 {"explanation": "2-sentence explanation of why this is dangerous and what could be exploited", "fixSuggestion": "the corrected code snippet, just the code, no explanation"}`,
       },
     ],
-  }) as { content?: Array<{ text?: string }> };
+  }, apiKey) as { content?: Array<{ text?: string }> };
 
   const text = response.content?.[0]?.text ?? '';
   try {
@@ -97,8 +103,14 @@ Respond with exactly this JSON structure:
   }
 }
 
-async function enrichWithAI(findings: Finding[]): Promise<FindingWithAI[]> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+/**
+ * Enriches up to 5 findings with AI-generated explanations.
+ * @param findings  - Findings to enrich
+ * @param apiKey    - Optional per-request Anthropic key; falls back to env var
+ */
+async function enrichWithAI(findings: Finding[], apiKey?: string): Promise<FindingWithAI[]> {
+  const effectiveKey = apiKey ?? process.env.ANTHROPIC_API_KEY;
+  if (!effectiveKey) {
     console.warn('[ai-explain] ANTHROPIC_API_KEY not set — skipping AI enrichment');
     return findings;
   }
@@ -113,7 +125,7 @@ async function enrichWithAI(findings: Finding[]): Promise<FindingWithAI[]> {
   await Promise.all(
     toEnrich.map(async (f) => {
       try {
-        const ai = await explainFinding(f);
+        const ai = await explainFinding(f, effectiveKey);
         enriched.set(f, { ...f, ...ai });
       } catch (err) {
         console.error(`[ai-explain] failed for ${f.type}:`, err);
@@ -215,6 +227,15 @@ app.post('/scan', scanLimiter, async (req, res) => {
     return;
   }
 
+  // Per-request Anthropic key: the caller may supply their own key via the
+  // X-Anthropic-Key header. This lets individual callers use ?aiExplain=true
+  // without the server having a shared ANTHROPIC_API_KEY. Falls back to the
+  // server-level env var when the header is absent.
+  const requestAnthropicKey = (() => {
+    const h = req.headers['x-anthropic-key'];
+    return typeof h === 'string' && h.length > 0 ? h : undefined;
+  })();
+
   const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes } = req.body as {
     code?: string;
     filename?: string;
@@ -297,9 +318,10 @@ app.post('/scan', scanLimiter, async (req, res) => {
     }
   }
 
-  // AI explain enrichment
+  // AI explain enrichment — uses per-request key (X-Anthropic-Key header) when
+  // present, otherwise falls back to the server-level ANTHROPIC_API_KEY env var.
   if (aiExplain && findings.length > 0) {
-    findings = await enrichWithAI(findings);
+    findings = await enrichWithAI(findings, requestAnthropicKey);
   }
 
   const scanSummary = findings.reduce<Record<string, number>>((acc, f) => {
