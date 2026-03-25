@@ -2,7 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.detectSQLInjection = detectSQLInjection;
 const SQL_FUNCTION_NAMES = /^(query|execute|raw|db|sql|run|all|get|prepare)$/i;
-const SQL_MEMBER_NAMES = /\.(query|execute|raw|run|all|get|prepare)\s*\(/;
+const SQL_MEMBER_NAMES = /\.(query|execute|raw|run|all|get|prepare)\s*\(/; // kept for reference
+// ORM raw-query methods: prisma.$queryRaw, prisma.$executeRaw, repository.query
+const ORM_RAW_METHODS = /^\$(queryRaw|executeRaw|queryRawUnsafe|executeRawUnsafe)$/;
 function walkNode(node, callback) {
     callback(node);
     for (const key of Object.keys(node)) {
@@ -43,35 +45,72 @@ function isSQLCallExpression(node) {
     }
     if (callee.type === 'MemberExpression') {
         const prop = callee.property;
-        if (prop.type === 'Identifier')
-            return SQL_FUNCTION_NAMES.test(prop.name);
+        if (prop.type === 'Identifier') {
+            return SQL_FUNCTION_NAMES.test(prop.name) || ORM_RAW_METHODS.test(prop.name);
+        }
     }
     return false;
 }
+function isORMTaggedTemplate(node) {
+    const tag = node.tag;
+    if (tag.type !== 'MemberExpression')
+        return false;
+    const prop = tag.property;
+    if (prop.type !== 'Identifier')
+        return false;
+    return ORM_RAW_METHODS.test(prop.name);
+}
 function detectSQLInjection(result) {
     const findings = [];
+    const reported = new Set();
     walkNode(result.ast, (node) => {
-        if (node.type !== 'CallExpression')
+        // Case 1: CallExpression — db.query(dynamic), repository.query(dynamic), prisma.$queryRaw(dynamic)
+        if (node.type === 'CallExpression') {
+            const call = node;
+            if (!isSQLCallExpression(call))
+                return;
+            if (call.arguments.length === 0)
+                return;
+            const firstArg = call.arguments[0];
+            if (firstArg.type === 'SpreadElement')
+                return;
+            if (isDynamic(firstArg)) {
+                const line = node.loc.start.line;
+                if (!reported.has(line)) {
+                    reported.add(line);
+                    findings.push({
+                        type: 'SQL_INJECTION',
+                        severity: 'critical',
+                        line,
+                        column: node.loc.start.column,
+                        snippet: result.lines[line - 1]?.trim() ?? '',
+                        message: 'Dynamic value passed directly to SQL query function. Use parameterized queries.',
+                    });
+                }
+            }
             return;
-        const call = node;
-        if (!isSQLCallExpression(call))
-            return;
-        if (call.arguments.length === 0)
-            return;
-        const firstArg = call.arguments[0];
-        if (firstArg.type === 'SpreadElement')
-            return;
-        if (isDynamic(firstArg)) {
-            const line = node.loc.start.line;
-            const snippet = result.lines[line - 1]?.trim() ?? '';
-            findings.push({
-                type: 'SQL_INJECTION',
-                severity: 'critical',
-                line,
-                column: node.loc.start.column,
-                snippet,
-                message: 'Dynamic value passed directly to SQL query function. Use parameterized queries.',
-            });
+        }
+        // Case 2: TaggedTemplateExpression — prisma.$queryRaw`SELECT ... ${expr}`
+        if (node.type === 'TaggedTemplateExpression') {
+            const tagged = node;
+            if (!isORMTaggedTemplate(tagged))
+                return;
+            // Only flag if the template has dynamic expressions
+            if (tagged.quasi.expressions.length > 0) {
+                const line = node.loc.start.line;
+                if (!reported.has(line)) {
+                    reported.add(line);
+                    findings.push({
+                        type: 'SQL_INJECTION',
+                        severity: 'critical',
+                        line,
+                        column: node.loc.start.column,
+                        snippet: result.lines[line - 1]?.trim() ?? '',
+                        message: 'ORM raw query (prisma.$queryRaw / $executeRaw) called with a dynamic template literal. ' +
+                            'Use Prisma.sql tagged template or parameterized inputs to prevent SQL injection.',
+                    });
+                }
+            }
         }
     });
     return findings;

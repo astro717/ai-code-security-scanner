@@ -1,27 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.detectEval = detectEval;
-function walkNode(node, callback) {
-    callback(node);
-    for (const key of Object.keys(node)) {
-        const child = node[key];
-        if (child && typeof child === 'object') {
-            if (Array.isArray(child)) {
-                child.forEach((c) => { if (c && typeof c === 'object' && 'type' in c)
-                    walkNode(c, callback); });
-            }
-            else if ('type' in child) {
-                walkNode(child, callback);
-            }
-        }
-    }
-}
+const utils_1 = require("../utils");
 function isStringLiteral(node) {
     return node.type === 'Literal' && typeof node.value === 'string';
 }
 function detectEval(result) {
     const findings = [];
-    walkNode(result.ast, (node) => {
+    (0, utils_1.walkNode)(result.ast, (node) => {
         // eval(x) where x is not a string literal
         if (node.type === 'CallExpression') {
             const call = node;

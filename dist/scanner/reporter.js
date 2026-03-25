@@ -1,8 +1,56 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.KNOWN_TYPES = void 0;
+exports.deduplicateFindings = deduplicateFindings;
 exports.summarize = summarize;
 exports.formatJSON = formatJSON;
+exports.formatFindingsText = formatFindingsText;
 exports.printFindings = printFindings;
+/**
+ * The canonical set of finding type strings emitted by the built-in detectors.
+ * Export this constant so consumers (e.g. CLI --ignore-type validation) can
+ * check whether a user-supplied type string is recognised.
+ */
+exports.KNOWN_TYPES = new Set([
+    'COMMAND_INJECTION',
+    'CORS_MISCONFIGURATION',
+    'EVAL_INJECTION',
+    'INSECURE_RANDOM',
+    'JWT_DECODE_NO_VERIFY',
+    'JWT_HARDCODED_SECRET',
+    'JWT_NONE_ALGORITHM',
+    'JWT_WEAK_SECRET',
+    'OPEN_REDIRECT',
+    'PATH_TRAVERSAL',
+    'PROTOTYPE_POLLUTION',
+    'REDOS',
+    'SECRET_HARDCODED',
+    'SHELL_INJECTION',
+    'SQL_INJECTION',
+    'SSRF',
+    'UNSAFE_DEPENDENCY',
+    'VULNERABLE_DEPENDENCY',
+    'WEAK_CRYPTO',
+    'XSS',
+    'UNSAFE_DESERIALIZATION',
+    'INSECURE_ASSERT',
+    'INSECURE_BINDING',
+]);
+/**
+ * Removes duplicate findings based on a stable key of (type, file, line, column).
+ * When multiple detectors independently flag the same code location with the same
+ * finding type, only the first occurrence is kept. Preserves original order.
+ */
+function deduplicateFindings(findings) {
+    const seen = new Set();
+    return findings.filter((f) => {
+        const key = `${f.type}|${f.file ?? ''}|${f.line}|${f.column}`;
+        if (seen.has(key))
+            return false;
+        seen.add(key);
+        return true;
+    });
+}
 function summarize(findings) {
     return {
         critical: findings.filter((f) => f.severity === 'critical').length,
@@ -27,6 +75,41 @@ const SEVERITY_LABELS = {
     medium: 'MEDIUM',
     low: 'LOW',
 };
+/**
+ * Returns the same structured text that `printFindings` writes to the
+ * terminal, but without ANSI colour codes so it is suitable for writing to a
+ * file via --output.
+ */
+function formatFindingsText(findings, targetPath) {
+    const lines = [];
+    lines.push(`\nScanning: ${targetPath}\n`);
+    if (findings.length === 0) {
+        lines.push('No vulnerabilities found.\n');
+        return lines.join('\n');
+    }
+    for (const f of findings) {
+        const fileRef = f.file ? `${f.file}:` : '';
+        lines.push(`  [${SEVERITY_LABELS[f.severity]}] [${f.type}] ${fileRef}line ${f.line}`);
+        lines.push(`  -> ${f.message}`);
+        if (f.snippet) {
+            lines.push(`     ${f.snippet.slice(0, 80)}`);
+        }
+        lines.push('');
+    }
+    const summary = summarize(findings);
+    const parts = [];
+    if (summary.critical)
+        parts.push(`${summary.critical} critical`);
+    if (summary.high)
+        parts.push(`${summary.high} high`);
+    if (summary.medium)
+        parts.push(`${summary.medium} medium`);
+    if (summary.low)
+        parts.push(`${summary.low} low`);
+    lines.push(`Found ${summary.total} issue(s): ${parts.join(' · ')}`);
+    lines.push('');
+    return lines.join('\n');
+}
 async function printFindings(findings, targetPath) {
     const chalk = await getChalk();
     const severityColor = (s, text) => {

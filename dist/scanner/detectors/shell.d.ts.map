@@ -1,1 +1,1 @@
-{"version":3,"file":"shell.d.ts","sourceRoot":"","sources":["../../../src/scanner/detectors/shell.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,WAAW,EAAE,MAAM,WAAW,CAAC;AACxC,OAAO,EAAE,OAAO,EAAE,MAAM,aAAa,CAAC;AAmCtC,wBAAgB,oBAAoB,CAAC,MAAM,EAAE,WAAW,GAAG,OAAO,EAAE,CA+BnE"}
+{"version":3,"file":"shell.d.ts","sourceRoot":"","sources":["../../../src/scanner/detectors/shell.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,WAAW,EAAE,MAAM,WAAW,CAAC;AACxC,OAAO,EAAE,OAAO,EAAE,MAAM,aAAa,CAAC;AAyCtC,wBAAgB,oBAAoB,CAAC,MAAM,EAAE,WAAW,GAAG,OAAO,EAAE,CA8BnE"}

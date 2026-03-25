@@ -1,7 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.detectShellInjection = detectShellInjection;
-const SHELL_FUNCTIONS = new Set(['exec', 'execSync', 'spawn', 'spawnSync', 'execFile', 'execFileSync']);
+const utils_1 = require("../utils");
+// execFile/execFileSync and spawn/spawnSync are intentionally excluded: they do
+// NOT invoke a shell — they take a file path and an args array directly, so the
+// risk profile is COMMAND_INJECTION (handled by commandInjection.ts), not
+// SHELL_INJECTION. Including them here would produce false positives with the
+// wrong vulnerability type.
+const SHELL_FUNCTIONS = new Set(['exec', 'execSync']);
 function walkNode(node, callback) {
     callback(node);
     for (const key of Object.keys(node)) {
@@ -47,10 +53,9 @@ function detectShellInjection(result) {
         if (firstArg.type === 'SpreadElement')
             return;
         // exec/execSync: first arg should be a plain string literal
-        // spawn/spawnSync: first arg is command, second is args array — command still shouldn't be dynamic
         if (!isSimpleStringLiteral(firstArg)) {
             const line = node.loc.start.line;
-            const snippet = result.lines[line - 1]?.trim() ?? '';
+            const snippet = (0, utils_1.getSnippet)(result, line);
             findings.push({
                 type: 'SHELL_INJECTION',
                 severity: 'high',

@@ -1,1 +1,1 @@
-{"version":3,"file":"eval.d.ts","sourceRoot":"","sources":["../../../src/scanner/detectors/eval.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,WAAW,EAAE,MAAM,WAAW,CAAC;AACxC,OAAO,EAAE,OAAO,EAAE,MAAM,aAAa,CAAC;AAoBtC,wBAAgB,UAAU,CAAC,MAAM,EAAE,WAAW,GAAG,OAAO,EAAE,CAwEzD"}
+{"version":3,"file":"eval.d.ts","sourceRoot":"","sources":["../../../src/scanner/detectors/eval.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,WAAW,EAAE,MAAM,WAAW,CAAC;AACxC,OAAO,EAAE,OAAO,EAAE,MAAM,aAAa,CAAC;AAOtC,wBAAgB,UAAU,CAAC,MAAM,EAAE,WAAW,GAAG,OAAO,EAAE,CAwEzD"}
