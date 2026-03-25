@@ -316,6 +316,12 @@ const scanRepoLimiter = rateLimit({
  * slate for each test suite regardless of execution order.
  */
 export async function resetRateLimiters(): Promise<void> {
+  if (process.env.NODE_ENV !== 'test') {
+    throw new Error(
+      'resetRateLimiters() is only available in test mode (NODE_ENV=test). ' +
+      'Calling this in production would disable rate limiting for all clients.',
+    );
+  }
   await Promise.all([
     scanLimiter.resetKey('127.0.0.1'),
     scanRepoLimiter.resetKey('127.0.0.1'),
