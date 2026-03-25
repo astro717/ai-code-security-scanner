@@ -26,6 +26,8 @@ import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
 import { summarize, Finding, deduplicateFindings } from './scanner/reporter';
 import { buildSARIF } from './scanner/sarif';
 import { detectUnsafeDepsFromJson } from './scanner/detectors/deps';
+import { parsePythonCode, scanPython } from './scanner/python-parser';
+import { parseGoCode, scanGo } from './scanner/go-parser';
 
 // ── Anthropic AI explain ──────────────────────────────────────────────────────
 
@@ -540,7 +542,7 @@ async function collectFiles(
     if (isIgnoredByPatterns(item.path, ignorePatterns)) continue;
     if (item.type === 'file') {
       const ext = item.name.split('.').pop() ?? '';
-      if (['ts', 'tsx', 'js', 'jsx'].includes(ext) && item.size <= 200 * 1024) {
+      if (['ts', 'tsx', 'js', 'jsx', 'py', 'go'].includes(ext) && item.size <= 200 * 1024) {
         collected.push(item);
       }
     } else if (item.type === 'dir') {
@@ -619,25 +621,37 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       collected.map(async (item) => {
         try {
           const code = await githubGetText(`${apiBase}/contents/${item.path}?ref=${encodeURIComponent(branch)}`);
-          const parsed = parseCode(code, item.path);
-          const findings: Finding[] = [
-            ...detectSecrets(parsed),
-            ...detectSQLInjection(parsed),
-            ...detectShellInjection(parsed),
-            ...detectEval(parsed),
-            ...detectXSS(parsed),
-            ...detectPathTraversal(parsed),
-            ...detectPrototypePollution(parsed),
-            ...detectInsecureRandom(parsed),
-            ...detectOpenRedirect(parsed),
-            ...detectSSRF(parsed),
-            ...detectJWTSecrets(parsed),
-            ...detectJWTNoneAlgorithm(parsed),
-            ...detectCommandInjection(parsed),
-            ...detectCORSMisconfiguration(parsed),
-            ...detectReDoS(parsed),
-            ...detectWeakCrypto(parsed),
-          ].map((f) => ({ ...f, file: item.path }));
+          const ext = path.extname(item.name).toLowerCase();
+          let findings: Finding[];
+
+          if (ext === '.py') {
+            const parsed = parsePythonCode(code, item.path);
+            findings = scanPython(parsed);
+          } else if (ext === '.go') {
+            const parsed = parseGoCode(code, item.path);
+            findings = scanGo(parsed);
+          } else {
+            // JS/TS — use AST-based detectors
+            const parsed = parseCode(code, item.path);
+            findings = [
+              ...detectSecrets(parsed),
+              ...detectSQLInjection(parsed),
+              ...detectShellInjection(parsed),
+              ...detectEval(parsed),
+              ...detectXSS(parsed),
+              ...detectPathTraversal(parsed),
+              ...detectPrototypePollution(parsed),
+              ...detectInsecureRandom(parsed),
+              ...detectOpenRedirect(parsed),
+              ...detectSSRF(parsed),
+              ...detectJWTSecrets(parsed),
+              ...detectJWTNoneAlgorithm(parsed),
+              ...detectCommandInjection(parsed),
+              ...detectCORSMisconfiguration(parsed),
+              ...detectReDoS(parsed),
+              ...detectWeakCrypto(parsed),
+            ].map((f) => ({ ...f, file: item.path }));
+          }
           allFindings.push(...findings);
         } catch {
           // Skip files that fail to parse
