@@ -204,11 +204,12 @@ app.post('/scan', scanLimiter, async (req, res) => {
     return;
   }
 
-  const { code, filename: rawFilename, packageJson, aiExplain } = req.body as {
+  const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes } = req.body as {
     code?: string;
     filename?: string;
     packageJson?: string;
     aiExplain?: boolean;
+    ignoreTypes?: string[];
   };
 
   if (!code || typeof code !== 'string') {
@@ -272,6 +273,18 @@ app.post('/scan', scanLimiter, async (req, res) => {
 
   // Deduplicate by (type, file, line, column) before reporting.
   findings = deduplicateFindings(findings) as FindingWithAI[];
+
+  // Optional ignoreTypes suppression — mirrors the CLI --ignore-type flag.
+  // Only accepts an array of strings; malformed values are silently ignored so
+  // the endpoint degrades gracefully for clients that send unexpected shapes.
+  if (Array.isArray(ignoreTypes) && ignoreTypes.length > 0) {
+    const typesToIgnore = new Set(
+      ignoreTypes.filter((t) => typeof t === 'string').map((t) => t.trim().toUpperCase()),
+    );
+    if (typesToIgnore.size > 0) {
+      findings = findings.filter((f) => !typesToIgnore.has(f.type));
+    }
+  }
 
   // AI explain enrichment
   if (aiExplain && findings.length > 0) {
