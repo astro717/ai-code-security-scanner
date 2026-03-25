@@ -44,11 +44,14 @@ interface PythonPattern {
 }
 
 const PYTHON_PATTERNS: PythonPattern[] = [
-  // SQL injection via string formatting / concatenation
+  // SQL injection via string formatting / concatenation.
+  // Scans to end-of-call (closing paren) rather than end-of-quote so that
+  // single quotes embedded inside a double-quoted SQL string — e.g.
+  // "WHERE name = '" + username — do not prematurely terminate the match.
   {
     type: 'SQL_INJECTION',
     severity: 'critical',
-    pattern: /\.execute\s*\(\s*(?:f['""]|['""][^'"")]*%\s*\(|['""][^'"")]*\+)/,
+    pattern: /\.execute\s*\(\s*(?:f['"]|['"][^)\n]*(?:\+|%\s*\())/,
     message:
       'Python SQL execute() call uses string interpolation or concatenation. ' +
       'Use parameterised queries (cursor.execute(query, params)) instead.',
@@ -216,11 +219,15 @@ const PYTHON_PATTERNS: PythonPattern[] = [
 
   // ── Path traversal (additional pattern) ──────────────────────────────────────
 
-  // os.path.join with user-controlled first argument
+  // os.path.join with user-controlled argument.
+  // Narrowed to explicit taint sources (request/req objects, Flask/Django
+  // args/form/values dicts, and common parameter variable names). Generic
+  // local variable names like "safe_name" are intentionally excluded so that
+  // properly-sanitised paths do not produce false positives.
   {
     type: 'PATH_TRAVERSAL',
     severity: 'high',
-    pattern: /os\.path\.join\s*\([^)\n]*(?:request|input|param|data|body|query|get|post|args|form)/i,
+    pattern: /os\.path\.join\s*\([^)\n]*(?:request\.|req\.|flask\.request|args\[|form\[|request\.(?:GET|POST|args|form|values|params|data|files))/i,
     message:
       'os.path.join() called with what appears to be user-controlled input. A path like ' +
       '"/etc/passwd" as a component overrides earlier segments. Validate and sanitise ' +
