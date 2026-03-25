@@ -418,8 +418,9 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       }),
     );
 
-    console.log(`[scan-repo] ${owner}/${repo}@${branch} — ${collected.length} files → ${allFindings.length} findings`);
-    res.json({ findings: allFindings, summary: summarize(allFindings), filesScanned: collected.length });
+    const dedupedFindings = deduplicateFindings(allFindings);
+    console.log(`[scan-repo] ${owner}/${repo}@${branch} — ${collected.length} files → ${dedupedFindings.length} findings (deduped from ${allFindings.length})`);
+    res.json({ findings: dedupedFindings, summary: summarize(dedupedFindings), filesScanned: collected.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[scan-repo] error: ${msg}`);
