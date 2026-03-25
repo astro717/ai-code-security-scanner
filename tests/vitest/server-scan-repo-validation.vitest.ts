@@ -138,6 +138,7 @@ beforeAll(async () => {
 
   delete process.env.SERVER_API_KEY;
   process.env.PORT = String(serverPort);
+  process.env.NODE_ENV = 'test';
 
   const origWarn = console.warn;
   const origLog = console.log;
@@ -162,6 +163,12 @@ beforeAll(async () => {
 
   console.warn = origWarn;
   console.log = origLog;
+
+  // Reset rate-limiter hit counters so prior test suites running in the same
+  // process (shared module cache) cannot exhaust the /scan-repo budget.
+  if (typeof mod?.resetRateLimiters === 'function') {
+    await mod.resetRateLimiters();
+  }
 }, 10_000);
 
 afterAll(() => {
