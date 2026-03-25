@@ -48,6 +48,10 @@
       {
         "command": "aiSecScan.scanWorkspace",
         "title": "AI Security: Scan Workspace"
+      },
+      {
+        "command": "aiSecScan.showAIFix",
+        "title": "AI Security: Show AI Fix"
       }
     ],
     "keybindings": [
