@@ -2,6 +2,13 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // Emit both human-readable output and JUnit XML so CI platforms
+    // (Jenkins, GitLab, Azure DevOps) can render per-test pass/fail results
+    // directly in the PR UI without additional tooling.
+    reporters: ['default', 'junit'],
+    outputFile: {
+      junit: 'coverage/junit.xml',
+    },
     // Only include the vitest-native test files under tests/vitest/.
     // The existing custom runner (tests/scanner.test.ts) uses its own
     // test() / expect() API and calls process.exit() — it is kept for
