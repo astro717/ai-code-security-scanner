@@ -92,9 +92,10 @@ const JAVA_PATTERNS = [
     {
         type: 'COMMAND_INJECTION',
         severity: 'critical',
-        pattern: /Runtime\.getRuntime\(\)\.exec\s*\(\s*(?!")[^)]*(?:request|req\.|param|input|getParameter)/i,
-        message: 'Runtime.exec() called with what appears to be user-controlled input. ' +
-            'Validate and sanitise all arguments before passing them to external commands.',
+        pattern: /Runtime\.getRuntime\s*\(\s*\)\.exec\s*\(\s*(?!["'])[a-zA-Z]/,
+        message: 'Runtime.exec() called with a non-literal argument. If any part of the command is ' +
+            'user-controlled, this allows arbitrary command execution. Use ProcessBuilder with ' +
+            'a list of arguments and avoid shell interpretation.',
     },
     {
         type: 'COMMAND_INJECTION',
@@ -138,7 +139,7 @@ const JAVA_PATTERNS = [
     {
         type: 'INSECURE_RANDOM',
         severity: 'medium',
-        pattern: /new\s+Random\s*\(/,
+        pattern: /new\s+(?:java\.util\.)?Random\s*\(/,
         message: 'java.util.Random is not cryptographically secure. For tokens, passwords, ' +
             'or session IDs, use java.security.SecureRandom instead.',
     },
@@ -174,6 +175,30 @@ const JAVA_PATTERNS = [
         pattern: /\.eval\s*\(\s*(?!")[^)]*(?:request|req\.|param|getParameter|input)/i,
         message: 'ScriptEngine.eval() called with user-controlled input. This executes arbitrary ' +
             'code and must never receive untrusted input.',
+    },
+    // XXE (XML external entity injection)
+    {
+        type: 'XML_INJECTION',
+        severity: 'critical',
+        pattern: /DocumentBuilderFactory\.newInstance\s*\(\s*\)/,
+        message: 'DocumentBuilderFactory created without disabling external entity processing. ' +
+            'This may allow XXE attacks that read local files or trigger SSRF. ' +
+            'Call factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true).',
+    },
+    {
+        type: 'XML_INJECTION',
+        severity: 'high',
+        pattern: /SAXParserFactory\.newInstance\s*\(\s*\)/,
+        message: 'SAXParserFactory created without configuring secure processing. ' +
+            'Enable FEATURE_SECURE_PROCESSING and disable external entity resolution to prevent XXE.',
+    },
+    // LDAP injection
+    {
+        type: 'LDAP_INJECTION',
+        severity: 'high',
+        pattern: /ctx\.search\s*\([^)]*\+/,
+        message: 'LDAP DirContext.search() called with a concatenated filter string. ' +
+            'User input in LDAP filters allows LDAP injection. Use parameterised queries.',
     },
 ];
 /**

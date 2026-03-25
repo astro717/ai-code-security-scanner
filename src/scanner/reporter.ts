@@ -29,6 +29,8 @@ export const KNOWN_TYPES = new Set([
   'UNSAFE_DESERIALIZATION',
   'INSECURE_ASSERT',
   'INSECURE_BINDING',
+  'XML_INJECTION',
+  'LDAP_INJECTION',
 ]);
 
 export interface Finding {

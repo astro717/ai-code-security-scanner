@@ -35,6 +35,8 @@ exports.KNOWN_TYPES = new Set([
     'UNSAFE_DESERIALIZATION',
     'INSECURE_ASSERT',
     'INSECURE_BINDING',
+    'XML_INJECTION',
+    'LDAP_INJECTION',
 ]);
 /**
  * Removes duplicate findings based on a stable key of (type, file, line, column).

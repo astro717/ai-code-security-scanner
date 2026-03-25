@@ -35,6 +35,7 @@ const sarif_1 = require("./scanner/sarif");
 const deps_1 = require("./scanner/detectors/deps");
 const python_parser_1 = require("./scanner/python-parser");
 const go_parser_1 = require("./scanner/go-parser");
+const java_parser_1 = require("./scanner/java-parser");
 // LLM calls can be slow — 30 s gives ample time for a response while bounding
 // the maximum time a single /scan?aiExplain=true request can block the server.
 const ANTHROPIC_REQUEST_TIMEOUT_MS = 30000;
@@ -343,33 +344,54 @@ app.post('/scan', scanLimiter, async (req, res) => {
         // Strip any remaining path components — only keep the base name
         filename = path_1.default.basename(rawFilename);
     }
-    let parsed;
-    try {
-        parsed = (0, parser_1.parseCode)(code, filename ?? 'input.tsx');
+    const effectiveFilename = filename ?? 'input.tsx';
+    const ext = path_1.default.extname(effectiveFilename).toLowerCase();
+    let findings;
+    if (ext === '.java') {
+        // Java files use the dedicated regex-based Java scanner
+        const javaResult = (0, java_parser_1.parseJavaCode)(code, effectiveFilename);
+        findings = (0, java_parser_1.scanJava)(javaResult).map((f) => ({ ...f, file: filename ?? 'input' }));
     }
-    catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.status(400).json({ error: `Parse error: ${msg}` });
-        return;
+    else if (ext === '.py') {
+        // Python files use the dedicated regex-based Python scanner
+        const pyResult = (0, python_parser_1.parsePythonCode)(code, effectiveFilename);
+        findings = (0, python_parser_1.scanPython)(pyResult).map((f) => ({ ...f, file: filename ?? 'input' }));
     }
-    let findings = [
-        ...(0, secrets_1.detectSecrets)(parsed),
-        ...(0, sql_1.detectSQLInjection)(parsed),
-        ...(0, shell_1.detectShellInjection)(parsed),
-        ...(0, eval_1.detectEval)(parsed),
-        ...(0, xss_1.detectXSS)(parsed),
-        ...(0, pathTraversal_1.detectPathTraversal)(parsed),
-        ...(0, prototypePollution_1.detectPrototypePollution)(parsed),
-        ...(0, insecureRandom_1.detectInsecureRandom)(parsed),
-        ...(0, openRedirect_1.detectOpenRedirect)(parsed),
-        ...(0, ssrf_1.detectSSRF)(parsed),
-        ...(0, jwt_1.detectJWTSecrets)(parsed),
-        ...(0, jwtNone_1.detectJWTNoneAlgorithm)(parsed),
-        ...(0, commandInjection_1.detectCommandInjection)(parsed),
-        ...(0, cors_2.detectCORSMisconfiguration)(parsed),
-        ...(0, redos_1.detectReDoS)(parsed),
-        ...(0, weakCrypto_1.detectWeakCrypto)(parsed),
-    ].map((f) => ({ ...f, file: filename ?? 'input' }));
+    else if (ext === '.go') {
+        // Go files use the dedicated regex-based Go scanner
+        const goResult = (0, go_parser_1.parseGoCode)(code, effectiveFilename);
+        findings = (0, go_parser_1.scanGo)(goResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+    }
+    else {
+        // JS/TS files use the AST-based parser and detector suite
+        let parsed;
+        try {
+            parsed = (0, parser_1.parseCode)(code, effectiveFilename);
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            res.status(400).json({ error: `Parse error: ${msg}` });
+            return;
+        }
+        findings = [
+            ...(0, secrets_1.detectSecrets)(parsed),
+            ...(0, sql_1.detectSQLInjection)(parsed),
+            ...(0, shell_1.detectShellInjection)(parsed),
+            ...(0, eval_1.detectEval)(parsed),
+            ...(0, xss_1.detectXSS)(parsed),
+            ...(0, pathTraversal_1.detectPathTraversal)(parsed),
+            ...(0, prototypePollution_1.detectPrototypePollution)(parsed),
+            ...(0, insecureRandom_1.detectInsecureRandom)(parsed),
+            ...(0, openRedirect_1.detectOpenRedirect)(parsed),
+            ...(0, ssrf_1.detectSSRF)(parsed),
+            ...(0, jwt_1.detectJWTSecrets)(parsed),
+            ...(0, jwtNone_1.detectJWTNoneAlgorithm)(parsed),
+            ...(0, commandInjection_1.detectCommandInjection)(parsed),
+            ...(0, cors_2.detectCORSMisconfiguration)(parsed),
+            ...(0, redos_1.detectReDoS)(parsed),
+            ...(0, weakCrypto_1.detectWeakCrypto)(parsed),
+        ].map((f) => ({ ...f, file: filename ?? 'input' }));
+    }
     // Scan package.json for unsafe deps if provided
     if (packageJson && typeof packageJson === 'string') {
         const depsFindings = (0, deps_1.detectUnsafeDepsFromJson)(packageJson);
@@ -483,7 +505,7 @@ async function collectFiles(apiBase, dirPath, branch, collected, max, ignorePatt
             continue;
         if (item.type === 'file') {
             const ext = item.name.split('.').pop() ?? '';
-            if (['ts', 'tsx', 'js', 'jsx', 'py', 'go'].includes(ext) && item.size <= 200 * 1024) {
+            if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'java'].includes(ext) && item.size <= 200 * 1024) {
                 collected.push(item);
             }
         }
@@ -551,6 +573,10 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
                 else if (ext === '.go') {
                     const parsed = (0, go_parser_1.parseGoCode)(code, item.path);
                     findings = (0, go_parser_1.scanGo)(parsed);
+                }
+                else if (ext === '.java') {
+                    const parsed = (0, java_parser_1.parseJavaCode)(code, item.path);
+                    findings = (0, java_parser_1.scanJava)(parsed);
                 }
                 else {
                     // JS/TS — use AST-based detectors
