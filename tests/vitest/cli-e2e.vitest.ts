@@ -32,7 +32,12 @@ describe('CLI E2E — full scan pipeline', () => {
     const cliMtime = fs.existsSync(DIST_CLI) ? fs.statSync(DIST_CLI).mtimeMs : 0;
     const srcMtime = fs.statSync(path.join(PROJECT_ROOT, 'src', 'cli.ts')).mtimeMs;
     if (cliMtime < srcMtime) {
-      execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'pipe' });
+      execSync('npm run build', {
+        cwd: PROJECT_ROOT,
+        stdio: 'pipe',
+        timeout: 120_000,         // 2 min cap — prevent hanging tsc from blocking CI indefinitely
+        maxBuffer: 10 * 1024 * 1024, // 10 MB — avoid truncation on verbose tsc output
+      });
     }
   }, 60_000);
 
