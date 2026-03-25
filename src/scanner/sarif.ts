@@ -23,6 +23,9 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   WEAK_CRYPTO:           'Weak hashing algorithm (MD5, SHA-1) used for security purposes.',
   UNSAFE_DEPENDENCY:     'Dependency pinned to an unpinned or missing-lockfile version.',
   VULNERABLE_DEPENDENCY: 'Dependency version matches a known CVE.',
+  UNSAFE_DESERIALIZATION:'Untrusted data deserialized via pickle or equivalent — arbitrary code execution risk.',
+  INSECURE_ASSERT:       'Security check implemented with assert, which is stripped in optimized mode.',
+  INSECURE_BINDING:      'Server bound to 0.0.0.0, exposing the service on all network interfaces.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';

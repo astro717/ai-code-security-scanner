@@ -99,7 +99,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
   },
   // Hardcoded secrets (password/token/secret = literal string)
   {
-    type: 'SECRET',
+    type: 'SECRET_HARDCODED',
     severity: 'high',
     pattern: /(?:password|passwd|secret|token|api_key|apikey)\s*=\s*['"][^'"]{4,}['"]/i,
     message:

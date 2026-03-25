@@ -26,6 +26,9 @@ export const KNOWN_TYPES = new Set([
   'VULNERABLE_DEPENDENCY',
   'WEAK_CRYPTO',
   'XSS',
+  'UNSAFE_DESERIALIZATION',
+  'INSECURE_ASSERT',
+  'INSECURE_BINDING',
 ]);
 
 export interface Finding {
