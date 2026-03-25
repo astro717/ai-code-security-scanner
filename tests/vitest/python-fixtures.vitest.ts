@@ -19,36 +19,10 @@ describe('Python scanner — vulnerable.py fixture', () => {
   const findings = scanPython(result);
   const types = new Set(findings.map((f) => f.type));
 
+  // ── Broad smoke tests ───────────────────────────────────────────────────────
+
   test('produces at least one finding', () => {
     expect(findings.length).toBeGreaterThan(0);
-  });
-
-  test('detects SQL_INJECTION', () => {
-    expect(types.has('SQL_INJECTION')).toBe(true);
-  });
-
-  test('detects COMMAND_INJECTION', () => {
-    expect(types.has('COMMAND_INJECTION')).toBe(true);
-  });
-
-  test('detects EVAL_INJECTION', () => {
-    expect(types.has('EVAL_INJECTION')).toBe(true);
-  });
-
-  test('detects UNSAFE_DESERIALIZATION', () => {
-    expect(types.has('UNSAFE_DESERIALIZATION')).toBe(true);
-  });
-
-  test('detects WEAK_CRYPTO', () => {
-    expect(types.has('WEAK_CRYPTO')).toBe(true);
-  });
-
-  test('detects PATH_TRAVERSAL', () => {
-    expect(types.has('PATH_TRAVERSAL')).toBe(true);
-  });
-
-  test('detects SSRF', () => {
-    expect(types.has('SSRF')).toBe(true);
   });
 
   test('every finding has a line number, severity, and message', () => {
@@ -59,6 +33,67 @@ describe('Python scanner — vulnerable.py fixture', () => {
       expect(typeof f.message).toBe('string');
       expect(f.message.length).toBeGreaterThan(0);
     }
+  });
+
+  // ── Per-type individual tests ────────────────────────────────────────────────
+  // Each test targets a specific vulnerability type, checks it is detected at
+  // least once, and asserts the expected severity. Line numbers are also checked
+  // to catch regressions where the detector fires on the wrong location.
+
+  test('SQL_INJECTION — detects execute() with string concatenation (line 16)', () => {
+    const hits = findings.filter((f) => f.type === 'SQL_INJECTION');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('critical');
+    expect(hits[0].line).toBe(16);
+  });
+
+  test('COMMAND_INJECTION — detects os.system() with variable argument (line 21)', () => {
+    const hits = findings.filter((f) => f.type === 'COMMAND_INJECTION');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('critical');
+    expect(hits[0].line).toBe(21);
+  });
+
+  test('EVAL_INJECTION — detects eval() with dynamic argument (line 25)', () => {
+    const hits = findings.filter((f) => f.type === 'EVAL_INJECTION');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('critical');
+    expect(hits[0].line).toBe(25);
+  });
+
+  test('UNSAFE_DESERIALIZATION — detects pickle.loads() (line 29)', () => {
+    const hits = findings.filter((f) => f.type === 'UNSAFE_DESERIALIZATION');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('critical');
+    expect(hits[0].line).toBe(29);
+  });
+
+  test('WEAK_CRYPTO — detects hashlib.md5() (line 33)', () => {
+    const hits = findings.filter((f) => f.type === 'WEAK_CRYPTO');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('high');
+    expect(hits[0].line).toBe(33);
+  });
+
+  test('PATH_TRAVERSAL — detects open() with path concatenation (line 37)', () => {
+    const hits = findings.filter((f) => f.type === 'PATH_TRAVERSAL');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('high');
+    expect(hits[0].line).toBe(37);
+  });
+
+  test('SSRF — detects requests.get() with variable URL (line 42)', () => {
+    const hits = findings.filter((f) => f.type === 'SSRF');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('high');
+    expect(hits[0].line).toBe(42);
+  });
+
+  test('SECRET — detects hardcoded api_key assignment (line 46)', () => {
+    const hits = findings.filter((f) => f.type === 'SECRET');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('high');
+    expect(hits[0].line).toBe(46);
   });
 });
 

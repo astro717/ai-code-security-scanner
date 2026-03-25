@@ -40,3 +40,6 @@ def read_file(filename):
 # SSRF: requests.get with user-controlled URL
 def fetch_url(url):
     return requests.get(url)
+
+# SECRET_HARDCODED: API key stored as a literal string
+api_key = "sk-abcdef1234567890abcdef1234567890"
