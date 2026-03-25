@@ -27,6 +27,7 @@ import { buildHTMLReport } from './scanner/htmlReport';
 import { parsePythonFile, scanPython } from './scanner/python-parser';
 import { parseGoFile, scanGo } from './scanner/go-parser';
 import { parseJavaFile, scanJava } from './scanner/java-parser';
+import { initCache, persistCache } from './scanner/scan-cache';
 import { contentHash, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/cache';
 
 // JS/TS extensions use the TypeScript ESLint AST parser.
@@ -108,12 +109,11 @@ function scanFile(filePath: string): Finding[] {
   } catch {
     return [];
   }
-  const hash = contentHash(fileContent);
-  const cached = getCachedFindings(filePath, hash);
+  const cached = getCachedFindings(filePath, fileContent);
   if (cached) return cached;
 
   const findings = scanFileUncached(filePath);
-  setCachedFindings(filePath, hash, findings);
+  setCachedFindings(filePath, fileContent, findings);
   return findings;
 }
 
@@ -356,6 +356,9 @@ function startWatchMode(
     }
   }
 
+  // Initialise the disk-backed scan cache so results survive across sessions.
+  initCache();
+
   // Seed cache with initial scan (silent)
   const initialFiles = collectFiles(targetPath, ignorePatterns);
   console.error(`[watch] Watching ${initialFiles.length} file(s) in ${targetPath}`);
@@ -391,9 +394,20 @@ function startWatchMode(
     process.exit(1);
   }
 
+  // Persist the scan cache to disk every 60 seconds so that long-running
+  // watch sessions contribute cached results to subsequent one-shot scans.
+  const persistInterval = setInterval(() => {
+    persistCache();
+  }, 60_000);
+  persistInterval.unref();
+
   process.on('SIGINT', () => {
     console.log('\n[watch] Stopping.');
+    clearInterval(persistInterval);
     watchers.forEach((w) => w.close());
+    // Flush the scan cache to disk before exiting so all accumulated
+    // results are available for the next scan session.
+    persistCache();
     process.exit(0);
   });
 

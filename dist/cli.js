@@ -60,9 +60,15 @@ const deps_1 = require("./scanner/detectors/deps");
 const sarif_1 = require("./scanner/sarif");
 const htmlReport_1 = require("./scanner/htmlReport");
 const python_parser_1 = require("./scanner/python-parser");
+const go_parser_1 = require("./scanner/go-parser");
+const java_parser_1 = require("./scanner/java-parser");
+const scan_cache_1 = require("./scanner/scan-cache");
+const cache_1 = require("./scanner/cache");
 // JS/TS extensions use the TypeScript ESLint AST parser.
 // Python files use the regex-based python-parser module.
-const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py']);
+// Go files use the regex-based go-parser module.
+// Java files use the regex-based java-parser module.
+const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.go', '.java']);
 // ── .aiscanner ignore file ────────────────────────────────────────────────────
 /**
  * Loads ignore patterns from a `.aiscanner` file in the given directory (or
@@ -126,12 +132,52 @@ function collectFiles(targetPath, ignorePatterns = []) {
     return files;
 }
 function scanFile(filePath) {
+    // Cache check: skip re-scanning unchanged files.
+    let fileContent;
+    try {
+        fileContent = fs.readFileSync(filePath, 'utf-8');
+    }
+    catch {
+        return [];
+    }
+    const cached = (0, cache_1.getCachedFindings)(filePath, fileContent);
+    if (cached)
+        return cached;
+    const findings = scanFileUncached(filePath);
+    (0, cache_1.setCachedFindings)(filePath, fileContent, findings);
+    return findings;
+}
+function scanFileUncached(filePath) {
     const ext = path.extname(filePath).toLowerCase();
     // Python files use the dedicated regex-based scanner (no AST parser needed).
     if (ext === '.py') {
         try {
             const parsed = (0, python_parser_1.parsePythonFile)(filePath);
             return (0, python_parser_1.scanPython)(parsed);
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`  [skip] ${filePath}: ${msg}`);
+            return [];
+        }
+    }
+    // Go files use the dedicated regex-based scanner (no Go AST parser needed).
+    if (ext === '.go') {
+        try {
+            const parsed = (0, go_parser_1.parseGoFile)(filePath);
+            return (0, go_parser_1.scanGo)(parsed);
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`  [skip] ${filePath}: ${msg}`);
+            return [];
+        }
+    }
+    // Java files use the dedicated regex-based scanner (no Java parser needed).
+    if (ext === '.java') {
+        try {
+            const parsed = (0, java_parser_1.parseJavaFile)(filePath);
+            return (0, java_parser_1.scanJava)(parsed);
         }
         catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -309,6 +355,8 @@ function startWatchMode(targetPath, ignorePatterns, severity, outputPath) {
             appendToOutput(filePath, added, resolved);
         }
     }
+    // Initialise the disk-backed scan cache so results survive across sessions.
+    (0, scan_cache_1.initCache)();
     // Seed cache with initial scan (silent)
     const initialFiles = collectFiles(targetPath, ignorePatterns);
     console.error(`[watch] Watching ${initialFiles.length} file(s) in ${targetPath}`);
@@ -344,9 +392,19 @@ function startWatchMode(targetPath, ignorePatterns, severity, outputPath) {
         console.error(`[watch] Could not watch ${targetPath}: ${msg}`);
         process.exit(1);
     }
+    // Persist the scan cache to disk every 60 seconds so that long-running
+    // watch sessions contribute cached results to subsequent one-shot scans.
+    const persistInterval = setInterval(() => {
+        (0, scan_cache_1.persistCache)();
+    }, 60000);
+    persistInterval.unref();
     process.on('SIGINT', () => {
         console.log('\n[watch] Stopping.');
+        clearInterval(persistInterval);
         watchers.forEach((w) => w.close());
+        // Flush the scan cache to disk before exiting so all accumulated
+        // results are available for the next scan session.
+        (0, scan_cache_1.persistCache)();
         process.exit(0);
     });
     // Keep the process alive
@@ -456,6 +514,10 @@ commander_1.program
     }
     if (total > 1) {
         process.stderr.write('\r\x1b[2K'); // clear the progress line
+        const stats = (0, cache_1.getCacheStats)();
+        if (stats.hits > 0) {
+            console.error(`[cache] ${stats.hits} file(s) served from cache, ${stats.misses} scanned`);
+        }
     }
     // ── Dependency scanning (directory targets only) ─────────────────────────
     if (fs.statSync(scanRoot).isDirectory()) {

@@ -132,7 +132,7 @@ const PYTHON_PATTERNS = [
     {
         type: 'PATH_TRAVERSAL',
         severity: 'high',
-        pattern: /open\s*\(\s*(?:request\.|req\.|f['""].*\{|[^'"")]*\+\s*(?:request|req|user|input))/,
+        pattern: /open\s*\([^)]*\+/,
         message: 'File open() with a path derived from user input. Without path sanitization, ' +
             'attackers can traverse the filesystem with ../.. sequences.',
     },

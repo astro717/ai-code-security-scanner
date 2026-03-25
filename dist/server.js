@@ -33,6 +33,8 @@ const jwtNone_1 = require("./scanner/detectors/jwtNone");
 const reporter_1 = require("./scanner/reporter");
 const sarif_1 = require("./scanner/sarif");
 const deps_1 = require("./scanner/detectors/deps");
+const python_parser_1 = require("./scanner/python-parser");
+const go_parser_1 = require("./scanner/go-parser");
 // LLM calls can be slow — 30 s gives ample time for a response while bounding
 // the maximum time a single /scan?aiExplain=true request can block the server.
 const ANTHROPIC_REQUEST_TIMEOUT_MS = 30000;
@@ -273,6 +275,10 @@ const scanRepoLimiter = (0, express_rate_limit_1.default)({
  * slate for each test suite regardless of execution order.
  */
 async function resetRateLimiters() {
+    if (process.env.NODE_ENV !== 'test') {
+        throw new Error('resetRateLimiters() is only available in test mode (NODE_ENV=test). ' +
+            'Calling this in production would disable rate limiting for all clients.');
+    }
     await Promise.all([
         scanLimiter.resetKey('127.0.0.1'),
         scanRepoLimiter.resetKey('127.0.0.1'),
@@ -296,8 +302,23 @@ app.post('/scan', scanLimiter, async (req, res) => {
     // server-level env var when the header is absent.
     const requestAnthropicKey = (() => {
         const h = req.headers['x-anthropic-key'];
-        return typeof h === 'string' && h.length > 0 ? h : undefined;
+        if (typeof h !== 'string' || h.length === 0)
+            return undefined;
+        // Basic format validation: Anthropic keys start with "sk-ant-" and are
+        // at least 20 characters. Reject obviously malformed keys early so the
+        // caller gets a clear 400 instead of an opaque 401 from the upstream API.
+        if (!/^sk-ant-.{13,}$/.test(h)) {
+            res.status(400).json({
+                error: 'Invalid X-Anthropic-Key header. Anthropic API keys start with "sk-ant-" and ' +
+                    'are at least 20 characters long. Check your key and try again.',
+            });
+            return null; // sentinel: response already sent
+        }
+        return h;
     })();
+    // If requestAnthropicKey is null, the response was already sent (invalid key).
+    if (requestAnthropicKey === null)
+        return;
     const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes, webhookUrl, webhookSecret } = req.body;
     if (!code || typeof code !== 'string') {
         res.status(400).json({ error: 'Missing required field: code (string)' });
@@ -462,7 +483,7 @@ async function collectFiles(apiBase, dirPath, branch, collected, max, ignorePatt
             continue;
         if (item.type === 'file') {
             const ext = item.name.split('.').pop() ?? '';
-            if (['ts', 'tsx', 'js', 'jsx'].includes(ext) && item.size <= 200 * 1024) {
+            if (['ts', 'tsx', 'js', 'jsx', 'py', 'go'].includes(ext) && item.size <= 200 * 1024) {
                 collected.push(item);
             }
         }
@@ -521,25 +542,38 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
         await Promise.all(collected.map(async (item) => {
             try {
                 const code = await githubGetText(`${apiBase}/contents/${item.path}?ref=${encodeURIComponent(branch)}`);
-                const parsed = (0, parser_1.parseCode)(code, item.path);
-                const findings = [
-                    ...(0, secrets_1.detectSecrets)(parsed),
-                    ...(0, sql_1.detectSQLInjection)(parsed),
-                    ...(0, shell_1.detectShellInjection)(parsed),
-                    ...(0, eval_1.detectEval)(parsed),
-                    ...(0, xss_1.detectXSS)(parsed),
-                    ...(0, pathTraversal_1.detectPathTraversal)(parsed),
-                    ...(0, prototypePollution_1.detectPrototypePollution)(parsed),
-                    ...(0, insecureRandom_1.detectInsecureRandom)(parsed),
-                    ...(0, openRedirect_1.detectOpenRedirect)(parsed),
-                    ...(0, ssrf_1.detectSSRF)(parsed),
-                    ...(0, jwt_1.detectJWTSecrets)(parsed),
-                    ...(0, jwtNone_1.detectJWTNoneAlgorithm)(parsed),
-                    ...(0, commandInjection_1.detectCommandInjection)(parsed),
-                    ...(0, cors_2.detectCORSMisconfiguration)(parsed),
-                    ...(0, redos_1.detectReDoS)(parsed),
-                    ...(0, weakCrypto_1.detectWeakCrypto)(parsed),
-                ].map((f) => ({ ...f, file: item.path }));
+                const ext = path_1.default.extname(item.name).toLowerCase();
+                let findings;
+                if (ext === '.py') {
+                    const parsed = (0, python_parser_1.parsePythonCode)(code, item.path);
+                    findings = (0, python_parser_1.scanPython)(parsed);
+                }
+                else if (ext === '.go') {
+                    const parsed = (0, go_parser_1.parseGoCode)(code, item.path);
+                    findings = (0, go_parser_1.scanGo)(parsed);
+                }
+                else {
+                    // JS/TS — use AST-based detectors
+                    const parsed = (0, parser_1.parseCode)(code, item.path);
+                    findings = [
+                        ...(0, secrets_1.detectSecrets)(parsed),
+                        ...(0, sql_1.detectSQLInjection)(parsed),
+                        ...(0, shell_1.detectShellInjection)(parsed),
+                        ...(0, eval_1.detectEval)(parsed),
+                        ...(0, xss_1.detectXSS)(parsed),
+                        ...(0, pathTraversal_1.detectPathTraversal)(parsed),
+                        ...(0, prototypePollution_1.detectPrototypePollution)(parsed),
+                        ...(0, insecureRandom_1.detectInsecureRandom)(parsed),
+                        ...(0, openRedirect_1.detectOpenRedirect)(parsed),
+                        ...(0, ssrf_1.detectSSRF)(parsed),
+                        ...(0, jwt_1.detectJWTSecrets)(parsed),
+                        ...(0, jwtNone_1.detectJWTNoneAlgorithm)(parsed),
+                        ...(0, commandInjection_1.detectCommandInjection)(parsed),
+                        ...(0, cors_2.detectCORSMisconfiguration)(parsed),
+                        ...(0, redos_1.detectReDoS)(parsed),
+                        ...(0, weakCrypto_1.detectWeakCrypto)(parsed),
+                    ].map((f) => ({ ...f, file: item.path }));
+                }
                 allFindings.push(...findings);
             }
             catch {

@@ -3,6 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SARIF_RULE_DESCRIPTIONS = void 0;
 exports.buildSARIF = buildSARIF;
 // ── SARIF rule metadata ────────────────────────────────────────────────────────
+// Every finding type emitted by JS/TS detectors, the Python scanner, and the Go
+// scanner must have an entry below.  When adding a new detector or language
+// scanner, add the corresponding rule description here AND in KNOWN_TYPES
+// (reporter.ts) so SARIF output is complete and --ignore-type validation works.
 exports.SARIF_RULE_DESCRIPTIONS = {
     SECRET_HARDCODED: 'Hardcoded secret or API key detected in source code.',
     SQL_INJECTION: 'User-controlled input used in a SQL query without parameterisation.',
