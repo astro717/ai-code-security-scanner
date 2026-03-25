@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { CodeEditor, type CodeEditorHandle } from './components/CodeEditor'
 import { ScanResults, type Finding } from './components/ScanResults'
 import { SummaryCards, type ScanSummary } from './components/SummaryCards'
+import { TrendChart } from './components/TrendChart'
 
 const SCANNER_URL = import.meta.env.VITE_SCANNER_URL || 'http://localhost:3001'
 
@@ -563,6 +564,9 @@ function App() {
               )}
             </div>
           )}
+
+          {/* Severity trend chart — visible when 2+ scans exist */}
+          <TrendChart history={history} />
 
           {status === 'idle' && history.length === 0 && (
             <div className="flex-1 flex items-center justify-center">
