@@ -1,7 +1,7 @@
 import { TSESTree } from '@typescript-eslint/types';
 import { ParseResult } from '../parser';
 import { Finding } from '../reporter';
-import { walkNode } from '../utils';
+import { walkNode, getSnippet } from '../utils';
 
 /**
  * Detects command injection via spawn()/spawnSync() where the first argument
@@ -77,7 +77,7 @@ export function detectCommandInjection(result: ParseResult): Finding[] {
           severity: 'high',
           line,
           column: node.loc!.start.column,
-          snippet: result.lines[line - 1]?.trim() ?? '',
+          snippet: getSnippet(result, line),
           message:
             `${fnName}() called with a dynamic command. If the command name originates from ` +
             `user input, an attacker can execute arbitrary programs. Use a hardcoded command ` +
