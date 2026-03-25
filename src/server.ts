@@ -31,6 +31,10 @@ interface FindingWithAI extends Finding {
   fixSuggestion?: string;
 }
 
+// LLM calls can be slow — 30 s gives ample time for a response while bounding
+// the maximum time a single /scan?aiExplain=true request can block the server.
+const ANTHROPIC_REQUEST_TIMEOUT_MS = 30_000;
+
 async function anthropicRequest(body: object): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
@@ -51,6 +55,9 @@ async function anthropicRequest(body: object): Promise<unknown> {
         try { resolve(JSON.parse(data)); }
         catch { reject(new Error('Invalid JSON from Anthropic')); }
       });
+    });
+    req.setTimeout(ANTHROPIC_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Anthropic API request timed out after ${ANTHROPIC_REQUEST_TIMEOUT_MS}ms`));
     });
     req.on('error', reject);
     req.write(payload);
