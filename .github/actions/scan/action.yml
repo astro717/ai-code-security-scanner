@@ -1,0 +1,157 @@
+name: 'AI Code Security Scanner'
+description: 'Scan JS/TS files for security vulnerabilities and upload results to GitHub Code Scanning as SARIF.'
+author: 'ai-code-security-scanner'
+
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  paths:
+    description: >
+      Space-separated list of files or glob patterns to scan. Defaults to
+      scanning all JS/TS files in the repository.
+    required: false
+    default: '.'
+
+  severity:
+    description: >
+      Minimum severity level to report. One of: low, medium, high, critical.
+      Findings below this level are ignored.
+    required: false
+    default: 'low'
+
+  fail-on:
+    description: >
+      Minimum severity level that causes the action to exit with a non-zero
+      status code. Set to "none" to never fail. One of: none, low, medium,
+      high, critical.
+    required: false
+    default: 'high'
+
+  ignore-type:
+    description: >
+      Comma-separated list of finding types to suppress globally (e.g.
+      "WEAK_CRYPTO,REDOS"). Mirrors the CLI --ignore-type flag.
+    required: false
+    default: ''
+
+  sarif-output:
+    description: >
+      Path for the generated SARIF file. Set to empty string to skip SARIF
+      output. The file is always uploaded to GitHub Code Scanning when it is
+      generated (requires the security-events write permission).
+    required: false
+    default: 'results.sarif'
+
+  node-version:
+    description: 'Node.js version to use when running the scanner.'
+    required: false
+    default: '20'
+
+outputs:
+  findings-count:
+    description: 'Total number of findings at or above the configured severity level.'
+    value: ${{ steps.scan.outputs.findings_count }}
+
+  sarif-path:
+    description: 'Path to the generated SARIF file, or empty if SARIF output was disabled.'
+    value: ${{ steps.scan.outputs.sarif_path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install ai-code-security-scanner
+      shell: bash
+      run: npm install -g ai-code-security-scanner
+
+    - name: Build scanner CLI
+      shell: bash
+      # When running from a checkout of this repo (e.g. in CI for the scanner
+      # itself), prefer the local build. When used as a published action the
+      # global npm install above is sufficient.
+      run: |
+        if [ -f "$GITHUB_WORKSPACE/package.json" ] && grep -q '"ai-code-security-scanner"' "$GITHUB_WORKSPACE/package.json" 2>/dev/null; then
+          cd "$GITHUB_WORKSPACE"
+          npm ci --prefer-offline
+          npm run build
+          echo "SCANNER_CMD=$GITHUB_WORKSPACE/dist/cli.js" >> "$GITHUB_ENV"
+        else
+          echo "SCANNER_CMD=ai-sec-scan" >> "$GITHUB_ENV"
+        fi
+
+    - name: Run security scan
+      id: scan
+      shell: bash
+      env:
+        SCAN_PATHS: ${{ inputs.paths }}
+        SCAN_SEVERITY: ${{ inputs.severity }}
+        SCAN_FAIL_ON: ${{ inputs.fail-on }}
+        SCAN_IGNORE_TYPE: ${{ inputs.ignore-type }}
+        SCAN_SARIF_OUTPUT: ${{ inputs.sarif-output }}
+      run: |
+        set -e
+
+        # Build the CLI argument list
+        ARGS="--severity $SCAN_SEVERITY"
+
+        if [ "$SCAN_FAIL_ON" != "none" ]; then
+          ARGS="$ARGS --fail-on $SCAN_FAIL_ON"
+        fi
+
+        if [ -n "$SCAN_IGNORE_TYPE" ]; then
+          IFS=',' read -ra IGNORE_TYPES <<< "$SCAN_IGNORE_TYPE"
+          for t in "${IGNORE_TYPES[@]}"; do
+            t=$(echo "$t" | xargs)   # trim whitespace
+            [ -n "$t" ] && ARGS="$ARGS --ignore-type $t"
+          done
+        fi
+
+        if [ -n "$SCAN_SARIF_OUTPUT" ]; then
+          ARGS="$ARGS --format sarif --output $SCAN_SARIF_OUTPUT"
+        fi
+
+        # Run scanner — exits non-zero if fail-on threshold is crossed
+        EXIT_CODE=0
+        if command -v node &>/dev/null && [ -f "${SCANNER_CMD:-}" ]; then
+          node "$SCANNER_CMD" $SCAN_PATHS $ARGS || EXIT_CODE=$?
+        else
+          ai-sec-scan $SCAN_PATHS $ARGS || EXIT_CODE=$?
+        fi
+
+        # Count findings from SARIF (if generated) or record 0
+        FINDINGS_COUNT=0
+        if [ -n "$SCAN_SARIF_OUTPUT" ] && [ -f "$SCAN_SARIF_OUTPUT" ]; then
+          FINDINGS_COUNT=$(python3 -c "
+        import json, sys
+        try:
+            sarif = json.load(open('$SCAN_SARIF_OUTPUT'))
+            total = sum(
+                len(run.get('results', []))
+                for run in sarif.get('runs', [])
+            )
+            print(total)
+        except Exception:
+            print(0)
+        " 2>/dev/null || echo 0)
+          echo "sarif_path=$SCAN_SARIF_OUTPUT" >> "$GITHUB_OUTPUT"
+        else
+          echo "sarif_path=" >> "$GITHUB_OUTPUT"
+        fi
+
+        echo "findings_count=$FINDINGS_COUNT" >> "$GITHUB_OUTPUT"
+
+        # Propagate scanner exit code so the step fails correctly
+        exit $EXIT_CODE
+
+    - name: Upload SARIF to GitHub Code Scanning
+      if: ${{ inputs.sarif-output != '' && always() }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-output }}
+        category: 'ai-code-security-scanner'
