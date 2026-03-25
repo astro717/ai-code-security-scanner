@@ -25,6 +25,7 @@ import { detectUnsafeDeps } from './scanner/detectors/deps';
 import { buildSARIF } from './scanner/sarif';
 import { buildHTMLReport } from './scanner/htmlReport';
 import { parsePythonFile, scanPython } from './scanner/python-parser';
+import { contentHash, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/cache';
 
 // JS/TS extensions use the TypeScript ESLint AST parser.
 // Python files use the regex-based python-parser module.
@@ -96,6 +97,23 @@ function collectFiles(targetPath: string, ignorePatterns: string[] = []): string
 }
 
 function scanFile(filePath: string): Finding[] {
+  // Cache check: skip re-scanning unchanged files.
+  let fileContent: string;
+  try {
+    fileContent = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return [];
+  }
+  const hash = contentHash(fileContent);
+  const cached = getCachedFindings(filePath, hash);
+  if (cached) return cached;
+
+  const findings = scanFileUncached(filePath);
+  setCachedFindings(filePath, hash, findings);
+  return findings;
+}
+
+function scanFileUncached(filePath: string): Finding[] {
   const ext = path.extname(filePath).toLowerCase();
 
   // Python files use the dedicated regex-based scanner (no AST parser needed).
@@ -504,6 +522,10 @@ program
 
     if (total > 1) {
       process.stderr.write('\r\x1b[2K'); // clear the progress line
+      const stats = getCacheStats();
+      if (stats.hits > 0) {
+        console.error(`[cache] ${stats.hits} file(s) served from cache, ${stats.misses} scanned`);
+      }
     }
 
     // ── Dependency scanning (directory targets only) ─────────────────────────
