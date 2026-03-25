@@ -90,6 +90,35 @@ function exportJSON(findings: Finding[], summary: ScanSummary) {
   downloadBlob(JSON.stringify({ findings, summary }, null, 2), 'scan-results.json', 'application/json')
 }
 
+function exportCSV(history: ScanHistoryEntry[]) {
+  const headers = ['timestamp', 'filename', 'finding_type', 'severity', 'line', 'message']
+  const csvEscape = (v: string | number) => {
+    const s = String(v)
+    // Wrap in quotes if it contains a comma, quote, or newline
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"`
+      : s
+  }
+  const rows: string[] = [headers.join(',')]
+  for (const entry of history) {
+    for (const f of entry.findings) {
+      rows.push(
+        [
+          entry.timestamp,
+          f.file ?? entry.source,
+          f.type,
+          f.severity,
+          f.line,
+          f.message,
+        ]
+          .map(csvEscape)
+          .join(','),
+      )
+    }
+  }
+  downloadBlob(rows.join('\n'), 'scan-history.csv', 'text/csv;charset=utf-8;')
+}
+
 function exportSARIF(findings: Finding[]) {
   const rules = Array.from(new Set(findings.map((f) => f.type))).map((id) => ({
     id,
@@ -503,17 +532,30 @@ function App() {
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
                 </button>
-                <button
-                  type="button"
-                  onClick={clearHistory}
-                  title="Clear scan history"
-                  className="flex items-center gap-1 px-2 py-0.5 text-xs font-mono rounded border border-[#30363d] text-[#7d8590] hover:border-red-500/40 hover:text-red-400 transition-colors"
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-                  </svg>
-                  Clear
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => exportCSV(history)}
+                    title="Export scan history as CSV (timestamp, filename, finding type, severity, line, message)"
+                    className="flex items-center gap-1 px-2 py-0.5 text-xs font-mono rounded border border-[#30363d] text-[#7d8590] hover:border-violet-500/60 hover:text-violet-400 transition-colors"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Export CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearHistory}
+                    title="Clear scan history"
+                    className="flex items-center gap-1 px-2 py-0.5 text-xs font-mono rounded border border-[#30363d] text-[#7d8590] hover:border-red-500/40 hover:text-red-400 transition-colors"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                    </svg>
+                    Clear
+                  </button>
+                </div>
               </div>
               {showHistory && (
                 <div className="border-t border-[#1e1e2e] divide-y divide-[#1e1e2e]">
