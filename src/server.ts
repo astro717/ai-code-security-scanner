@@ -297,6 +297,8 @@ app.post('/scan', scanLimiter, async (req, res) => {
 });
 
 // Helper: fetch JSON from GitHub Contents API
+const GITHUB_REQUEST_TIMEOUT_MS = 15000;
+
 function githubGet(url: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const opts = new URL(url);
@@ -309,21 +311,25 @@ function githubGet(url: string): Promise<unknown> {
         ...(process.env.GITHUB_TOKEN ? { 'Authorization': `token ${process.env.GITHUB_TOKEN}` } : {}),
       },
     };
-    https.get(reqOpts, (res) => {
+    const req = https.get(reqOpts, (res) => {
       let body = '';
       res.on('data', (chunk) => body += chunk);
       res.on('end', () => {
         try { resolve(JSON.parse(body)); }
         catch { reject(new Error('Invalid JSON from GitHub')); }
       });
-    }).on('error', reject);
+    });
+    req.setTimeout(GITHUB_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(new Error(`GitHub API request timed out after ${GITHUB_REQUEST_TIMEOUT_MS}ms`));
+    });
+    req.on('error', reject);
   });
 }
 
 function githubGetText(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const opts = new URL(url);
-    https.get({
+    const req = https.get({
       hostname: opts.hostname,
       path: opts.pathname + opts.search,
       headers: {
@@ -335,7 +341,11 @@ function githubGetText(url: string): Promise<string> {
       let body = '';
       res.on('data', (chunk) => body += chunk);
       res.on('end', () => resolve(body));
-    }).on('error', reject);
+    });
+    req.setTimeout(GITHUB_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(new Error(`GitHub API request timed out after ${GITHUB_REQUEST_TIMEOUT_MS}ms`));
+    });
+    req.on('error', reject);
   });
 }
 
