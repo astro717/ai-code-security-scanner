@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
+import http from 'http';
 import https from 'https';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
@@ -149,6 +151,62 @@ function logScan(fields: Record<string, unknown>): void {
   console.log(JSON.stringify({ ...fields, ts: new Date().toISOString() }));
 }
 
+// ── Webhook delivery ──────────────────────────────────────────────────────────
+
+const WEBHOOK_TIMEOUT_MS = 10_000;
+
+/**
+ * Fire-and-forget POST of scan results to a webhook URL.
+ * If `webhookSecret` is provided, an HMAC-SHA256 signature is sent in
+ * the `X-Scanner-Signature` header so the receiver can verify authenticity.
+ */
+function deliverWebhook(
+  webhookUrl: string,
+  payload: unknown,
+  webhookSecret?: string,
+): void {
+  const body = JSON.stringify(payload);
+  const parsed = new URL(webhookUrl);
+  const transport = parsed.protocol === 'https:' ? https : http;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Content-Length': String(Buffer.byteLength(body)),
+    'User-Agent': 'ai-code-security-scanner/0.1',
+  };
+
+  if (webhookSecret) {
+    const signature = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(body)
+      .digest('hex');
+    headers['X-Scanner-Signature'] = `sha256=${signature}`;
+  }
+
+  const req = transport.request(
+    {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers,
+    },
+    (res) => {
+      // Drain response to free socket
+      res.resume();
+      console.log(`[webhook] POST ${webhookUrl} → ${res.statusCode}`);
+    },
+  );
+  req.setTimeout(WEBHOOK_TIMEOUT_MS, () => {
+    req.destroy(new Error(`Webhook timed out after ${WEBHOOK_TIMEOUT_MS}ms`));
+  });
+  req.on('error', (err) => {
+    console.error(`[webhook] POST ${webhookUrl} failed:`, err.message);
+  });
+  req.write(body);
+  req.end();
+}
+
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 
@@ -287,12 +345,14 @@ app.post('/scan', scanLimiter, async (req, res) => {
     return typeof h === 'string' && h.length > 0 ? h : undefined;
   })();
 
-  const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes } = req.body as {
+  const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes, webhookUrl, webhookSecret } = req.body as {
     code?: string;
     filename?: string;
     packageJson?: string;
     aiExplain?: boolean;
     ignoreTypes?: string[];
+    webhookUrl?: string;
+    webhookSecret?: string;
   };
 
   if (!code || typeof code !== 'string') {
@@ -387,7 +447,17 @@ app.post('/scan', scanLimiter, async (req, res) => {
     ai_enriched: !!aiExplain,
   });
 
-  res.json({ findings, summary: summarize(findings) });
+  const responsePayload = { findings, summary: summarize(findings) };
+  res.json(responsePayload);
+
+  // Fire-and-forget webhook delivery after responding to the client
+  if (webhookUrl && typeof webhookUrl === 'string') {
+    deliverWebhook(
+      webhookUrl,
+      { event: 'scan_complete', file: filename ?? 'input', ...responsePayload },
+      webhookSecret,
+    );
+  }
 });
 
 // Helper: fetch JSON from GitHub Contents API
@@ -484,11 +554,13 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
   // This enables GitHub Code Scanning integration for repository scans.
   const sarifMode = req.query['sarif'] === 'true';
 
-  const { repoUrl, branch = 'main', ignorePatterns = [], ignoreTypes } = req.body as {
+  const { repoUrl, branch = 'main', ignorePatterns = [], ignoreTypes, webhookUrl, webhookSecret } = req.body as {
     repoUrl?: string;
     branch?: string;
     ignorePatterns?: string[];
     ignoreTypes?: string[];
+    webhookUrl?: string;
+    webhookSecret?: string;
   };
 
   if (!repoUrl || typeof repoUrl !== 'string') {
@@ -611,7 +683,17 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       return;
     }
 
-    res.json({ findings: dedupedFindings, summary: summarize(dedupedFindings), filesScanned: collected.length });
+    const responsePayload = { findings: dedupedFindings, summary: summarize(dedupedFindings), filesScanned: collected.length };
+    res.json(responsePayload);
+
+    // Fire-and-forget webhook delivery after responding to the client
+    if (webhookUrl && typeof webhookUrl === 'string') {
+      deliverWebhook(
+        webhookUrl,
+        { event: 'scan_repo_complete', repo: `${owner}/${repo}`, branch, ...responsePayload },
+        webhookSecret,
+      );
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[scan-repo] error: ${msg}`);
