@@ -22,6 +22,7 @@ import { detectReDoS } from './scanner/detectors/redos';
 import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
 import { summarize, Finding, deduplicateFindings } from './scanner/reporter';
+import { buildSARIF } from './scanner/sarif';
 import { detectUnsafeDepsFromJson } from './scanner/detectors/deps';
 
 // ── Anthropic AI explain ──────────────────────────────────────────────────────
@@ -407,6 +408,10 @@ async function collectFiles(
 }
 
 app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
+  // ?sarif=true returns a SARIF 2.1.0 document instead of the default JSON shape.
+  // This enables GitHub Code Scanning integration for repository scans.
+  const sarifMode = req.query['sarif'] === 'true';
+
   const { repoUrl, branch = 'main', ignorePatterns = [] } = req.body as {
     repoUrl?: string;
     branch?: string;
@@ -513,7 +518,15 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       findings_total: dedupedFindings.length,
       findings_by_severity: repoScanSummary,
       duration_ms: repoScanDurationMs,
+      sarif: sarifMode,
     });
+
+    if (sarifMode) {
+      res.setHeader('Content-Type', 'application/sarif+json');
+      res.json(buildSARIF(dedupedFindings));
+      return;
+    }
+
     res.json({ findings: dedupedFindings, summary: summarize(dedupedFindings), filesScanned: collected.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
