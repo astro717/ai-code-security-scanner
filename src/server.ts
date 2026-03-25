@@ -183,13 +183,41 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── Trusted internal token ────────────────────────────────────────────────────
+//
+// Set INTERNAL_API_TOKEN in the environment to enable the rate-limit bypass.
+// Callers (CI pipelines, internal dashboards) present the token in the
+// X-Internal-Token request header to be exempted from per-IP rate limits.
+// The value must be at least 32 characters to prevent accidental weak tokens.
+// If the env var is not set the bypass is disabled entirely.
+
+const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
+
+if (INTERNAL_API_TOKEN && INTERNAL_API_TOKEN.length < 32) {
+  console.warn(
+    '[auth] WARNING: INTERNAL_API_TOKEN is shorter than 32 characters. ' +
+    'Use a long random value to prevent token guessing.',
+  );
+}
+
 // ── Rate limiting ─────────────────────────────────────────────────────────────
+//
+// Requests that present a valid X-Internal-Token header skip both limiters so
+// internal tools (CI, dashboards) can make burst requests without hitting the
+// per-IP cap. All other callers are subject to the standard limits below.
+
+function skipIfInternalToken(req: import('express').Request): boolean {
+  if (!INTERNAL_API_TOKEN) return false;
+  const presented = req.headers['x-internal-token'];
+  return typeof presented === 'string' && presented === INTERNAL_API_TOKEN;
+}
 
 const scanLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipIfInternalToken,
   message: { error: 'Too many scan requests from this IP. Limit: 20 requests per minute.' },
 });
 
@@ -198,6 +226,7 @@ const scanRepoLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipIfInternalToken,
   message: { error: 'Too many scan-repo requests from this IP. Limit: 5 requests per minute (GitHub API calls).' },
 });
 
