@@ -350,8 +350,23 @@ app.post('/scan', scanLimiter, async (req, res) => {
   // server-level env var when the header is absent.
   const requestAnthropicKey = (() => {
     const h = req.headers['x-anthropic-key'];
-    return typeof h === 'string' && h.length > 0 ? h : undefined;
+    if (typeof h !== 'string' || h.length === 0) return undefined;
+    // Basic format validation: Anthropic keys start with "sk-ant-" and are
+    // at least 20 characters. Reject obviously malformed keys early so the
+    // caller gets a clear 400 instead of an opaque 401 from the upstream API.
+    if (!/^sk-ant-.{13,}$/.test(h)) {
+      res.status(400).json({
+        error:
+          'Invalid X-Anthropic-Key header. Anthropic API keys start with "sk-ant-" and ' +
+          'are at least 20 characters long. Check your key and try again.',
+      });
+      return null; // sentinel: response already sent
+    }
+    return h;
   })();
+
+  // If requestAnthropicKey is null, the response was already sent (invalid key).
+  if (requestAnthropicKey === null) return;
 
   const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes, webhookUrl, webhookSecret } = req.body as {
     code?: string;
