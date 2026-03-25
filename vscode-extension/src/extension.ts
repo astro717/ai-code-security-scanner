@@ -76,6 +76,12 @@ interface ScanResponse {
   summary: Record<string, number>;
 }
 
+interface ScanRepoResponse {
+  findings: Finding[];
+  summary: Record<string, number>;
+  filesScanned: number;
+}
+
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
 function postJSON(serverUrl: string, body: object, apiKey?: string): Promise<ScanResponse> {
@@ -224,6 +230,48 @@ async function scanWorkspace(
       progress.report({ message: 'Done.', increment: 100 });
     },
   );
+}
+
+// ── /scan-repo HTTP helper ────────────────────────────────────────────────────
+
+function postScanRepo(serverUrl: string, body: object, apiKey?: string): Promise<ScanRepoResponse> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const parsed = new URL(serverUrl + '/scan-repo');
+    const lib = parsed.protocol === 'https:' ? https : http;
+
+    const headers: Record<string, string | number> = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+    };
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
+    const req = lib.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname,
+        method: 'POST',
+        headers,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data) as ScanRepoResponse);
+          } catch {
+            reject(new Error('Invalid JSON response from scanner server'));
+          }
+        });
+      },
+    );
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────────
@@ -523,6 +571,75 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('aiSecScan.scanWorkspace', () => {
       void scanWorkspace(collection);
+    }),
+  );
+
+  // Command: scan a GitHub repository via /scan-repo
+  context.subscriptions.push(
+    vscode.commands.registerCommand('aiSecScan.scanRepo', async () => {
+      const repoUrl = await vscode.window.showInputBox({
+        prompt: 'Enter a GitHub repository URL to scan',
+        placeHolder: 'https://github.com/owner/repo',
+        validateInput: (value) => {
+          if (!value || !value.trim().match(/github\.com\/[^/]+\/[^/]+/)) {
+            return 'Please enter a valid GitHub repository URL (https://github.com/owner/repo)';
+          }
+          return undefined;
+        },
+      });
+
+      if (!repoUrl) return; // cancelled
+
+      const config = vscode.workspace.getConfiguration('aiSecScan');
+      const serverUrl: string = config.get('serverUrl') ?? 'http://localhost:3001';
+      const apiKey: string = config.get('apiKey') ?? '';
+
+      updateStatusBar(statusBar, 'scanning');
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `AI Security: scanning ${repoUrl}…`,
+          cancellable: false,
+        },
+        async () => {
+          let response: ScanRepoResponse;
+          try {
+            response = await postScanRepo(serverUrl, { repoUrl }, apiKey || undefined);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            updateStatusBar(statusBar, 'offline');
+            vscode.window.showErrorMessage(`AI Security Scanner: failed to scan repository — ${msg}`);
+            return;
+          }
+
+          // Display results: reuse existing diagnostic rendering, keying on a
+          // synthetic URI so results appear in the Problems panel.
+          const syntheticUri = vscode.Uri.parse(`ai-sec-scan-repo://${repoUrl.replace(/https?:\/\//, '')}`);
+          const diagnostics = findingsToDiagnostics(response.findings.map((f) => ({
+            ...f,
+            // Remap file paths to the synthetic URI for display purposes
+          })));
+          collection.set(syntheticUri, diagnostics);
+
+          if (response.findings.length > 0) {
+            updateStatusBar(statusBar, 'issues', `${response.findings.length} issue${response.findings.length !== 1 ? 's' : ''}`);
+            const detail = response.findings
+              .slice(0, 5)
+              .map((f) => `${f.file ?? '?'}:${f.line} [${f.severity}] ${f.type}`)
+              .join('\n');
+            vscode.window.showWarningMessage(
+              `AI Security: ${response.findings.length} finding(s) across ${response.filesScanned} file(s) in ${repoUrl}`,
+              { detail, modal: false },
+            );
+          } else {
+            updateStatusBar(statusBar, 'clean');
+            vscode.window.showInformationMessage(
+              `AI Security: no findings in ${response.filesScanned} file(s) scanned from ${repoUrl}`,
+            );
+          }
+        },
+      );
     }),
   );
 

@@ -52,6 +52,10 @@
       {
         "command": "aiSecScan.showAIFix",
         "title": "AI Security: Show AI Fix"
+      },
+      {
+        "command": "aiSecScan.scanRepo",
+        "title": "AI Security: Scan GitHub Repository"
       }
     ],
     "keybindings": [
