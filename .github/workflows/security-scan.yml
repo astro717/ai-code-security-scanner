@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  security-events: write
 
 jobs:
   security-scan:
@@ -170,6 +171,28 @@ jobs:
                 body,
               });
             }
+
+      - name: Generate SARIF report
+        if: always() && steps.changed-files.outputs.count != '0'
+        run: |
+          SARIF_FILE="results.sarif"
+          # Scan all changed files and merge findings into a single SARIF report.
+          # We use the CLI's --sarif flag on a temp file that collects all changed code.
+          ALL_FINDINGS_JSON=$(cat "${{ steps.scan.outputs.findings_file }}" 2>/dev/null || echo "[]")
+          # Generate SARIF from the findings using a Node one-liner with the existing buildSARIF function
+          node -e "
+            const { buildSARIF } = require('./dist/scanner/sarif');
+            const findings = JSON.parse(process.argv[1]);
+            console.log(JSON.stringify(buildSARIF(findings), null, 2));
+          " "$ALL_FINDINGS_JSON" > "$SARIF_FILE"
+          echo "sarif_file=$SARIF_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always() && steps.changed-files.outputs.count != '0'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: ai-code-security-scanner
 
       - name: No supported files changed
         if: steps.changed-files.outputs.count == '0'
