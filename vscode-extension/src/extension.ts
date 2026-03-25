@@ -273,6 +273,144 @@ function updateStatusBar(
   }
 }
 
+// ── AI Explain helper ───────────────────────────────────────────────────────
+
+async function fetchAIExplanation(
+  serverUrl: string,
+  code: string,
+  filename: string,
+  apiKey?: string,
+): Promise<Finding[]> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({ code, filename, aiExplain: true });
+    const parsed = new URL(serverUrl + '/scan');
+    const lib = parsed.protocol === 'https:' ? https : http;
+
+    const headers: Record<string, string | number> = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+    };
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
+    const req = lib.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname,
+        method: 'POST',
+        headers,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try {
+            const body = JSON.parse(data) as { findings: Finding[] };
+            resolve(body.findings ?? []);
+          } catch {
+            reject(new Error('Invalid JSON from scanner'));
+          }
+        });
+      },
+    );
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+// ── CodeLens provider ───────────────────────────────────────────────────────
+
+class SecurityCodeLensProvider implements vscode.CodeLensProvider {
+  private _onDidChange = new vscode.EventEmitter<void>();
+  readonly onDidChangeCodeLenses = this._onDidChange.event;
+
+  constructor(private diagnosticCollection: vscode.DiagnosticCollection) {}
+
+  refresh(): void {
+    this._onDidChange.fire();
+  }
+
+  provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+    const diagnostics = this.diagnosticCollection.get(document.uri);
+    if (!diagnostics || diagnostics.length === 0) return [];
+
+    const lenses: vscode.CodeLens[] = [];
+    const seenLines = new Set<number>();
+
+    for (const diag of diagnostics) {
+      if (diag.source !== DIAGNOSTIC_SOURCE) continue;
+
+      const line = diag.range.start.line;
+      if (seenLines.has(line)) continue;
+      seenLines.add(line);
+
+      const lens = new vscode.CodeLens(diag.range, {
+        title: '$(lightbulb) Show AI fix',
+        command: 'aiSecScan.showAIFix',
+        arguments: [document.uri, line, String(diag.code ?? ''), diag.message],
+      });
+      lenses.push(lens);
+    }
+
+    return lenses;
+  }
+}
+
+function showFixInWebview(
+  context: vscode.ExtensionContext,
+  finding: Finding & { explanation?: string; fixSuggestion?: string },
+): void {
+  const panel = vscode.window.createWebviewPanel(
+    'aiSecFix',
+    `AI Fix: ${finding.type}`,
+    vscode.ViewColumn.Beside,
+    { enableScripts: false },
+  );
+
+  const severityColors: Record<string, string> = {
+    critical: '#ef4444',
+    high: '#f97316',
+    medium: '#eab308',
+    low: '#6b7280',
+  };
+
+  const color = severityColors[finding.severity] ?? '#6b7280';
+
+  panel.webview.html = `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 1.5rem; color: #e6edf3; background: #0d1117; line-height: 1.6; }
+    h2 { color: ${color}; font-size: 1.1rem; margin: 0 0 0.25rem; }
+    .severity { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; background: ${color}22; color: ${color}; border: 1px solid ${color}44; }
+    .snippet { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 0.75rem; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; white-space: pre-wrap; margin: 0.75rem 0; overflow-x: auto; }
+    .section { margin: 1.25rem 0; }
+    .section-title { color: #7d8590; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.35rem; }
+    p { margin: 0.25rem 0; }
+    .message { color: #7d8590; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h2>${escapeHtml(finding.type)}</h2>
+  <span class="severity">${finding.severity.toUpperCase()}</span>
+  <p class="message">${escapeHtml(finding.message)}</p>
+
+  ${finding.snippet ? `<div class="section"><div class="section-title">Code</div><div class="snippet">${escapeHtml(finding.snippet)}</div></div>` : ''}
+
+  ${finding.explanation ? `<div class="section"><div class="section-title">Explanation</div><p>${escapeHtml(finding.explanation)}</p></div>` : ''}
+
+  ${finding.fixSuggestion ? `<div class="section"><div class="section-title">Suggested Fix</div><div class="snippet">${escapeHtml(finding.fixSuggestion)}</div></div>` : '<div class="section"><p style="color:#7d8590;">No AI fix available. Set ANTHROPIC_API_KEY on the scanner server to enable AI explanations.</p></div>'}
+</body>
+</html>`;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // ── Extension lifecycle ───────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -281,6 +419,53 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const statusBar = createStatusBarItem();
   context.subscriptions.push(statusBar);
+
+  // CodeLens: "Show AI fix" above each diagnostic
+  const codeLensProvider = new SecurityCodeLensProvider(collection);
+  const supportedLanguages = [
+    { language: 'typescript' },
+    { language: 'typescriptreact' },
+    { language: 'javascript' },
+    { language: 'javascriptreact' },
+  ];
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(supportedLanguages, codeLensProvider),
+  );
+
+  // Command: show AI fix in webview panel
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'aiSecScan.showAIFix',
+      async (uri: vscode.Uri, line: number, type: string, message: string) => {
+        const config = vscode.workspace.getConfiguration('aiSecScan');
+        const serverUrl: string = config.get('serverUrl') ?? 'http://localhost:3001';
+        const apiKey: string = config.get('apiKey') ?? '';
+
+        // Get the document text and request AI explanation
+        let aiFindings: Finding[] = [];
+        try {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          aiFindings = await fetchAIExplanation(serverUrl, doc.getText(), doc.fileName, apiKey || undefined);
+        } catch {
+          // Fall back to showing basic info without AI
+        }
+
+        // Find the matching finding by line and type
+        const matchingFinding = aiFindings.find(
+          (f) => f.line === line + 1 && f.type === type, // line is 0-indexed from VS Code
+        ) ?? {
+          type,
+          severity: 'medium' as const,
+          line: line + 1,
+          column: 0,
+          snippet: '',
+          message,
+        };
+
+        showFixInWebview(context, matchingFinding as Finding & { explanation?: string; fixSuggestion?: string });
+      },
+    ),
+  );
 
   // Wrap scanDocument to update status bar
   async function scanDocumentWithStatus(document: vscode.TextDocument): Promise<void> {
@@ -299,6 +484,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const diagnostics = findingsToDiagnostics(response.findings);
     collection.set(document.uri, diagnostics);
+    codeLensProvider.refresh();
 
     if (diagnostics.length > 0) {
       updateStatusBar(statusBar, 'issues', `${response.findings.length} issue${response.findings.length !== 1 ? 's' : ''}`);
