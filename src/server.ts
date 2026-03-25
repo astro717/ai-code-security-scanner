@@ -441,10 +441,13 @@ export const server = app.listen(PORT, () => {
 
 // Graceful shutdown: drain connections before process exit so tests close
 // cleanly and production process managers can do zero-downtime restarts.
-process.on('SIGTERM', () => {
-  console.log('[server] SIGTERM received — closing HTTP server...');
+function gracefulShutdown(signal: string): void {
+  console.log(`[server] ${signal} received — closing HTTP server...`);
   server.close(() => {
     console.log('[server] HTTP server closed. Exiting.');
     process.exit(0);
   });
-});
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
