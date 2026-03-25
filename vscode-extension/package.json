@@ -48,6 +48,10 @@
       {
         "command": "aiSecScan.scanWorkspace",
         "title": "AI Security: Scan Workspace"
+      },
+      {
+        "command": "aiSecScan.scanRepo",
+        "title": "AI Security: Scan GitHub Repository"
       }
     ],
     "keybindings": [
