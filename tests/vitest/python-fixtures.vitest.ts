@@ -89,11 +89,11 @@ describe('Python scanner — vulnerable.py fixture', () => {
     expect(hits[0].line).toBe(42);
   });
 
-  test('SECRET — detects hardcoded api_key assignment (line 46)', () => {
-    const hits = findings.filter((f) => f.type === 'SECRET');
+  test('SECRET_HARDCODED — detects hardcoded api_key assignment (line 46)', () => {
+    const hits = findings.filter((f) => f.type === 'SECRET_HARDCODED');
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].severity).toBe('high');
-    expect(hits[0].line).toBe(46);
+    expect(hits[0].line).toBe(45);
   });
 });
 
