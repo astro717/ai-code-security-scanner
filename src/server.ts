@@ -450,10 +450,11 @@ async function collectFiles(
 }
 
 app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
-  const { repoUrl, branch = 'main', ignorePatterns = [] } = req.body as {
+  const { repoUrl, branch = 'main', ignorePatterns = [], ignoreTypes } = req.body as {
     repoUrl?: string;
     branch?: string;
     ignorePatterns?: string[];
+    ignoreTypes?: string[];
   };
 
   if (!repoUrl || typeof repoUrl !== 'string') {
@@ -541,7 +542,18 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
     // Deduplicate by (type, file, line, column) across all scanned files — same
     // logic as the /scan endpoint — so parallel file scans don't produce duplicate
     // findings for the same location when detectors overlap.
-    const dedupedFindings = deduplicateFindings(allFindings);
+    let dedupedFindings = deduplicateFindings(allFindings);
+
+    // Optional ignoreTypes suppression — mirrors the CLI --ignore-type flag and
+    // the /scan endpoint behaviour. Only accepts an array of strings.
+    if (Array.isArray(ignoreTypes) && ignoreTypes.length > 0) {
+      const typesToIgnore = new Set(
+        ignoreTypes.filter((t) => typeof t === 'string').map((t) => t.trim().toUpperCase()),
+      );
+      if (typesToIgnore.size > 0) {
+        dedupedFindings = dedupedFindings.filter((f) => !typesToIgnore.has(f.type));
+      }
+    }
 
     const repoScanDurationMs = Date.now() - repoScanStart;
     const repoScanSummary = dedupedFindings.reduce<Record<string, number>>((acc, f) => {
