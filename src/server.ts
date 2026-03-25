@@ -196,10 +196,17 @@ app.use((req, res, next) => {
 });
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
+//
+// In test mode (NODE_ENV=test) both limiters use a very high cap so that
+// multiple test files loading the server in the same process (sharing module
+// cache and therefore limiter state) never exhaust the per-IP budget before
+// all assertions run.  Production limits are unaffected.
+
+const IS_TEST = process.env.NODE_ENV === 'test';
 
 const scanLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 20,
+  max: IS_TEST ? 10_000 : 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many scan requests from this IP. Limit: 20 requests per minute.' },
@@ -207,11 +214,25 @@ const scanLimiter = rateLimit({
 
 const scanRepoLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 5,
+  max: IS_TEST ? 10_000 : 5,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many scan-repo requests from this IP. Limit: 5 requests per minute (GitHub API calls).' },
 });
+
+/**
+ * Resets the in-memory hit counters for both rate limiters.
+ * Exported for test use only — do not call in production code.
+ * Vitest loads the server module once per process (module cache is shared
+ * across test files), so calling this in beforeAll() guarantees a clean
+ * slate for each test suite regardless of execution order.
+ */
+export async function resetRateLimiters(): Promise<void> {
+  await Promise.all([
+    scanLimiter.resetKey('127.0.0.1'),
+    scanRepoLimiter.resetKey('127.0.0.1'),
+  ]);
+}
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.1.0' });
