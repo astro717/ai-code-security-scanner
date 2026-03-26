@@ -64,9 +64,17 @@ Place a `.ai-sec-scan.json` in your project root (or pass `--config`):
 {
   "severity": "medium",
   "format": "sarif",
+  "fix": true,
   "ignore": ["dist/**", "**/*.test.ts", "**/*.spec.ts"]
 }
 ```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `severity` | `string` | Minimum severity to include (`critical` \| `high` \| `medium` \| `low`). Default: `low` |
+| `format` | `string` | Default output format (`text` \| `json` \| `sarif` \| `html` \| `junit`). Default: `text` |
+| `fix` | `boolean` | Apply auto-fixes for supported finding types (equivalent to `--fix` on every run). Default: `false` |
+| `ignore` | `string[]` | Glob patterns to exclude from scanning (merged with `--ignore` flags). |
 
 CLI flags override config file values.
 
