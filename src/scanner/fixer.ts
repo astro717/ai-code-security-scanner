@@ -93,6 +93,31 @@ const FIX_RULES: FixRule[] = [
       return fixed !== line ? fixed : null;
     },
   },
+
+  // ── WEAK_CRYPTO: createHash('md5'|'sha1') → createHash('sha256') ──────────
+  {
+    types: ['WEAK_CRYPTO'],
+    description: "Replace weak hash algorithm (MD5/SHA-1) with SHA-256",
+    transform(line: string): string | null {
+      if (!/createHash\s*\(\s*['"](?:md5|sha1?)['"]/.test(line)) return null;
+      const fixed = line.replace(
+        /createHash\s*\(\s*['"](?:md5|sha1?)['"]\s*\)/gi,
+        "createHash('sha256')",
+      );
+      return fixed !== line ? fixed : null;
+    },
+  },
+
+  // ── XSS: .innerHTML = → .textContent = ────────────────────────────────────
+  {
+    types: ['XSS'],
+    description: 'Replace innerHTML assignment with textContent (prevents XSS)',
+    transform(line: string): string | null {
+      if (!/\.innerHTML\s*=/.test(line)) return null;
+      const fixed = line.replace(/\.innerHTML\s*=/g, '.textContent =');
+      return fixed !== line ? fixed : null;
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────

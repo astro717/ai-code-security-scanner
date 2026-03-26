@@ -36,6 +36,47 @@ const deps_1 = require("./scanner/detectors/deps");
 const python_parser_1 = require("./scanner/python-parser");
 const go_parser_1 = require("./scanner/go-parser");
 const java_parser_1 = require("./scanner/java-parser");
+const csharp_parser_1 = require("./scanner/csharp-parser");
+const c_parser_1 = require("./scanner/c-parser");
+const ruby_parser_1 = require("./scanner/ruby-parser");
+function validateRequestBody(body, schema, endpointName) {
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        return { valid: false, errors: [`${endpointName} request body must be a JSON object`] };
+    }
+    const record = body;
+    const errors = [];
+    // Only validate required fields — optional field types are validated by
+    // downstream per-field checks which produce more specific error messages.
+    for (const [key, rule] of Object.entries(schema)) {
+        if (!rule.required)
+            continue;
+        const val = record[key];
+        if (val === undefined || val === null) {
+            errors.push(`Missing required field: ${key} (${rule.type})`);
+        }
+        else if (rule.type === 'string' && typeof val !== 'string') {
+            errors.push(`Field "${key}" must be a ${rule.type}, got ${typeof val}`);
+        }
+    }
+    return errors.length > 0 ? { valid: false, errors } : { valid: true };
+}
+const SCAN_BODY_SCHEMA = {
+    code: { type: 'string', required: true },
+    filename: { type: 'string' },
+    packageJson: { type: 'string' },
+    aiExplain: { type: 'boolean' },
+    ignoreTypes: { type: 'array', items: 'string' },
+    webhookUrl: { type: 'string' },
+    webhookSecret: { type: 'string' },
+};
+const SCAN_REPO_BODY_SCHEMA = {
+    repoUrl: { type: 'string', required: true },
+    branch: { type: 'string' },
+    ignorePatterns: { type: 'array', items: 'string' },
+    ignoreTypes: { type: 'array', items: 'string' },
+    webhookUrl: { type: 'string' },
+    webhookSecret: { type: 'string' },
+};
 // LLM calls can be slow — 30 s gives ample time for a response while bounding
 // the maximum time a single /scan?aiExplain=true request can block the server.
 const ANTHROPIC_REQUEST_TIMEOUT_MS = 30000;
@@ -89,7 +130,7 @@ async function explainFinding(finding, apiKey) {
 
 Vulnerability type: ${finding.type}
 Severity: ${finding.severity}
-Code snippet: ${finding.snippet}
+Code snippet: ${finding.snippet ?? '(not available)'}
 Message: ${finding.message}
 
 Respond with exactly this JSON structure:
@@ -289,6 +330,8 @@ app.get('/health', (_req, res) => {
     res.json({ status: 'ok', version: '0.1.0' });
 });
 app.post('/scan', scanLimiter, async (req, res) => {
+    // ?sarif=true returns a SARIF 2.1.0 document instead of the default JSON shape.
+    const sarifMode = req.query['sarif'] === 'true';
     // Explicit payload size guard (belt-and-suspenders on top of express.json limit)
     const rawLength = parseInt(req.headers['content-length'] ?? '0', 10);
     if (rawLength > PAYLOAD_LIMIT_BYTES) {
@@ -320,6 +363,12 @@ app.post('/scan', scanLimiter, async (req, res) => {
     // If requestAnthropicKey is null, the response was already sent (invalid key).
     if (requestAnthropicKey === null)
         return;
+    // Schema validation — reject malformed requests early with detailed errors.
+    const scanValidation = validateRequestBody(req.body, SCAN_BODY_SCHEMA, '/scan');
+    if (!scanValidation.valid) {
+        res.status(400).json({ error: scanValidation.errors.join('; ') });
+        return;
+    }
     const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes, webhookUrl, webhookSecret } = req.body;
     if (!code || typeof code !== 'string') {
         res.status(400).json({ error: 'Missing required field: code (string)' });
@@ -344,6 +393,18 @@ app.post('/scan', scanLimiter, async (req, res) => {
         // Strip any remaining path components — only keep the base name
         filename = path_1.default.basename(rawFilename);
     }
+    // Validate ignoreTypes — reject unknown type strings so callers learn about
+    // typos early instead of silently getting unfiltered results.
+    if (Array.isArray(ignoreTypes) && ignoreTypes.length > 0) {
+        const stringTypes = ignoreTypes.filter((t) => typeof t === 'string').map((t) => t.trim().toUpperCase());
+        const unknown = stringTypes.filter((t) => !reporter_1.KNOWN_TYPES.has(t));
+        if (unknown.length > 0) {
+            res.status(400).json({
+                error: `Unknown ignoreTypes: ${unknown.join(', ')}. Valid types: ${[...reporter_1.KNOWN_TYPES].sort().join(', ')}`,
+            });
+            return;
+        }
+    }
     const effectiveFilename = filename ?? 'input.tsx';
     const ext = path_1.default.extname(effectiveFilename).toLowerCase();
     let findings;
@@ -361,6 +422,21 @@ app.post('/scan', scanLimiter, async (req, res) => {
         // Go files use the dedicated regex-based Go scanner
         const goResult = (0, go_parser_1.parseGoCode)(code, effectiveFilename);
         findings = (0, go_parser_1.scanGo)(goResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+    }
+    else if (ext === '.cs') {
+        // C# files use the dedicated regex-based C# scanner
+        const csResult = (0, csharp_parser_1.parseCSharpCode)(code, effectiveFilename);
+        findings = (0, csharp_parser_1.scanCSharp)(csResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+    }
+    else if (['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp'].includes(ext)) {
+        // C/C++ files use the dedicated regex-based C scanner
+        const cResult = (0, c_parser_1.parseCCode)(code, effectiveFilename);
+        findings = (0, c_parser_1.scanC)(cResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+    }
+    else if (ext === '.rb') {
+        // Ruby files use the dedicated regex-based Ruby scanner
+        const rbResult = (0, ruby_parser_1.parseRubyCode)(code, effectiveFilename);
+        findings = (0, ruby_parser_1.scanRuby)(rbResult).map((f) => ({ ...f, file: filename ?? 'input' }));
     }
     else {
         // JS/TS files use the AST-based parser and detector suite
@@ -424,6 +500,11 @@ app.post('/scan', scanLimiter, async (req, res) => {
         findings_by_severity: scanSummary,
         ai_enriched: !!aiExplain,
     });
+    if (sarifMode) {
+        res.setHeader('Content-Type', 'application/sarif+json');
+        res.json((0, sarif_1.buildSARIF)(findings));
+        return;
+    }
     const responsePayload = { findings, summary: (0, reporter_1.summarize)(findings) };
     res.json(responsePayload);
     // Fire-and-forget webhook delivery after responding to the client
@@ -505,7 +586,7 @@ async function collectFiles(apiBase, dirPath, branch, collected, max, ignorePatt
             continue;
         if (item.type === 'file') {
             const ext = item.name.split('.').pop() ?? '';
-            if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'java'].includes(ext) && item.size <= 200 * 1024) {
+            if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'java', 'cs', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'rb'].includes(ext) && item.size <= 200 * 1024) {
                 collected.push(item);
             }
         }
@@ -518,6 +599,12 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
     // ?sarif=true returns a SARIF 2.1.0 document instead of the default JSON shape.
     // This enables GitHub Code Scanning integration for repository scans.
     const sarifMode = req.query['sarif'] === 'true';
+    // Schema validation — reject malformed requests early with detailed errors.
+    const repoValidation = validateRequestBody(req.body, SCAN_REPO_BODY_SCHEMA, '/scan-repo');
+    if (!repoValidation.valid) {
+        res.status(400).json({ error: repoValidation.errors.join('; ') });
+        return;
+    }
     const { repoUrl, branch = 'main', ignorePatterns = [], ignoreTypes, webhookUrl, webhookSecret } = req.body;
     if (!repoUrl || typeof repoUrl !== 'string') {
         res.status(400).json({ error: 'Missing required field: repoUrl (string)' });
@@ -577,6 +664,18 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
                 else if (ext === '.java') {
                     const parsed = (0, java_parser_1.parseJavaCode)(code, item.path);
                     findings = (0, java_parser_1.scanJava)(parsed);
+                }
+                else if (ext === '.cs') {
+                    const parsed = (0, csharp_parser_1.parseCSharpCode)(code, item.path);
+                    findings = (0, csharp_parser_1.scanCSharp)(parsed);
+                }
+                else if (['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp'].includes(ext)) {
+                    const parsed = (0, c_parser_1.parseCCode)(code, item.path);
+                    findings = (0, c_parser_1.scanC)(parsed);
+                }
+                else if (ext === '.rb') {
+                    const parsed = (0, ruby_parser_1.parseRubyCode)(code, item.path);
+                    findings = (0, ruby_parser_1.scanRuby)(parsed);
                 }
                 else {
                     // JS/TS — use AST-based detectors

@@ -197,7 +197,7 @@ async function scanDocument(
 async function scanWorkspace(
   collection: vscode.DiagnosticCollection,
 ): Promise<void> {
-  const supportedGlob = '**/*.{ts,tsx,js,jsx,mjs,cjs}';
+  const supportedGlob = '**/*.{ts,tsx,js,jsx,mjs,cjs,py,go,java,cs,c,cpp,h,hpp,rb}';
   const files = await vscode.workspace.findFiles(supportedGlob, '**/node_modules/**');
 
   // Load .aiscanner ignore patterns from the workspace root
@@ -475,6 +475,13 @@ export function activate(context: vscode.ExtensionContext): void {
     { language: 'typescriptreact' },
     { language: 'javascript' },
     { language: 'javascriptreact' },
+    { language: 'python' },
+    { language: 'go' },
+    { language: 'java' },
+    { language: 'csharp' },
+    { language: 'c' },
+    { language: 'cpp' },
+    { language: 'ruby' },
   ];
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider(supportedLanguages, codeLensProvider),
@@ -548,6 +555,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const autoScan: boolean = config.get('autoScanOnSave') ?? true;
       const supported = [
         'typescript', 'typescriptreact', 'javascript', 'javascriptreact',
+        'python', 'go', 'java', 'csharp', 'c', 'cpp', 'ruby',
       ];
       if (autoScan && supported.includes(document.languageId)) {
         void scanDocumentWithStatus(document);
@@ -645,7 +653,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Scan the currently active file on activation (if supported)
   const active = vscode.window.activeTextEditor;
-  const supportedLangs = ['typescript', 'typescriptreact', 'javascript', 'javascriptreact'];
+  const supportedLangs = [
+    'typescript', 'typescriptreact', 'javascript', 'javascriptreact',
+    'python', 'go', 'java', 'csharp', 'c', 'cpp', 'ruby',
+  ];
   if (active && supportedLangs.includes(active.document.languageId)) {
     void scanDocumentWithStatus(active.document);
   }

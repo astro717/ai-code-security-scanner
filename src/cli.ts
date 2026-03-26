@@ -553,12 +553,6 @@ program
     'Dramatically faster for PR-gating workflows where only changed files matter.',
   )
   .option(
-    '--fix',
-    'Automatically apply safe remediations for findings that have known fixes ' +
-    '(e.g. Math.random -> crypto.randomBytes, eval -> JSON.parse, md5 -> sha256). ' +
-    'Modified files are written in-place. Only applies fixes where the replacement is unambiguous.',
-  )
-  .option(
     '--severity-exit <level>',
     'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
@@ -751,34 +745,6 @@ program
       const suppressed = before - filtered.length;
       if (suppressed > 0) {
         console.error(`[ignore-type] ${suppressed} finding(s) suppressed for type(s): ${[...suppressedTypes].join(', ')}`);
-      }
-    }
-
-    // ── --fix auto-remediation ────────────────────────────────────────────
-    if (options.fix && filtered.length > 0) {
-      const { applyFixes } = await import('./scanner/autofix.js');
-      // Group findings by file for efficient batch fixing
-      const byFile = new Map<string, Finding[]>();
-      for (const f of filtered) {
-        const file = f.file ?? '';
-        if (!file) continue;
-        if (!byFile.has(file)) byFile.set(file, []);
-        byFile.get(file)!.push(f);
-      }
-      let totalFixed = 0;
-      for (const [file, fileFindings] of byFile) {
-        const results = applyFixes(file, fileFindings);
-        for (const r of results) {
-          console.error(`  [fix] ${path.relative(process.cwd(), r.file)}:${r.line} — ${r.description}`);
-          console.error(`         ${r.before}`);
-          console.error(`      -> ${r.after}`);
-          totalFixed++;
-        }
-      }
-      if (totalFixed > 0) {
-        console.error(`[fix] Applied ${totalFixed} auto-fix(es). Re-scan to verify.`);
-      } else {
-        console.error('[fix] No auto-fixable findings found.');
       }
     }
 

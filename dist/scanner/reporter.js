@@ -37,6 +37,9 @@ exports.KNOWN_TYPES = new Set([
     'INSECURE_BINDING',
     'XML_INJECTION',
     'LDAP_INJECTION',
+    'BUFFER_OVERFLOW',
+    'MASS_ASSIGNMENT',
+    'FORMAT_STRING',
 ]);
 /**
  * Removes duplicate findings based on a stable key of (type, file, line, column).
