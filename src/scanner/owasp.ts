@@ -90,6 +90,7 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   // A03 — Injection
   SQL_INJECTION:          'A03:2021',
   COMMAND_INJECTION:      'A03:2021',
+  COMMAND_INJECTION_C:    'A03:2021',
   SHELL_INJECTION:        'A03:2021',
   EVAL_INJECTION:         'A03:2021',
   XSS:                    'A03:2021',

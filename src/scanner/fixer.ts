@@ -147,6 +147,22 @@ const FIX_RULES: FixRule[] = [
       return fixed1 !== line ? fixed1 : null;
     },
   },
+  // ── JWT_DECODE_NO_VERIFY: jwt.decode(token) → jwt.verify(token, secret, { algorithms: ['HS256'] }) ──
+  {
+    types: ['JWT_DECODE_NO_VERIFY'],
+    description: "Replace jwt.decode(token) with jwt.verify(token, secret, { algorithms: ['HS256'] })",
+    transform(line: string): string | null {
+      // Match jwt.decode(token) — must NOT already have jwt.verify on this line
+      const match = line.match(/\bjwt\.decode\s*\(([^)]+)\)/);
+      if (!match) return null;
+      const tokenExpr = match[1]!.trim();
+      const fixed = line.replace(
+        /\bjwt\.decode\s*\([^)]+\)/,
+        `jwt.verify(${tokenExpr}, secret, { algorithms: ['HS256'] })`,
+      );
+      return fixed !== line ? fixed : null;
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────
