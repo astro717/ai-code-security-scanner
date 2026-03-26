@@ -2,6 +2,7 @@
 import { program } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import { minimatch } from 'minimatch';
 import { parseFile } from './scanner/parser';
 import { detectSecrets } from './scanner/detectors/secrets';
@@ -24,14 +25,15 @@ import { Finding, printFindings, formatFindingsText, formatJSON, summarize, dedu
 import { detectUnsafeDeps } from './scanner/detectors/deps';
 import { buildSARIF } from './scanner/sarif';
 import { buildHTMLReport } from './scanner/htmlReport';
+import { buildJUnit } from './scanner/junit';
 import { parsePythonFile, scanPython } from './scanner/python-parser';
 import { parseGoFile, scanGo } from './scanner/go-parser';
 import { parseJavaFile, scanJava } from './scanner/java-parser';
 import { parseCSharpFile, scanCSharp } from './scanner/csharp-parser';
 import { parseCFile, scanC } from './scanner/c-parser';
 import { parseRubyFile, scanRuby } from './scanner/ruby-parser';
-import { initCache, persistCache } from './scanner/scan-cache';
-import { contentHash, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/cache';
+import { initCache, persistCache, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/scan-cache';
+import { applyFixes, printFixSummary } from './scanner/fixer';
 import * as os from 'os';
 
 // JS/TS extensions use the TypeScript ESLint AST parser.
@@ -235,7 +237,7 @@ function scanFileUncached(filePath: string): Finding[] {
 interface AiSecScanConfig {
   ignore?: string[];
   severity?: string;
-  format?: 'text' | 'json' | 'sarif' | 'html';
+  format?: 'text' | 'json' | 'sarif' | 'html' | 'junit';
 }
 
 /** Validates a parsed config object against the AiSecScanConfig schema.
@@ -248,7 +250,7 @@ function validateConfig(obj: unknown): string[] {
 
   const allowed = new Set(['ignore', 'severity', 'format']);
   const knownSeverities = new Set(['critical', 'high', 'medium', 'low']);
-  const knownFormats = new Set(['text', 'json', 'sarif']);
+  const knownFormats = new Set(['text', 'json', 'sarif', 'html', 'junit']);
 
   // Check for unknown keys — a typo here silently dropped config before this fix
   for (const key of Object.keys(obj as Record<string, unknown>)) {
@@ -475,7 +477,7 @@ program
     'Write a self-contained HTML report to <output-path>. Shorthand for --format html --output <output-path>. ' +
     'The file can be opened directly in a browser without a server.',
   )
-  .option('--format <format>', 'Output format: text | json | sarif | html (overrides --json / --sarif flags)')
+  .option('--format <format>', 'Output format: text | json | sarif | html | junit (overrides --json / --sarif flags)')
   .option('--severity <level>', 'Minimum severity to report (critical|high|medium|low)', 'low')
   .option(
     '--min-severity <level>',
@@ -546,11 +548,33 @@ program
     'Useful for verifying that the scan cache is working correctly in CI.',
   )
   .option(
+    '--diff-only',
+    'Scan only files changed according to git (uses git diff --name-only HEAD). ' +
+    'Dramatically faster for PR-gating workflows where only changed files matter.',
+  )
+  .option(
+    '--fix',
+    'Automatically apply safe remediations for findings that have known fixes ' +
+    '(e.g. Math.random -> crypto.randomBytes, eval -> JSON.parse, md5 -> sha256). ' +
+    'Modified files are written in-place. Only applies fixes where the replacement is unambiguous.',
+  )
+  .option(
     '--severity-exit <level>',
     'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean }) => {
+  .option(
+    '--fix',
+    'Auto-apply safe remediations for findings with a known mechanical fix. ' +
+    'Currently supports: INSECURE_RANDOM (Math.random -> crypto.randomBytes), ' +
+    'EVAL_INJECTION (eval(x) -> JSON.parse(x)). ' +
+    'Fixes are applied in-place; unsupported finding types are reported as requiring manual action.',
+  )
+  .option(
+    '--dry-run',
+    'Used with --fix: compute and display all remediations that would be applied without writing any files.',
+  )
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean }) => {
     // --html <path>: shorthand for --format html --output <path>.
     // Explicit --format / --output take precedence if both are provided.
     if (options.html) {
@@ -608,7 +632,35 @@ program
     }
 
     // ── One-shot scan ───────────────────────────────────────────────────────
-    const files = collectFiles(scanRoot, effectiveIgnore);
+    // Initialise the disk-backed scan cache so results are persisted across runs.
+    // Watch mode already calls initCache() inside startWatchMode().
+    initCache();
+
+    let files = collectFiles(scanRoot, effectiveIgnore);
+
+    // --diff-only: restrict to git-changed files only
+    if (options.diffOnly) {
+      try {
+        const gitOutput = execSync('git diff --name-only HEAD', {
+          cwd: scanRootDir,
+          encoding: 'utf-8',
+          timeout: 10_000,
+        });
+        const changedRelPaths = gitOutput
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0);
+        const changedAbsPaths = new Set(
+          changedRelPaths.map((rel) => path.resolve(scanRootDir, rel)),
+        );
+        const before = files.length;
+        files = files.filter((f) => changedAbsPaths.has(path.resolve(f)));
+        console.error(`[diff-only] ${files.length} changed file(s) to scan (${before} total in tree)`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[diff-only] Warning: git diff failed (${msg}). Falling back to full scan.`);
+      }
+    }
     const allFindings: Finding[] = [];
     const total = files.length;
 
@@ -651,11 +703,10 @@ program
       const stats = getCacheStats();
       const totalLookups = stats.hits + stats.misses;
       const hitRatio = totalLookups > 0 ? ((stats.hits / totalLookups) * 100).toFixed(1) : '0.0';
-      const cacheSizeStr = stats.size < 1024 ? `${stats.size} B` : `${(stats.size / 1024).toFixed(1)} KB`;
       console.error(
         `[cache-stats] hits: ${stats.hits}  misses: ${stats.misses}  ` +
-        `ratio: ${hitRatio}%  entries: ${stats.size}  ` +
-        `size: ${cacheSizeStr}`
+        `ratio: ${hitRatio}%  entries: ${stats.entries}  ` +
+        `path: ${stats.cachePath ?? '(disabled)'}`
       );
     }
 
@@ -663,6 +714,9 @@ program
     if (fs.statSync(scanRoot).isDirectory()) {
       allFindings.push(...detectUnsafeDeps(scanRoot));
     }
+
+    // Flush the scan cache to disk so cached results are available for the next run.
+    persistCache();
 
     // Deduplicate by (type, file, line, column) before reporting.
     // Multiple detectors can flag the same location; deduplication eliminates
@@ -697,6 +751,34 @@ program
       const suppressed = before - filtered.length;
       if (suppressed > 0) {
         console.error(`[ignore-type] ${suppressed} finding(s) suppressed for type(s): ${[...suppressedTypes].join(', ')}`);
+      }
+    }
+
+    // ── --fix auto-remediation ────────────────────────────────────────────
+    if (options.fix && filtered.length > 0) {
+      const { applyFixes } = await import('./scanner/autofix.js');
+      // Group findings by file for efficient batch fixing
+      const byFile = new Map<string, Finding[]>();
+      for (const f of filtered) {
+        const file = f.file ?? '';
+        if (!file) continue;
+        if (!byFile.has(file)) byFile.set(file, []);
+        byFile.get(file)!.push(f);
+      }
+      let totalFixed = 0;
+      for (const [file, fileFindings] of byFile) {
+        const results = applyFixes(file, fileFindings);
+        for (const r of results) {
+          console.error(`  [fix] ${path.relative(process.cwd(), r.file)}:${r.line} — ${r.description}`);
+          console.error(`         ${r.before}`);
+          console.error(`      -> ${r.after}`);
+          totalFixed++;
+        }
+      }
+      if (totalFixed > 0) {
+        console.error(`[fix] Applied ${totalFixed} auto-fix(es). Re-scan to verify.`);
+      } else {
+        console.error('[fix] No auto-fixable findings found.');
       }
     }
 
@@ -746,6 +828,28 @@ program
       }
     }
 
+    // ── --fix: auto-remediation ─────────────────────────────────────────────
+    if (options.fix || options.dryRun) {
+      if (options.dryRun && !options.fix) {
+        console.error('[fix] --dry-run requires --fix. Ignoring --dry-run.');
+      } else {
+        const fixResults = applyFixes(filtered, options.dryRun ?? false);
+        printFixSummary(fixResults, options.dryRun ?? false);
+        // Re-filter: remove findings that were successfully fixed from the reported output
+        // so the scan output reflects the remaining (unfixed) state.
+        if (!options.dryRun) {
+          const fixedKeys = new Set(
+            fixResults
+              .filter((r) => r.applied)
+              .map((r) => `${r.finding.type}|${r.file ?? ''}|${r.finding.line}|${r.finding.column}`),
+          );
+          filtered = filtered.filter(
+            (f) => !fixedKeys.has(`${f.type}|${f.file ?? ''}|${f.line}|${f.column}`),
+          );
+        }
+      }
+    }
+
     // --output routes output to a file; otherwise use stdout
     const outputPath = options.output ? path.resolve(options.output) : undefined;
     function emit(text: string): void {
@@ -761,6 +865,11 @@ program
       emit(JSON.stringify(buildSARIF(filtered), null, 2));
     } else if (effectiveFormat === 'json') {
       emit(formatJSON(filtered));
+    } else if (effectiveFormat === 'junit') {
+      emit(buildJUnit(filtered, scanRoot));
+      if (outputPath) {
+        console.error('[junit] JUnit XML report written. Import into your CI system as a test result artifact.');
+      }
     } else if (effectiveFormat === 'html') {
       emit(buildHTMLReport(filtered, scanRoot));
       if (outputPath) {
