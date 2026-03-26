@@ -248,4 +248,27 @@ describe('/scan ignoreTypes filtering', () => {
     // (we know SECRET_HARDCODED is present in the raw output)
     expect(filteredCount).toBeLessThan(rawTotal);
   });
+
+  test('rejects unknown ignoreTypes with 400 and lists valid types', async () => {
+    const res = await post(serverPort, '/scan', {
+      code: CODE_WITH_SQL_INJECTION,
+      filename: 'unknown-type.ts',
+      ignoreTypes: ['TOTALLY_FAKE_TYPE'],
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.body as { error?: string };
+    expect(body.error).toContain('Unknown ignoreTypes');
+    expect(body.error).toContain('TOTALLY_FAKE_TYPE');
+  });
+
+  test('rejects a mix of valid and unknown ignoreTypes with 400', async () => {
+    const res = await post(serverPort, '/scan', {
+      code: CODE_WITH_SQL_INJECTION,
+      filename: 'mixed-type.ts',
+      ignoreTypes: ['SQL_INJECTION', 'NOT_A_REAL_TYPE'],
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.body as { error?: string };
+    expect(body.error).toContain('NOT_A_REAL_TYPE');
+  });
 });

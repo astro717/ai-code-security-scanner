@@ -37,6 +37,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const commander_1 = require("commander");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const child_process_1 = require("child_process");
 const minimatch_1 = require("minimatch");
 const parser_1 = require("./scanner/parser");
 const secrets_1 = require("./scanner/detectors/secrets");
@@ -59,6 +60,7 @@ const reporter_1 = require("./scanner/reporter");
 const deps_1 = require("./scanner/detectors/deps");
 const sarif_1 = require("./scanner/sarif");
 const htmlReport_1 = require("./scanner/htmlReport");
+const junit_1 = require("./scanner/junit");
 const python_parser_1 = require("./scanner/python-parser");
 const go_parser_1 = require("./scanner/go-parser");
 const java_parser_1 = require("./scanner/java-parser");
@@ -66,7 +68,7 @@ const csharp_parser_1 = require("./scanner/csharp-parser");
 const c_parser_1 = require("./scanner/c-parser");
 const ruby_parser_1 = require("./scanner/ruby-parser");
 const scan_cache_1 = require("./scanner/scan-cache");
-const cache_1 = require("./scanner/cache");
+const fixer_1 = require("./scanner/fixer");
 const os = __importStar(require("os"));
 // JS/TS extensions use the TypeScript ESLint AST parser.
 // Python files use the regex-based python-parser module.
@@ -150,11 +152,11 @@ function scanFile(filePath) {
     catch {
         return [];
     }
-    const cached = (0, cache_1.getCachedFindings)(filePath, fileContent);
+    const cached = (0, scan_cache_1.getCachedFindings)(filePath, fileContent);
     if (cached)
         return cached;
     const findings = scanFileUncached(filePath);
-    (0, cache_1.setCachedFindings)(filePath, fileContent, findings);
+    (0, scan_cache_1.setCachedFindings)(filePath, fileContent, findings);
     return findings;
 }
 function scanFileUncached(filePath) {
@@ -268,7 +270,7 @@ function validateConfig(obj) {
     }
     const allowed = new Set(['ignore', 'severity', 'format']);
     const knownSeverities = new Set(['critical', 'high', 'medium', 'low']);
-    const knownFormats = new Set(['text', 'json', 'sarif']);
+    const knownFormats = new Set(['text', 'json', 'sarif', 'html', 'junit']);
     // Check for unknown keys — a typo here silently dropped config before this fix
     for (const key of Object.keys(obj)) {
         if (!allowed.has(key)) {
@@ -466,7 +468,7 @@ commander_1.program
     .option('--sarif', 'Output results as SARIF 2.1.0')
     .option('--html <output-path>', 'Write a self-contained HTML report to <output-path>. Shorthand for --format html --output <output-path>. ' +
     'The file can be opened directly in a browser without a server.')
-    .option('--format <format>', 'Output format: text | json | sarif | html (overrides --json / --sarif flags)')
+    .option('--format <format>', 'Output format: text | json | sarif | html | junit (overrides --json / --sarif flags)')
     .option('--severity <level>', 'Minimum severity to report (critical|high|medium|low)', 'low')
     .option('--min-severity <level>', 'Minimum severity level that triggers a non-zero exit code (critical|high|medium|low). ' +
     'Defaults to high when omitted (only critical/high cause failure).')
@@ -500,8 +502,15 @@ commander_1.program
     'Falls back to sequential scanning if worker_threads is unavailable.')
     .option('--cache-stats', 'Print cache hit/miss ratio and cache file size at the end of a scan. ' +
     'Useful for verifying that the scan cache is working correctly in CI.')
+    .option('--diff-only', 'Scan only files changed according to git (uses git diff --name-only HEAD). ' +
+    'Dramatically faster for PR-gating workflows where only changed files matter.')
     .option('--severity-exit <level>', 'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.')
+    .option('--fix', 'Auto-apply safe remediations for findings with a known mechanical fix. ' +
+    'Currently supports: INSECURE_RANDOM (Math.random -> crypto.randomBytes), ' +
+    'EVAL_INJECTION (eval(x) -> JSON.parse(x)). ' +
+    'Fixes are applied in-place; unsupported finding types are reported as requiring manual action.')
+    .option('--dry-run', 'Used with --fix: compute and display all remediations that would be applied without writing any files.')
     .action(async (targetPath, options) => {
     // --html <path>: shorthand for --format html --output <path>.
     // Explicit --format / --output take precedence if both are provided.
@@ -554,7 +563,32 @@ commander_1.program
         return;
     }
     // ── One-shot scan ───────────────────────────────────────────────────────
-    const files = collectFiles(scanRoot, effectiveIgnore);
+    // Initialise the disk-backed scan cache so results are persisted across runs.
+    // Watch mode already calls initCache() inside startWatchMode().
+    (0, scan_cache_1.initCache)();
+    let files = collectFiles(scanRoot, effectiveIgnore);
+    // --diff-only: restrict to git-changed files only
+    if (options.diffOnly) {
+        try {
+            const gitOutput = (0, child_process_1.execSync)('git diff --name-only HEAD', {
+                cwd: scanRootDir,
+                encoding: 'utf-8',
+                timeout: 10000,
+            });
+            const changedRelPaths = gitOutput
+                .split('\n')
+                .map((l) => l.trim())
+                .filter((l) => l.length > 0);
+            const changedAbsPaths = new Set(changedRelPaths.map((rel) => path.resolve(scanRootDir, rel)));
+            const before = files.length;
+            files = files.filter((f) => changedAbsPaths.has(path.resolve(f)));
+            console.error(`[diff-only] ${files.length} changed file(s) to scan (${before} total in tree)`);
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[diff-only] Warning: git diff failed (${msg}). Falling back to full scan.`);
+        }
+    }
     const allFindings = [];
     const total = files.length;
     if (options.parallel && total > 1) {
@@ -583,25 +617,26 @@ commander_1.program
         }
     }
     if (total > 1) {
-        const stats = (0, cache_1.getCacheStats)();
+        const stats = (0, scan_cache_1.getCacheStats)();
         if (stats.hits > 0) {
             console.error(`[cache] ${stats.hits} file(s) served from cache, ${stats.misses} scanned`);
         }
     }
     // ── --cache-stats output ─────────────────────────────────────────────────
     if (options.cacheStats) {
-        const stats = (0, cache_1.getCacheStats)();
+        const stats = (0, scan_cache_1.getCacheStats)();
         const totalLookups = stats.hits + stats.misses;
         const hitRatio = totalLookups > 0 ? ((stats.hits / totalLookups) * 100).toFixed(1) : '0.0';
-        const cacheSizeStr = stats.size < 1024 ? `${stats.size} B` : `${(stats.size / 1024).toFixed(1)} KB`;
         console.error(`[cache-stats] hits: ${stats.hits}  misses: ${stats.misses}  ` +
-            `ratio: ${hitRatio}%  entries: ${stats.size}  ` +
-            `size: ${cacheSizeStr}`);
+            `ratio: ${hitRatio}%  entries: ${stats.entries}  ` +
+            `path: ${stats.cachePath ?? '(disabled)'}`);
     }
     // ── Dependency scanning (directory targets only) ─────────────────────────
     if (fs.statSync(scanRoot).isDirectory()) {
         allFindings.push(...(0, deps_1.detectUnsafeDeps)(scanRoot));
     }
+    // Flush the scan cache to disk so cached results are available for the next run.
+    (0, scan_cache_1.persistCache)();
     // Deduplicate by (type, file, line, column) before reporting.
     // Multiple detectors can flag the same location; deduplication eliminates
     // noise in large scans without losing any unique signals.
@@ -673,6 +708,24 @@ commander_1.program
             console.error(`[baseline] Warning: could not load baseline file: ${msg}`);
         }
     }
+    // ── --fix: auto-remediation ─────────────────────────────────────────────
+    if (options.fix || options.dryRun) {
+        if (options.dryRun && !options.fix) {
+            console.error('[fix] --dry-run requires --fix. Ignoring --dry-run.');
+        }
+        else {
+            const fixResults = (0, fixer_1.applyFixes)(filtered, options.dryRun ?? false);
+            (0, fixer_1.printFixSummary)(fixResults, options.dryRun ?? false);
+            // Re-filter: remove findings that were successfully fixed from the reported output
+            // so the scan output reflects the remaining (unfixed) state.
+            if (!options.dryRun) {
+                const fixedKeys = new Set(fixResults
+                    .filter((r) => r.applied)
+                    .map((r) => `${r.finding.type}|${r.file ?? ''}|${r.finding.line}|${r.finding.column}`));
+                filtered = filtered.filter((f) => !fixedKeys.has(`${f.type}|${f.file ?? ''}|${f.line}|${f.column}`));
+            }
+        }
+    }
     // --output routes output to a file; otherwise use stdout
     const outputPath = options.output ? path.resolve(options.output) : undefined;
     function emit(text) {
@@ -689,6 +742,12 @@ commander_1.program
     }
     else if (effectiveFormat === 'json') {
         emit((0, reporter_1.formatJSON)(filtered));
+    }
+    else if (effectiveFormat === 'junit') {
+        emit((0, junit_1.buildJUnit)(filtered, scanRoot));
+        if (outputPath) {
+            console.error('[junit] JUnit XML report written. Import into your CI system as a test result artifact.');
+        }
     }
     else if (effectiveFormat === 'html') {
         emit((0, htmlReport_1.buildHTMLReport)(filtered, scanRoot));

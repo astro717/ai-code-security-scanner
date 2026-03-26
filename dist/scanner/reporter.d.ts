@@ -10,7 +10,8 @@ export interface Finding {
     severity: Severity;
     line: number;
     column: number;
-    snippet: string;
+    /** Code snippet at the finding location. May be absent for some detectors. */
+    snippet?: string;
     message: string;
     file?: string;
 }

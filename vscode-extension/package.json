@@ -36,7 +36,14 @@
     "onLanguage:typescript",
     "onLanguage:typescriptreact",
     "onLanguage:javascript",
-    "onLanguage:javascriptreact"
+    "onLanguage:javascriptreact",
+    "onLanguage:python",
+    "onLanguage:go",
+    "onLanguage:java",
+    "onLanguage:csharp",
+    "onLanguage:c",
+    "onLanguage:cpp",
+    "onLanguage:ruby"
   ],
   "main": "./out/extension.js",
   "contributes": {
