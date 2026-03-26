@@ -1,3 +1,5 @@
+import { getOwaspCategory } from './owasp';
+
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
 /**
@@ -81,7 +83,11 @@ export function summarize(findings: Finding[]): ScanSummary {
 }
 
 export function formatJSON(findings: Finding[]): string {
-  return JSON.stringify({ findings, summary: summarize(findings) }, null, 2);
+  const enriched = findings.map((f) => {
+    const owasp = getOwaspCategory(f.type);
+    return owasp ? { ...f, owasp: owasp.id } : f;
+  });
+  return JSON.stringify({ findings: enriched, summary: summarize(findings) }, null, 2);
 }
 
 // Lazy chalk import for CommonJS compatibility
@@ -114,7 +120,9 @@ export function formatFindingsText(findings: Finding[], targetPath: string): str
 
   for (const f of findings) {
     const fileRef = f.file ? `${f.file}:` : '';
-    lines.push(`  [${SEVERITY_LABELS[f.severity]}] [${f.type}] ${fileRef}line ${f.line}`);
+    const owasp = getOwaspCategory(f.type);
+    const owaspTag = owasp ? ` [${owasp.id}]` : '';
+    lines.push(`  [${SEVERITY_LABELS[f.severity]}] [${f.type}]${owaspTag} ${fileRef}line ${f.line}`);
     lines.push(`  -> ${f.message}`);
     if (f.snippet) {
       lines.push(`     ${f.snippet.slice(0, 80)}`);
@@ -155,9 +163,11 @@ export async function printFindings(findings: Finding[], targetPath: string): Pr
 
   for (const f of findings) {
     const fileRef = f.file ? chalk.dim(`${f.file}:`) : '';
+    const owasp = getOwaspCategory(f.type);
+    const owaspTag = owasp ? chalk.magenta(` [${owasp.id}]`) : '';
     console.log(
       `  ${severityColor(f.severity, SEVERITY_LABELS[f.severity])} ` +
-      chalk.cyan(`[${f.type}]`) +
+      chalk.cyan(`[${f.type}]`) + owaspTag +
       ` ${fileRef}${chalk.yellow(`line ${f.line}`)}`
     );
     console.log(`  ${chalk.dim('→')} ${f.message}`);

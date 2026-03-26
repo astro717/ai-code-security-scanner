@@ -268,7 +268,7 @@ function validateConfig(obj) {
     if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
         return ['Config root must be a JSON object, got: ' + (Array.isArray(obj) ? 'array' : typeof obj)];
     }
-    const allowed = new Set(['ignore', 'severity', 'format']);
+    const allowed = new Set(['ignore', 'severity', 'format', 'fix']);
     const knownSeverities = new Set(['critical', 'high', 'medium', 'low']);
     const knownFormats = new Set(['text', 'json', 'sarif', 'html', 'junit']);
     // Check for unknown keys — a typo here silently dropped config before this fix
@@ -300,6 +300,12 @@ function validateConfig(obj) {
         }
         else if (!knownSeverities.has(record['severity'])) {
             errors.push(`"severity" must be one of: ${[...knownSeverities].join(', ')}. Got: "${record['severity']}"`);
+        }
+    }
+    // fix: must be a boolean
+    if ('fix' in record) {
+        if (typeof record['fix'] !== 'boolean') {
+            errors.push(`"fix" must be a boolean, got: ${typeof record['fix']}`);
         }
     }
     // format: must be one of the known values
@@ -547,6 +553,14 @@ commander_1.program
     // Merge: config ignore + .aiscanner patterns + --ignore flags + --exclude-pattern flags
     // --exclude-pattern is merged here so all downstream code (scan, watch) benefits.
     const effectiveIgnore = [...(config.ignore ?? []), ...fileIgnorePatterns, ...options.ignore, ...options.excludePattern];
+    // Config-driven defaults: --fix from config applies if CLI did not explicitly pass --fix
+    if (config.fix && !options.fix) {
+        options.fix = true;
+    }
+    // Config-driven severity: only apply if CLI used the default ('low')
+    if (config.severity && options.severity === 'low') {
+        options.severity = config.severity;
+    }
     // --format takes highest precedence; --sarif / --json are convenience aliases; then config
     const effectiveFormat = options.format ?? (options.sarif ? 'sarif' : options.json ? 'json' : (config.format ?? 'text'));
     // --severity controls which findings are reported; config is fallback

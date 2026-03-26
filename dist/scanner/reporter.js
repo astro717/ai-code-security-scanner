@@ -6,6 +6,7 @@ exports.summarize = summarize;
 exports.formatJSON = formatJSON;
 exports.formatFindingsText = formatFindingsText;
 exports.printFindings = printFindings;
+const owasp_1 = require("./owasp");
 /**
  * The canonical set of finding type strings emitted by the built-in detectors.
  * Export this constant so consumers (e.g. CLI --ignore-type validation) can
@@ -66,7 +67,11 @@ function summarize(findings) {
     };
 }
 function formatJSON(findings) {
-    return JSON.stringify({ findings, summary: summarize(findings) }, null, 2);
+    const enriched = findings.map((f) => {
+        const owasp = (0, owasp_1.getOwaspCategory)(f.type);
+        return owasp ? { ...f, owasp: owasp.id } : f;
+    });
+    return JSON.stringify({ findings: enriched, summary: summarize(findings) }, null, 2);
 }
 // Lazy chalk import for CommonJS compatibility
 async function getChalk() {
@@ -94,7 +99,9 @@ function formatFindingsText(findings, targetPath) {
     }
     for (const f of findings) {
         const fileRef = f.file ? `${f.file}:` : '';
-        lines.push(`  [${SEVERITY_LABELS[f.severity]}] [${f.type}] ${fileRef}line ${f.line}`);
+        const owasp = (0, owasp_1.getOwaspCategory)(f.type);
+        const owaspTag = owasp ? ` [${owasp.id}]` : '';
+        lines.push(`  [${SEVERITY_LABELS[f.severity]}] [${f.type}]${owaspTag} ${fileRef}line ${f.line}`);
         lines.push(`  -> ${f.message}`);
         if (f.snippet) {
             lines.push(`     ${f.snippet.slice(0, 80)}`);
@@ -132,8 +139,10 @@ async function printFindings(findings, targetPath) {
     }
     for (const f of findings) {
         const fileRef = f.file ? chalk.dim(`${f.file}:`) : '';
+        const owasp = (0, owasp_1.getOwaspCategory)(f.type);
+        const owaspTag = owasp ? chalk.magenta(` [${owasp.id}]`) : '';
         console.log(`  ${severityColor(f.severity, SEVERITY_LABELS[f.severity])} ` +
-            chalk.cyan(`[${f.type}]`) +
+            chalk.cyan(`[${f.type}]`) + owaspTag +
             ` ${fileRef}${chalk.yellow(`line ${f.line}`)}`);
         console.log(`  ${chalk.dim('→')} ${f.message}`);
         if (f.snippet) {

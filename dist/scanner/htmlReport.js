@@ -72,7 +72,7 @@ const REMEDIATION_SNIPPETS = {
     COMMAND_INJECTION_C: `// Use execve() with explicit args:\nexecve("/usr/bin/ls", args, envp);`,
 };
 /** Renders a single finding row. */
-function renderFinding(f) {
+function renderFinding(f, anchorId) {
     const color = SEVERITY_COLOR[f.severity] ?? '#6b7280';
     const bg = SEVERITY_BG[f.severity] ?? '#f9fafb';
     const remediation = REMEDIATION_SNIPPETS[f.type];
@@ -88,8 +88,9 @@ function renderFinding(f) {
          title="${escapeHtml(owasp.name)}"
          style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#1d4ed8;background:#dbeafe;padding:2px 7px;border-radius:3px;text-decoration:none;white-space:nowrap;">${escapeHtml(owasp.id)}</a>`
         : '';
+    const anchor = anchorId ? ` id="${anchorId}"` : '';
     return `
-    <div class="finding" style="border-left: 4px solid ${color}; background: ${bg}; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;">
+    <div class="finding"${anchor} style="border-left: 4px solid ${color}; background: ${bg}; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${color};background:${color}22;padding:2px 8px;border-radius:3px;">${escapeHtml(f.severity)}</span>
         <code style="font-size:12px;color:#374151;background:#f3f4f6;padding:1px 6px;border-radius:3px;">${escapeHtml(f.type)}</code>
@@ -118,7 +119,7 @@ function renderFileCard(filePath, findings, scanRoot) {
       <code style="font-size:13px;font-weight:600;color:#111827;">${escapeHtml(relPath)}</code>
       <span style="font-size:12px;color:#6b7280;">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
     </div>
-    ${findings.map(renderFinding).join('')}
+    ${findings.map((f, i) => renderFinding(f, `finding-${escapeHtml((f.file ?? 'unknown').replace(/[^a-zA-Z0-9]/g, '-'))}-${i}`)).join('')}
   </div>`;
 }
 /** Renders the summary bar at the top of the report. */
@@ -138,6 +139,70 @@ function renderSummaryBar(findings) {
     </div>`;
     });
     return `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px;">${pills.join('')}</div>`;
+}
+/** Renders the OWASP Top 10 breakdown table. */
+function renderOwaspBreakdown(findings) {
+    if (findings.length === 0)
+        return '';
+    // Count findings per OWASP category
+    const counts = new Map();
+    for (const f of findings) {
+        const owaspId = owasp_1.FINDING_TO_OWASP[f.type];
+        if (owaspId) {
+            counts.set(owaspId, (counts.get(owaspId) ?? 0) + 1);
+        }
+    }
+    if (counts.size === 0)
+        return '';
+    // Sort by count descending
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const rows = sorted.map(([id, count]) => {
+        const cat = owasp_1.OWASP_CATEGORIES[id];
+        if (!cat)
+            return '';
+        const pct = Math.round((count / findings.length) * 100);
+        // Find the first finding belonging to this OWASP category for in-page scroll
+        const firstMatch = findings.find((f) => owasp_1.FINDING_TO_OWASP[f.type] === id);
+        const firstAnchorId = firstMatch
+            ? `finding-${(firstMatch.file ?? 'unknown').replace(/[^a-zA-Z0-9]/g, '-')}-0`
+            : '';
+        const rowOnClick = firstAnchorId
+            ? `onclick="var el=document.getElementById('${firstAnchorId}');if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}" style="cursor:pointer;"`
+            : '';
+        const cellLink = firstAnchorId
+            ? `<a href="#${firstAnchorId}" style="color:#1d4ed8;text-decoration:none;">${escapeHtml(id)}</a>
+         <a href="${escapeHtml(cat.url)}" target="_blank" rel="noopener noreferrer" title="OWASP docs" style="margin-left:6px;font-size:10px;color:#93c5fd;text-decoration:none;">↗</a>`
+            : `<a href="${escapeHtml(cat.url)}" target="_blank" rel="noopener noreferrer" style="color:#1d4ed8;text-decoration:none;">${escapeHtml(id)}</a>`;
+        return `<tr ${rowOnClick}>
+      <td style="padding:8px 12px;font-weight:600;color:#1d4ed8;white-space:nowrap;">
+        ${cellLink}
+      </td>
+      <td style="padding:8px 12px;color:#374151;">${escapeHtml(cat.name)}</td>
+      <td style="padding:8px 12px;text-align:right;font-weight:600;">${count}</td>
+      <td style="padding:8px 12px;width:120px;">
+        <div style="background:#e5e7eb;border-radius:3px;height:8px;overflow:hidden;">
+          <div style="background:#3b82f6;height:100%;width:${pct}%;border-radius:3px;"></div>
+        </div>
+      </td>
+    </tr>`;
+    }).join('');
+    return `
+  <div style="margin-bottom:28px;">
+    <div class="section-title">OWASP Top 10 2021 Breakdown</div>
+    <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+      <thead>
+        <tr style="background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+          <th style="padding:8px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#6b7280;">Category</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#6b7280;">Name</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#6b7280;">Count</th>
+          <th style="padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#6b7280;">Distribution</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>
+  </div>`;
 }
 /**
  * Produces a self-contained single-file HTML report for the given findings.
@@ -181,6 +246,8 @@ function buildHTMLReport(findings, scanRoot, generatedAt = new Date().toISOStrin
   </div>
 
   ${renderSummaryBar(findings)}
+
+  ${renderOwaspBreakdown(findings)}
 
   ${findings.length > 0 ? '<div class="section-title">Findings by file</div>' : ''}
   ${fileCards}

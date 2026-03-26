@@ -74,7 +74,7 @@ const GO_PATTERNS = [
     {
         type: 'SQL_INJECTION',
         severity: 'critical',
-        pattern: /(?:db|tx)\.\w*(?:Query|Exec)\w*\s*\(\s*[^")]*\+/,
+        pattern: /(?:db|tx)\.\w*(?:Query|Exec)\w*\s*\(.*\+/,
         message: 'SQL query built with string concatenation. Use parameterised queries ' +
             '(db.Query(query, args...)) to prevent SQL injection.',
     },

@@ -8,6 +8,7 @@ exports.resetRateLimiters = resetRateLimiters;
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const crypto_1 = __importDefault(require("crypto"));
+const fs_1 = __importDefault(require("fs"));
 const http_1 = __importDefault(require("http"));
 const https_1 = __importDefault(require("https"));
 const path_1 = __importDefault(require("path"));
@@ -45,17 +46,33 @@ function validateRequestBody(body, schema, endpointName) {
     }
     const record = body;
     const errors = [];
-    // Only validate required fields — optional field types are validated by
-    // downstream per-field checks which produce more specific error messages.
     for (const [key, rule] of Object.entries(schema)) {
-        if (!rule.required)
-            continue;
         const val = record[key];
-        if (val === undefined || val === null) {
+        // Check required fields for presence
+        if (rule.required && (val === undefined || val === null)) {
             errors.push(`Missing required field: ${key} (${rule.type})`);
+            continue;
         }
-        else if (rule.type === 'string' && typeof val !== 'string') {
-            errors.push(`Field "${key}" must be a ${rule.type}, got ${typeof val}`);
+        // Skip type check if the field is absent and optional
+        if (val === undefined || val === null)
+            continue;
+        // Type validation for all present fields (required and optional)
+        if (rule.type === 'string' && typeof val !== 'string') {
+            errors.push(`${key} must be a string`);
+        }
+        else if (rule.type === 'boolean' && typeof val !== 'boolean') {
+            errors.push(`${key} must be a boolean`);
+        }
+        else if (rule.type === 'array') {
+            if (!Array.isArray(val)) {
+                errors.push(`${key} must be an array`);
+            }
+            else if (rule.items === 'string' && val.some((item) => typeof item !== 'string')) {
+                errors.push(`${key} must be an array of strings`);
+            }
+        }
+        else if (rule.type === 'object' && (typeof val !== 'object' || Array.isArray(val))) {
+            errors.push(`${key} must be an object`);
         }
     }
     return errors.length > 0 ? { valid: false, errors } : { valid: true };
@@ -596,9 +613,10 @@ async function collectFiles(apiBase, dirPath, branch, collected, max, ignorePatt
     }
 }
 app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
-    // ?sarif=true returns a SARIF 2.1.0 document instead of the default JSON shape.
+    // ?sarif=true or body.sarif === true returns a SARIF 2.1.0 document instead of the default JSON shape.
     // This enables GitHub Code Scanning integration for repository scans.
-    const sarifMode = req.query['sarif'] === 'true';
+    const body = req.body;
+    const sarifMode = req.query['sarif'] === 'true' || body['sarif'] === true;
     // Schema validation — reject malformed requests early with detailed errors.
     const repoValidation = validateRequestBody(req.body, SCAN_REPO_BODY_SCHEMA, '/scan-repo');
     if (!repoValidation.valid) {
@@ -749,6 +767,128 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
         console.error(`[scan-repo] error: ${msg}`);
         res.status(500).json({ error: `Failed to scan repository: ${msg}` });
     }
+});
+// ── SSE /watch endpoint — streams scan results as files change ───────────────
+app.get('/watch', (req, res) => {
+    const targetPath = req.query['path'] ?? process.cwd();
+    const resolvedPath = path_1.default.resolve(targetPath);
+    if (!fs_1.default.existsSync(resolvedPath) || !fs_1.default.statSync(resolvedPath).isDirectory()) {
+        res.status(400).json({ error: `path must be an existing directory: ${resolvedPath}` });
+        return;
+    }
+    // SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    // Send initial connected event
+    res.write(`event: connected\ndata: ${JSON.stringify({ path: resolvedPath, ts: new Date().toISOString() })}\n\n`);
+    const JS_TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+    const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb']);
+    let debounceTimer = null;
+    const pendingFiles = new Set();
+    function scanFile(filePath) {
+        try {
+            const code = fs_1.default.readFileSync(filePath, 'utf-8');
+            const ext = path_1.default.extname(filePath).toLowerCase();
+            if (ext === '.py') {
+                const parsed = (0, python_parser_1.parsePythonCode)(code, filePath);
+                return (0, python_parser_1.scanPython)(parsed);
+            }
+            else if (ext === '.go') {
+                const parsed = (0, go_parser_1.parseGoCode)(code, filePath);
+                return (0, go_parser_1.scanGo)(parsed);
+            }
+            else if (ext === '.java') {
+                const parsed = (0, java_parser_1.parseJavaCode)(code, filePath);
+                return (0, java_parser_1.scanJava)(parsed);
+            }
+            else if (ext === '.cs') {
+                const parsed = (0, csharp_parser_1.parseCSharpCode)(code, filePath);
+                return (0, csharp_parser_1.scanCSharp)(parsed);
+            }
+            else if (['.c', '.cpp', '.cc', '.h'].includes(ext)) {
+                const parsed = (0, c_parser_1.parseCCode)(code, filePath);
+                return (0, c_parser_1.scanC)(parsed);
+            }
+            else if (ext === '.rb') {
+                const parsed = (0, ruby_parser_1.parseRubyCode)(code, filePath);
+                return (0, ruby_parser_1.scanRuby)(parsed);
+            }
+            else if (JS_TS_EXTENSIONS.has(ext)) {
+                const parsed = (0, parser_1.parseCode)(code, filePath);
+                return [
+                    ...(0, secrets_1.detectSecrets)(parsed),
+                    ...(0, sql_1.detectSQLInjection)(parsed),
+                    ...(0, shell_1.detectShellInjection)(parsed),
+                    ...(0, eval_1.detectEval)(parsed),
+                    ...(0, xss_1.detectXSS)(parsed),
+                    ...(0, pathTraversal_1.detectPathTraversal)(parsed),
+                    ...(0, prototypePollution_1.detectPrototypePollution)(parsed),
+                    ...(0, insecureRandom_1.detectInsecureRandom)(parsed),
+                    ...(0, openRedirect_1.detectOpenRedirect)(parsed),
+                    ...(0, ssrf_1.detectSSRF)(parsed),
+                    ...(0, jwt_1.detectJWTSecrets)(parsed),
+                    ...(0, jwtNone_1.detectJWTNoneAlgorithm)(parsed),
+                    ...(0, commandInjection_1.detectCommandInjection)(parsed),
+                    ...(0, cors_2.detectCORSMisconfiguration)(parsed),
+                    ...(0, redos_1.detectReDoS)(parsed),
+                    ...(0, weakCrypto_1.detectWeakCrypto)(parsed),
+                ].map((f) => ({ ...f, file: filePath }));
+            }
+            return [];
+        }
+        catch {
+            return [];
+        }
+    }
+    function processPendingFiles() {
+        const files = [...pendingFiles];
+        pendingFiles.clear();
+        const allFindings = [];
+        for (const file of files) {
+            if (fs_1.default.existsSync(file)) {
+                allFindings.push(...scanFile(file));
+            }
+        }
+        const deduped = (0, reporter_1.deduplicateFindings)(allFindings);
+        const payload = {
+            files,
+            findings: deduped,
+            summary: (0, reporter_1.summarize)(deduped),
+            ts: new Date().toISOString(),
+        };
+        res.write(`event: scan\ndata: ${JSON.stringify(payload)}\n\n`);
+    }
+    let watcher;
+    try {
+        watcher = fs_1.default.watch(resolvedPath, { recursive: true }, (_event, filename) => {
+            if (!filename)
+                return;
+            const full = path_1.default.isAbsolute(filename) ? filename : path_1.default.join(resolvedPath, filename);
+            const ext = path_1.default.extname(full).toLowerCase();
+            if (!ALL_EXTENSIONS.has(ext))
+                return;
+            if (full.includes('node_modules') || full.includes('.git'))
+                return;
+            pendingFiles.add(full);
+            if (debounceTimer)
+                clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(processPendingFiles, 300);
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.write(`event: error\ndata: ${JSON.stringify({ error: msg })}\n\n`);
+        res.end();
+        return;
+    }
+    req.on('close', () => {
+        if (debounceTimer)
+            clearTimeout(debounceTimer);
+        watcher.close();
+    });
 });
 exports.server = app.listen(PORT, () => {
     console.log(`AI Security Scanner server running on http://localhost:${PORT}`);
