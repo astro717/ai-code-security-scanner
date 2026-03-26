@@ -313,6 +313,60 @@ export function isFixable(findingType: string): boolean {
 }
 
 /**
+ * Generates a unified-diff string for a set of FixResults, grouped by file.
+ * Each hunk shows 3 lines of context around the changed line (standard unified format).
+ *
+ * This is used by the CLI when --fix --dry-run is requested.
+ */
+export function buildUnifiedDiff(results: FixResult[]): string {
+  const byFile = new Map<string, FixResult[]>();
+  for (const r of results) {
+    if (!r.applied || r.originalLine === undefined || r.fixedLine === undefined) continue;
+    if (!byFile.has(r.file)) byFile.set(r.file, []);
+    byFile.get(r.file)!.push(r);
+  }
+
+  const parts: string[] = [];
+  const CONTEXT_LINES = 3;
+
+  for (const [filePath, fixResults] of byFile.entries()) {
+    let lines: string[];
+    try {
+      lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    } catch {
+      // File may have already been written in a non-dry-run pass; use stored lines
+      lines = [];
+    }
+
+    parts.push(`--- a/${filePath}`);
+    parts.push(`+++ b/${filePath}`);
+
+    for (const r of fixResults) {
+      const lineIdx = r.finding.line - 1; // 0-based
+      const ctxStart = Math.max(0, lineIdx - CONTEXT_LINES);
+      const ctxEnd = Math.min(lines.length - 1, lineIdx + CONTEXT_LINES);
+      const hunkOldStart = ctxStart + 1;
+      const hunkNewStart = ctxStart + 1;
+      const hunkSize = ctxEnd - ctxStart + 1;
+
+      parts.push(`@@ -${hunkOldStart},${hunkSize} +${hunkNewStart},${hunkSize} @@ [${r.finding.type}]`);
+
+      for (let i = ctxStart; i <= ctxEnd; i++) {
+        if (i === lineIdx) {
+          parts.push(`-${r.originalLine}`);
+          parts.push(`+${r.fixedLine}`);
+        } else {
+          parts.push(` ${lines[i] ?? ''}`);
+        }
+      }
+    }
+  }
+
+  return parts.join('\n');
+}
+
+
+/**
  * Prints a human-readable summary of fix results to stderr.
  */
 export function printFixSummary(results: FixResult[], dryRun: boolean): void {

@@ -33,7 +33,7 @@ import { parseCSharpFile, scanCSharp } from './scanner/csharp-parser';
 import { parseCFile, scanC } from './scanner/c-parser';
 import { parseRubyFile, scanRuby } from './scanner/ruby-parser';
 import { initCache, persistCache, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/scan-cache';
-import { applyFixes, printFixSummary } from './scanner/fixer';
+import { applyFixes, printFixSummary, buildUnifiedDiff } from './scanner/fixer';
 import * as os from 'os';
 
 // JS/TS extensions use the TypeScript ESLint AST parser.
@@ -819,6 +819,13 @@ program
       } else {
         const fixResults = applyFixes(filtered, options.dryRun ?? false);
         printFixSummary(fixResults, options.dryRun ?? false);
+        if (options.dryRun) {
+          const diff = buildUnifiedDiff(fixResults);
+          if (diff.trim()) {
+            process.stderr.write('\n[fix --dry-run] Unified diff:\n');
+            process.stderr.write(diff + '\n');
+          }
+        }
         // Re-filter: remove findings that were successfully fixed from the reported output
         // so the scan output reflects the remaining (unfixed) state.
         if (!options.dryRun) {
