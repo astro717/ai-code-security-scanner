@@ -370,7 +370,7 @@ const scanLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: IS_TEST ? 10_000 : 20,
   standardHeaders: true,
-  legacyHeaders: false,
+  legacyHeaders: true,
   skip: skipIfInternalToken,
   message: { error: 'Too many scan requests from this IP. Limit: 20 requests per minute.' },
 });
@@ -379,7 +379,7 @@ const scanRepoLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: IS_TEST ? 10_000 : 5,
   standardHeaders: true,
-  legacyHeaders: false,
+  legacyHeaders: true,
   skip: skipIfInternalToken,
   message: { error: 'Too many scan-repo requests from this IP. Limit: 5 requests per minute (GitHub API calls).' },
 });

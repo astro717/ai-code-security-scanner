@@ -813,11 +813,13 @@ program
     }
 
     // ── --fix: auto-remediation ─────────────────────────────────────────────
+    let _fixResults: import('./scanner/fixer').FixResult[] | undefined;
     if (options.fix || options.dryRun) {
       if (options.dryRun && !options.fix) {
         console.error('[fix] --dry-run requires --fix. Ignoring --dry-run.');
       } else {
         const fixResults = applyFixes(filtered, options.dryRun ?? false);
+        _fixResults = fixResults;
         printFixSummary(fixResults, options.dryRun ?? false);
         if (options.dryRun) {
           const diff = buildUnifiedDiff(fixResults);
@@ -862,7 +864,7 @@ program
         console.error('[junit] JUnit XML report written. Import into your CI system as a test result artifact.');
       }
     } else if (effectiveFormat === 'html') {
-      emit(buildHTMLReport(filtered, scanRoot));
+      emit(buildHTMLReport(filtered, scanRoot, undefined, _fixResults));
       if (outputPath) {
         console.error('[html] Self-contained HTML report written. Open in a browser to review.');
       }

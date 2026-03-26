@@ -244,7 +244,56 @@ export function ScanResults({ findings, onGoToLine }: ScanResultsProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Severity filter bar */}
+      {/* OWASP Top 10 2021 breakdown panel */}
+      {(() => {
+        const owaspCounts: Record<string, { name: string; count: number }> = {}
+        for (const f of findings) {
+          const cat = FINDING_TO_OWASP[f.type]
+          if (!cat) continue
+          if (!owaspCounts[cat.id]) owaspCounts[cat.id] = { name: cat.name, count: 0 }
+          owaspCounts[cat.id]!.count++
+        }
+        const owaspEntries = Object.entries(owaspCounts).sort((a, b) => b[1].count - a[1].count)
+        if (owaspEntries.length === 0) return null
+        return (
+          <div className="border border-[#1e1e2e] rounded-lg overflow-hidden">
+            <div className="px-3 py-2 bg-[#0d1117] border-b border-[#1e1e2e] flex items-center gap-2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[#7d8590]" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+              <span className="text-xs font-mono text-[#7d8590] uppercase tracking-widest">OWASP Top 10 Breakdown</span>
+            </div>
+            <div className="divide-y divide-[#1e1e2e]">
+              {owaspEntries.map(([id, { name, count }]) => {
+                const url = OWASP_URLS[id] ?? '#'
+                const pct = Math.round((count / findings.length) * 100)
+                return (
+                  <div key={id} className="flex items-center gap-3 px-3 py-2">
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-mono text-violet-400 hover:text-violet-300 transition-colors shrink-0 w-20"
+                      title={`${id} — click to open OWASP docs`}
+                    >
+                      {id.split(':')[0]}
+                    </a>
+                    <span className="text-xs text-[#7d8590] font-mono flex-1 truncate">{name}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="w-20 h-1.5 bg-[#1e1e2e] rounded-full overflow-hidden">
+                        <div className="h-full bg-violet-500/60 rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="text-xs font-mono text-[#4a5668] w-6 text-right">{count}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
+            {/* Severity filter bar */}
       <div className="flex items-center gap-2 flex-wrap">
         {FILTER_OPTIONS.map(({ value, label }) => {
           const isActive = severityFilter === value
