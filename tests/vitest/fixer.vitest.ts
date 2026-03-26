@@ -6,7 +6,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { applyFixes, isFixable } from '../../src/scanner/fixer';
+import { applyFixes, isFixable, buildUnifiedDiff } from '../../src/scanner/fixer';
 import type { Finding } from '../../src/scanner/reporter';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -333,5 +333,126 @@ describe('applyFixes — edge cases', () => {
   test('no-op findings list returns empty results', () => {
     const results = applyFixes([], false);
     expect(results).toHaveLength(0);
+  });
+});
+
+// ── JWT_DECODE_NO_VERIFY fixes ────────────────────────────────────────────────
+
+describe('isFixable — JWT_DECODE_NO_VERIFY', () => {
+  test('returns true for JWT_DECODE_NO_VERIFY', () => {
+    expect(isFixable('JWT_DECODE_NO_VERIFY')).toBe(true);
+  });
+});
+
+describe('applyFixes — JWT_DECODE_NO_VERIFY', () => {
+  test('replaces jwt.decode(token) with jwt.verify using process.env.JWT_SECRET', () => {
+    const code = 'const payload = jwt.decode(token);\n';
+    const filePath = writeTempFile('jwt-decode.ts', code);
+    const finding = makeFinding({ type: 'JWT_DECODE_NO_VERIFY', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('jwt.verify(');
+    expect(updated).toContain('process.env.JWT_SECRET');
+    expect(updated).toContain("algorithms: ['HS256']");
+    expect(updated).not.toContain('jwt.decode(');
+  });
+
+  test('dry-run does NOT write the file', () => {
+    const code = 'const payload = jwt.decode(token);\n';
+    const filePath = writeTempFile('jwt-decode-dry.ts', code);
+    const finding = makeFinding({ type: 'JWT_DECODE_NO_VERIFY', line: 1, file: filePath });
+
+    const results = applyFixes([finding], true);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('jwt.decode(');
+  });
+
+  test('returns applied=false when jwt.decode is not on the flagged line', () => {
+    const code = 'const x = someOtherCall(token);\n';
+    const filePath = writeTempFile('jwt-no-decode.ts', code);
+    const finding = makeFinding({ type: 'JWT_DECODE_NO_VERIFY', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(false);
+  });
+
+  test('replaces jwt.decode with spaces in the call expression', () => {
+    const code = 'const p = jwt.decode( token );\n';
+    const filePath = writeTempFile('jwt-decode-spaces.ts', code);
+    const finding = makeFinding({ type: 'JWT_DECODE_NO_VERIFY', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('jwt.verify(');
+  });
+});
+
+// ── buildUnifiedDiff ──────────────────────────────────────────────────────────
+
+describe('buildUnifiedDiff', () => {
+  test('produces --- a/ and +++ b/ headers for an applied fix', () => {
+    const code = 'const token = Math.random();\nconsole.log(token);\n';
+    const filePath = writeTempFile('diff-test.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
+
+    const results = applyFixes([finding], true);
+    const diff = buildUnifiedDiff(results);
+
+    expect(diff).toContain(`--- a/${filePath}`);
+    expect(diff).toContain(`+++ b/${filePath}`);
+  });
+
+  test('produces @@ hunk markers', () => {
+    const code = 'const token = Math.random();\nconsole.log(token);\n';
+    const filePath = writeTempFile('diff-hunk.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
+
+    const results = applyFixes([finding], true);
+    const diff = buildUnifiedDiff(results);
+
+    expect(diff).toMatch(/^@@.+@@/m);
+  });
+
+  test('excludes non-applied fix results from the diff', () => {
+    const code = 'const x = 42;\n';
+    const filePath = writeTempFile('diff-no-apply.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(false);
+
+    const diff = buildUnifiedDiff(results);
+    expect(diff).toBe('');
+  });
+
+  test('includes 3 context lines before and after the changed line', () => {
+    const code = 'line1\nline2\nline3\nconst token = Math.random();\nline5\nline6\nline7\n';
+    const filePath = writeTempFile('diff-context.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 4, file: filePath });
+
+    const results = applyFixes([finding], true);
+    const diff = buildUnifiedDiff(results);
+
+    expect(diff).toContain(' line1');
+    expect(diff).toContain(' line2');
+    expect(diff).toContain(' line3');
+    expect(diff).toContain(' line5');
+    expect(diff).toContain(' line6');
+    expect(diff).toContain(' line7');
+    expect(diff).toContain('-const token = Math.random();');
+    expect(diff).toContain('+const token = crypto.randomBytes(32)');
+  });
+
+  test('returns empty string when results array is empty', () => {
+    const diff = buildUnifiedDiff([]);
+    expect(diff).toBe('');
   });
 });
