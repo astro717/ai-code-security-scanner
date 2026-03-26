@@ -158,7 +158,8 @@ const FIX_RULES: FixRule[] = [
       const tokenExpr = match[1]!.trim();
       const fixed = line.replace(
         /\bjwt\.decode\s*\([^)]+\)/,
-        `jwt.verify(${tokenExpr}, secret, { algorithms: ['HS256'] })`,
+        // TODO: replace process.env.JWT_SECRET with your actual JWT secret
+        `jwt.verify(${tokenExpr}, process.env.JWT_SECRET, { algorithms: ['HS256'] })`,
       );
       return fixed !== line ? fixed : null;
     },
