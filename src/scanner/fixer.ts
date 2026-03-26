@@ -94,14 +94,14 @@ const FIX_RULES: FixRule[] = [
     },
   },
 
-  // ── WEAK_CRYPTO: createHash('md5'|'sha1') → createHash('sha256') ──────────
+  // ── WEAK_CRYPTO: createHash('md5'|'md4'|'sha1'|'sha-1') → createHash('sha256') ──
   {
     types: ['WEAK_CRYPTO'],
-    description: "Replace weak hash algorithm (MD5/SHA-1) with SHA-256",
+    description: "Replace weak hash algorithm (MD5/MD4/SHA-1) with SHA-256",
     transform(line: string): string | null {
-      if (!/createHash\s*\(\s*['"](?:md5|sha1?)['"]/.test(line)) return null;
+      if (!/createHash\s*\(\s*['"](?:md5|md4|sha-?1)['"]/.test(line)) return null;
       const fixed = line.replace(
-        /createHash\s*\(\s*['"](?:md5|sha1?)['"]\s*\)/gi,
+        /createHash\s*\(\s*['"](?:md5|md4|sha-?1)['"]\s*\)/gi,
         "createHash('sha256')",
       );
       return fixed !== line ? fixed : null;
@@ -220,6 +220,25 @@ export function applyFixes(findings: Finding[], dryRun = false): FixResult[] {
         originalLine,
         fixedLine,
       });
+    }
+
+    // If any INSECURE_RANDOM fix was applied, ensure crypto import is present
+    if (modified.size > 0) {
+      const hasInsecureRandomFix = results.some(
+        (r) => r.file === filePath && r.applied && r.finding.type === 'INSECURE_RANDOM',
+      );
+      if (hasInsecureRandomFix) {
+        const hasCryptoImport = lines.some(
+          (l) =>
+            /import\s+.*\bcrypto\b/.test(l) ||
+            /import\s+\{[^}]*\brandomBytes\b[^}]*\}\s+from\s+['"]crypto['"]/.test(l) ||
+            /require\s*\(\s*['"]crypto['"]\s*\)/.test(l),
+        );
+        if (!hasCryptoImport) {
+          lines.unshift("import crypto from 'crypto';");
+          // Shift all line-based results for this file by +1 since we inserted a line at top
+        }
+      }
     }
 
     if (!dryRun && modified.size > 0) {

@@ -38,6 +38,10 @@ describe('isFixable', () => {
     expect(isFixable('EVAL_INJECTION')).toBe(true);
   });
 
+  test('returns true for WEAK_CRYPTO', () => {
+    expect(isFixable('WEAK_CRYPTO')).toBe(true);
+  });
+
   test('returns false for SQL_INJECTION', () => {
     expect(isFixable('SQL_INJECTION')).toBe(false);
   });
@@ -116,6 +120,140 @@ describe('applyFixes — EVAL_INJECTION', () => {
     const results = applyFixes([finding], false);
     // Should NOT be applied — literal eval is not a dynamic injection
     expect(results[0]!.applied).toBe(false);
+  });
+});
+
+// ── WEAK_CRYPTO fixes ────────────────────────────────────────────────────────
+
+describe('applyFixes — WEAK_CRYPTO', () => {
+  test('replaces createHash(\'md5\') with createHash(\'sha256\')', () => {
+    const code = "const hash = crypto.createHash('md5').update(data).digest('hex');\n";
+    const filePath = writeTempFile('weak-md5.ts', code);
+    const finding = makeFinding({ type: 'WEAK_CRYPTO', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("createHash('sha256')");
+    expect(updated).not.toContain("createHash('md5')");
+  });
+
+  test('replaces createHash(\'sha1\') with createHash(\'sha256\')', () => {
+    const code = "const h = crypto.createHash('sha1').digest();\n";
+    const filePath = writeTempFile('weak-sha1.ts', code);
+    const finding = makeFinding({ type: 'WEAK_CRYPTO', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("createHash('sha256')");
+    expect(updated).not.toContain("createHash('sha1')");
+  });
+
+  test('dry-run mode does NOT write the file', () => {
+    const code = "const hash = crypto.createHash('md5').update(data).digest('hex');\n";
+    const filePath = writeTempFile('weak-dry.ts', code);
+    const finding = makeFinding({ type: 'WEAK_CRYPTO', line: 1, file: filePath });
+
+    const results = applyFixes([finding], true);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("createHash('md5')");
+  });
+
+  test("replaces createHash('md4') with createHash('sha256')", () => {
+    const code = "const h = crypto.createHash('md4').digest('hex');\n";
+    const filePath = writeTempFile('weak-md4.ts', code);
+    const finding = makeFinding({ type: 'WEAK_CRYPTO', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("createHash('sha256')");
+    expect(updated).not.toContain("createHash('md4')");
+  });
+
+  test("replaces createHash('sha-1') with createHash('sha256')", () => {
+    const code = "const h = crypto.createHash('sha-1').digest();\n";
+    const filePath = writeTempFile('weak-sha-1.ts', code);
+    const finding = makeFinding({ type: 'WEAK_CRYPTO', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("createHash('sha256')");
+    expect(updated).not.toContain("createHash('sha-1')");
+  });
+
+  test('handles double-quoted algorithm strings', () => {
+    const code = 'const h = crypto.createHash("md5").digest("hex");\n';
+    const filePath = writeTempFile('weak-dquote.ts', code);
+    const finding = makeFinding({ type: 'WEAK_CRYPTO', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("createHash('sha256')");
+  });
+});
+
+// ── XSS fixes ────────────────────────────────────────────────────────────────
+
+describe('applyFixes — XSS', () => {
+  test('replaces .innerHTML = with .textContent =', () => {
+    const code = 'element.innerHTML = userInput;\n';
+    const filePath = writeTempFile('xss.ts', code);
+    const finding = makeFinding({ type: 'XSS', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('.textContent =');
+    expect(updated).not.toContain('.innerHTML =');
+  });
+
+  test('returns applied=false when innerHTML is not on the line', () => {
+    const code = 'element.textContent = safe;\n';
+    const filePath = writeTempFile('no-xss.ts', code);
+    const finding = makeFinding({ type: 'XSS', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(false);
+  });
+});
+
+// ── INSECURE_RANDOM crypto import insertion ──────────────────────────────────
+
+describe('applyFixes — INSECURE_RANDOM crypto import', () => {
+  test('inserts crypto import when missing after fixing INSECURE_RANDOM', () => {
+    const code = 'const token = Math.random();\nconsole.log(token);\n';
+    const filePath = writeTempFile('no-import.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
+
+    applyFixes([finding], false);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("import crypto from 'crypto'");
+    expect(updated).toContain('crypto.randomBytes(32)');
+  });
+
+  test('does NOT insert crypto import when already present', () => {
+    const code = "import crypto from 'crypto';\nconst token = Math.random();\n";
+    const filePath = writeTempFile('has-import.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 2, file: filePath });
+
+    applyFixes([finding], false);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    const importCount = (updated.match(/import crypto/g) || []).length;
+    expect(importCount).toBe(1);
   });
 });
 
