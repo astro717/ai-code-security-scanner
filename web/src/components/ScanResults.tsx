@@ -46,6 +46,52 @@ const FINDING_TYPE_META: Record<string, { label: string; description: string }> 
   CORS_MISCONFIGURATION: { label: 'CORS Misconfiguration',   description: 'CORS is configured to allow any origin with credentials, enabling cross-site request forgery.' },
 }
 
+// OWASP Top 10 2021 mapping — mirrors src/scanner/owasp.ts FINDING_TO_OWASP
+const FINDING_TO_OWASP: Record<string, { id: string; name: string }> = {
+  OPEN_REDIRECT:         { id: 'A01:2021', name: 'Broken Access Control' },
+  PATH_TRAVERSAL:        { id: 'A01:2021', name: 'Broken Access Control' },
+  MASS_ASSIGNMENT:       { id: 'A01:2021', name: 'Broken Access Control' },
+  WEAK_CRYPTO:           { id: 'A02:2021', name: 'Cryptographic Failures' },
+  INSECURE_RANDOM:       { id: 'A02:2021', name: 'Cryptographic Failures' },
+  JWT_WEAK_SECRET:       { id: 'A02:2021', name: 'Cryptographic Failures' },
+  JWT_HARDCODED_SECRET:  { id: 'A02:2021', name: 'Cryptographic Failures' },
+  SECRET_HARDCODED:      { id: 'A02:2021', name: 'Cryptographic Failures' },
+  SQL_INJECTION:         { id: 'A03:2021', name: 'Injection' },
+  COMMAND_INJECTION:     { id: 'A03:2021', name: 'Injection' },
+  SHELL_INJECTION:       { id: 'A03:2021', name: 'Injection' },
+  EVAL_INJECTION:        { id: 'A03:2021', name: 'Injection' },
+  XSS:                   { id: 'A03:2021', name: 'Injection' },
+  LDAP_INJECTION:        { id: 'A03:2021', name: 'Injection' },
+  XML_INJECTION:         { id: 'A03:2021', name: 'Injection' },
+  FORMAT_STRING:         { id: 'A03:2021', name: 'Injection' },
+  PROTOTYPE_POLLUTION:   { id: 'A03:2021', name: 'Injection' },
+  REDOS:                 { id: 'A04:2021', name: 'Insecure Design' },
+  INSECURE_BINDING:      { id: 'A04:2021', name: 'Insecure Design' },
+  CORS_MISCONFIGURATION: { id: 'A04:2021', name: 'Insecure Design' },
+  BUFFER_OVERFLOW:       { id: 'A04:2021', name: 'Insecure Design' },
+  INSECURE_ASSERT:       { id: 'A04:2021', name: 'Insecure Design' },
+  JWT_NONE_ALGORITHM:    { id: 'A05:2021', name: 'Security Misconfiguration' },
+  UNSAFE_DEPENDENCY:     { id: 'A06:2021', name: 'Vulnerable Components' },
+  VULNERABLE_DEPENDENCY: { id: 'A06:2021', name: 'Vulnerable Components' },
+  JWT_DECODE_NO_VERIFY:  { id: 'A07:2021', name: 'Auth Failures' },
+  UNSAFE_DESERIALIZATION:{ id: 'A08:2021', name: 'Integrity Failures' },
+  SSRF:                  { id: 'A10:2021', name: 'SSRF' },
+}
+
+// OWASP Top 10 2021 documentation URLs
+const OWASP_URLS: Record<string, string> = {
+  'A01:2021': 'https://owasp.org/Top10/A01_2021-Broken_Access_Control/',
+  'A02:2021': 'https://owasp.org/Top10/A02_2021-Cryptographic_Failures/',
+  'A03:2021': 'https://owasp.org/Top10/A03_2021-Injection/',
+  'A04:2021': 'https://owasp.org/Top10/A04_2021-Insecure_Design/',
+  'A05:2021': 'https://owasp.org/Top10/A05_2021-Security_Misconfiguration/',
+  'A06:2021': 'https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/',
+  'A07:2021': 'https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/',
+  'A08:2021': 'https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/',
+  'A09:2021': 'https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/',
+  'A10:2021': 'https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_(SSRF)/',
+}
+
 const SEVERITY_STYLES: Record<string, { badge: string; border: string; sectionBg: string; label: string }> = {
   critical: {
     badge: 'bg-red-500/20 text-red-400 border-red-500/40',
@@ -271,6 +317,18 @@ export function ScanResults({ findings, onGoToLine }: ScanResultsProps) {
                         <span className="text-xs font-mono text-[#7d8590]" title={FINDING_TYPE_META[finding.type]?.description ?? finding.type}>
                           {FINDING_TYPE_META[finding.type]?.label ?? finding.type}
                         </span>
+                        {FINDING_TO_OWASP[finding.type] && (
+                          <a
+                            href={OWASP_URLS[FINDING_TO_OWASP[finding.type].id] ?? '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`${FINDING_TO_OWASP[finding.type].id} — ${FINDING_TO_OWASP[finding.type].name} (click to view OWASP docs)`}
+                            className="text-[10px] font-mono font-semibold text-blue-400 bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.5 rounded hover:bg-blue-500/25 hover:border-blue-500/50 transition-colors no-underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {FINDING_TO_OWASP[finding.type].id}
+                          </a>
+                        )}
                         {finding.file && (
                           <span className="text-xs text-[#7d8590] font-mono truncate max-w-[120px]">{finding.file}</span>
                         )}
