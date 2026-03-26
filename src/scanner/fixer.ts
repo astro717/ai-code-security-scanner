@@ -118,6 +118,35 @@ const FIX_RULES: FixRule[] = [
       return fixed !== line ? fixed : null;
     },
   },
+
+  // ── JWT_NONE_ALGORITHM ──────────────────────────────────────────────────────
+  // Case 1: jwt.verify(token, secret) -> jwt.verify(token, secret, { algorithms: ['HS256'] })
+  // Case 2: algorithms: ['none'] -> algorithms: ['HS256']
+  {
+    types: ['JWT_NONE_ALGORITHM'],
+    description: "Add { algorithms: ['HS256'] } to jwt.verify() call",
+    transform(line: string): string | null {
+      // Case 2 — explicit 'none' in algorithms array
+      if (/algorithms\s*:\s*\[['"]none['"]\]/.test(line)) {
+        const fixed2 = line.replace(
+          /algorithms\s*:\s*\[['"]none['"]\]/g,
+          "algorithms: ['HS256']",
+        );
+        return fixed2 !== line ? fixed2 : null;
+      }
+
+      // Case 1 — jwt.verify(token, secret) with no 3rd argument
+      const match = line.match(/jwt\.verify\s*\(\s*([^,]+),\s*([^,)]+)\s*\)/);
+      if (!match) return null;
+      const jwtToken = match[1]!.trim();
+      const jwtSecret = match[2]!.trim();
+      const fixed1 = line.replace(
+        /jwt\.verify\s*\(\s*[^,]+,\s*[^,)]+\s*\)/,
+        `jwt.verify(${jwtToken}, ${jwtSecret}, { algorithms: ['HS256'] })`,
+      );
+      return fixed1 !== line ? fixed1 : null;
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────

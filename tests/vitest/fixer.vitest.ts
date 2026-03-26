@@ -229,6 +229,51 @@ describe('applyFixes — XSS', () => {
   });
 });
 
+// ── JWT_NONE_ALGORITHM fixes ─────────────────────────────────────────────────
+
+describe('applyFixes — JWT_NONE_ALGORITHM', () => {
+  test("inserts { algorithms: ['HS256'] } when jwt.verify has no 3rd argument", () => {
+    const code = "const payload = jwt.verify(token, secret);\n";
+    const filePath = writeTempFile('jwt-no-opts.ts', code);
+    const finding = makeFinding({ type: 'JWT_NONE_ALGORITHM', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("{ algorithms: ['HS256'] }");
+  });
+
+  test("replaces algorithms: ['none'] with algorithms: ['HS256']", () => {
+    const code = "const p = jwt.verify(token, secret, { algorithms: ['none'] });\n";
+    const filePath = writeTempFile('jwt-none-alg.ts', code);
+    const finding = makeFinding({ type: 'JWT_NONE_ALGORITHM', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("algorithms: ['HS256']");
+    expect(updated).not.toContain("algorithms: ['none']");
+  });
+
+  test('isFixable returns true for JWT_NONE_ALGORITHM', () => {
+    expect(isFixable('JWT_NONE_ALGORITHM')).toBe(true);
+  });
+
+  test('dry-run does NOT write the file', () => {
+    const code = "const p = jwt.verify(token, secret, { algorithms: ['none'] });\n";
+    const filePath = writeTempFile('jwt-dry.ts', code);
+    const finding = makeFinding({ type: 'JWT_NONE_ALGORITHM', line: 1, file: filePath });
+
+    const results = applyFixes([finding], true);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("algorithms: ['none']");
+  });
+});
+
 // ── INSECURE_RANDOM crypto import insertion ──────────────────────────────────
 
 describe('applyFixes — INSECURE_RANDOM crypto import', () => {
