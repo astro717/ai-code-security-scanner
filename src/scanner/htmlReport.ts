@@ -1,4 +1,5 @@
 import { Finding } from './reporter';
+import { getOwaspCategory } from './owasp';
 
 // ── HTML output format ─────────────────────────────────────────────────────────
 
@@ -51,18 +52,84 @@ function groupByFile(findings: Finding[]): Map<string, Finding[]> {
   );
 }
 
+// ── Remediation snippets per finding type ─────────────────────────────────────
+
+const REMEDIATION_SNIPPETS: Record<string, string> = {
+  SQL_INJECTION:
+    `// Use parameterised queries instead:\nconst result = await db.query(\n  "SELECT * FROM users WHERE id = $1",\n  [userId]\n);`,
+  COMMAND_INJECTION:
+    `// Use execFile with explicit args (no shell):\nimport { execFile } from 'child_process';\nexecFile('ls', ['-la', dir], callback);`,
+  SHELL_INJECTION:
+    `// Avoid shell=true; pass args as array:\nsubprocess.run(['cmd', arg1, arg2])`,
+  EVAL_INJECTION:
+    `// Replace eval() with a safe parser:\nconst data = JSON.parse(input);\n// Or use a sandboxed interpreter`,
+  XSS:
+    `// Escape output before rendering:\nconst safe = escapeHtml(userInput);\nelement.textContent = safe;  // not innerHTML`,
+  SECRET_HARDCODED:
+    `// Load from environment variable:\nconst apiKey = process.env.API_KEY;\n// Or use a secrets manager (Vault, AWS SSM)`,
+  PATH_TRAVERSAL:
+    `// Resolve and validate the path:\nconst resolved = path.resolve(baseDir, userInput);\nif (!resolved.startsWith(baseDir)) throw new Error('Invalid path');`,
+  SSRF:
+    `// Validate URL against allowlist:\nconst url = new URL(input);\nif (!ALLOWED_HOSTS.includes(url.hostname)) throw new Error('Blocked');`,
+  OPEN_REDIRECT:
+    `// Validate redirect is relative or allowlisted:\nif (!url.startsWith('/') || url.startsWith('//')) throw new Error('Invalid redirect');`,
+  PROTOTYPE_POLLUTION:
+    `// Use Object.create(null) or validate keys:\nconst safe = Object.create(null);\nif (key === '__proto__' || key === 'constructor') throw new Error('Blocked');`,
+  WEAK_CRYPTO:
+    `// Use SHA-256 or stronger:\nimport { createHash } from 'crypto';\nconst hash = createHash('sha256').update(data).digest('hex');`,
+  INSECURE_RANDOM:
+    `// Use crypto.randomBytes for security:\nimport { randomBytes } from 'crypto';\nconst token = randomBytes(32).toString('hex');`,
+  JWT_HARDCODED_SECRET:
+    `// Load JWT secret from env:\nconst secret = process.env.JWT_SECRET;\njwt.sign(payload, secret, { algorithm: 'HS256' });`,
+  JWT_NONE_ALGORITHM:
+    `// Always specify allowed algorithms:\njwt.verify(token, secret, { algorithms: ['HS256'] });`,
+  JWT_DECODE_NO_VERIFY:
+    `// Use jwt.verify() instead of jwt.decode():\nconst payload = jwt.verify(token, secret);`,
+  UNSAFE_DESERIALIZATION:
+    `// Use safe serialization (JSON):\nconst data = JSON.parse(input);\n// Never use pickle.loads() or BinaryFormatter on untrusted data`,
+  BUFFER_OVERFLOW:
+    `// Use bounded functions:\nfgets(buf, sizeof(buf), stdin);\nsnprintf(buf, sizeof(buf), "%s", input);`,
+  FORMAT_STRING:
+    `// Always use a literal format string:\nprintf("%s", user_input);\n// Never: printf(user_input);`,
+  MASS_ASSIGNMENT:
+    `# Explicitly list permitted attributes:\nparams.require(:user).permit(:name, :email)`,
+  CORS_MISCONFIGURATION:
+    `// Restrict origins explicitly:\napp.use(cors({ origin: 'https://yourdomain.com', credentials: true }));`,
+  REDOS:
+    `// Avoid user-controlled regex, or use safe-regex:\nimport safe from 'safe-regex';\nif (!safe(pattern)) throw new Error('Unsafe regex');`,
+  COMMAND_INJECTION_C:
+    `// Use execve() with explicit args:\nexecve("/usr/bin/ls", args, envp);`,
+};
+
 /** Renders a single finding row. */
 function renderFinding(f: Finding): string {
   const color = SEVERITY_COLOR[f.severity] ?? '#6b7280';
   const bg = SEVERITY_BG[f.severity] ?? '#f9fafb';
+  const remediation = REMEDIATION_SNIPPETS[f.type];
+  const remediationBlock = remediation
+    ? `<details style="margin-top:8px;">
+        <summary style="font-size:12px;color:${color};cursor:pointer;font-weight:600;">Show safe alternative</summary>
+        <pre style="margin:6px 0 0;padding:8px 12px;background:#1f2937;color:#e5e7eb;border-radius:4px;font-size:12px;line-height:1.5;overflow-x:auto;">${escapeHtml(remediation)}</pre>
+      </details>`
+    : '';
+
+  const owasp = getOwaspCategory(f.type);
+  const owaspBadge = owasp
+    ? `<a href="${escapeHtml(owasp.url)}" target="_blank" rel="noopener noreferrer"
+         title="${escapeHtml(owasp.name)}"
+         style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#1d4ed8;background:#dbeafe;padding:2px 7px;border-radius:3px;text-decoration:none;white-space:nowrap;">${escapeHtml(owasp.id)}</a>`
+    : '';
+
   return `
     <div class="finding" style="border-left: 4px solid ${color}; background: ${bg}; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${color};background:${color}22;padding:2px 8px;border-radius:3px;">${escapeHtml(f.severity)}</span>
         <code style="font-size:12px;color:#374151;background:#f3f4f6;padding:1px 6px;border-radius:3px;">${escapeHtml(f.type)}</code>
+        ${owaspBadge}
         <span style="font-size:12px;color:#6b7280;">line ${f.line}, col ${f.column}</span>
       </div>
       <p style="margin:0;font-size:14px;color:#1f2937;">${escapeHtml(f.message)}</p>
+      ${remediationBlock}
     </div>`;
 }
 
@@ -163,7 +230,8 @@ export function buildHTMLReport(
   ${emptyState}
 
   <div style="margin-top:40px;padding-top:20px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;text-align:center;">
-    Generated by <strong>ai-code-security-scanner</strong>
+    Generated by <strong>ai-code-security-scanner</strong> &nbsp;·&nbsp;
+    OWASP Top 10 2021 badges link to the relevant category documentation.
   </div>
 </body>
 </html>`;
