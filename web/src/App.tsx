@@ -214,6 +214,50 @@ function App() {
     setShowHistory(false)
   }, [])
 
+  // ── SSE /watch connection — push live scan results into history ──────────────
+  const [sseWatchPath, setSseWatchPath] = useState<string>('')
+  const [sseConnected, setSseConnected] = useState<boolean>(false)
+  const sseRef = useRef<EventSource | null>(null)
+
+  const connectWatch = useCallback((watchPath: string) => {
+    if (sseRef.current) {
+      sseRef.current.close()
+      sseRef.current = null
+      setSseConnected(false)
+    }
+    if (!watchPath.trim()) return
+
+    const url = `${SCANNER_URL}/watch?path=${encodeURIComponent(watchPath.trim())}`
+    const es = new EventSource(url)
+    sseRef.current = es
+
+    es.addEventListener('connected', () => setSseConnected(true))
+
+    es.addEventListener('scan', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as {
+          file: string
+          findings: Finding[]
+          summary: ScanSummary
+        }
+        addToHistory({
+          id: `sse-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          source: data.file,
+          summary: data.summary,
+          findings: data.findings,
+        })
+      } catch { /* ignore malformed events */ }
+    })
+
+    es.onerror = () => setSseConnected(false)
+  }, [addToHistory])
+
+  // Disconnect SSE on unmount
+  useEffect(() => {
+    return () => { sseRef.current?.close() }
+  }, [])
+
   const handleScan = async () => {
     setStatus('loading')
     setErrorMsg('')
@@ -606,6 +650,39 @@ function App() {
               )}
             </div>
           )}
+
+          {/* Live watch — SSE connection for streaming scan results */}
+          <div className="border border-[#1e1e2e] rounded-lg p-3 mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs text-[#7d8590] font-mono uppercase tracking-widest">Live Watch</span>
+              {sseConnected && (
+                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" title="SSE connected" />
+              )}
+            </div>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-xs font-mono text-[#cdd5e0] placeholder-[#4a5568] focus:outline-none focus:border-[#58a6ff]"
+                placeholder="/path/to/project"
+                value={sseWatchPath}
+                onChange={(e) => setSseWatchPath(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') connectWatch(sseWatchPath) }}
+              />
+              <button
+                className="px-3 py-1 text-xs font-mono rounded border border-[#30363d] bg-[#1c2333] text-[#7d8590] hover:text-[#cdd5e0] hover:border-[#58a6ff] transition-colors"
+                onClick={() => {
+                  if (sseConnected && sseRef.current) {
+                    sseRef.current.close()
+                    sseRef.current = null
+                    setSseConnected(false)
+                  } else {
+                    connectWatch(sseWatchPath)
+                  }
+                }}
+              >
+                {sseConnected ? 'Disconnect' : 'Connect'}
+              </button>
+            </div>
+          </div>
 
           {/* Severity trend chart — visible when 2+ scans exist */}
           <TrendChart history={history} />
