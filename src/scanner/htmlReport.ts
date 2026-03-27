@@ -100,6 +100,14 @@ const REMEDIATION_SNIPPETS: Record<string, string> = {
     `// Avoid user-controlled regex, or use safe-regex:\nimport safe from 'safe-regex';\nif (!safe(pattern)) throw new Error('Unsafe regex');`,
   COMMAND_INJECTION_C:
     `// Use execve() with explicit args:\nexecve("/usr/bin/ls", args, envp);`,
+  LDAP_INJECTION:
+    `# Escape all user-supplied values before embedding in LDAP filters:\nfrom ldap3.utils.conv import escape_filter_chars\nsafe_value = escape_filter_chars(user_input)\nldap_filter = f"(uid={safe_value})"`,
+  XML_INJECTION:
+    `# Disable external entities to prevent XXE:\n# Use defusedxml instead of xml.etree:\nimport defusedxml.ElementTree as ET\ntree = ET.fromstring(xml_string)`,
+  INSECURE_ASSERT:
+    `# Replace assert with an explicit runtime check that cannot be optimised away:\nif not condition:\n    raise ValueError("Security check failed: <describe invariant>")`,
+  INSECURE_BINDING:
+    `# Bind only to localhost unless external access is required:\napp.run(host='127.0.0.1', port=5000)\n# If external access is needed, place behind a reverse proxy (nginx/caddy).`,
 };
 
 /** Renders a single finding row. */
