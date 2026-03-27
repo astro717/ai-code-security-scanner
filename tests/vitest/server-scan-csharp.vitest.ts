@@ -222,3 +222,36 @@ describe('/scan with C# files', () => {
     expect(body.summary.total).toBeGreaterThan(0);
   });
 });
+
+// ── COMMAND_INJECTION_CS detection test ──────────────────────────────────────
+
+describe('/scan with C# — COMMAND_INJECTION_CS detection', () => {
+  test('Process.Start() with user input is detected as COMMAND_INJECTION_CS', async () => {
+    const cs_fixture = `
+using System.Diagnostics;
+
+public class CommandService
+{
+    public void RunUserCommand(string userInput)
+    {
+        Process.Start("cmd.exe", "/c " + userInput);
+    }
+}
+`;
+    const res = await post(serverPort, '/scan', {
+      code: cs_fixture,
+      filename: 'CommandService.cs',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.body as { findings: Array<{ type: string; severity: string }> };
+    expect(Array.isArray(body.findings)).toBe(true);
+
+    const types = new Set(body.findings.map((f) => f.type));
+    expect(types.has('COMMAND_INJECTION_CS')).toBe(true);
+
+    const finding = body.findings.find((f) => f.type === 'COMMAND_INJECTION_CS');
+    expect(finding).toBeDefined();
+    expect(['high', 'critical']).toContain(finding!.severity);
+  });
+});

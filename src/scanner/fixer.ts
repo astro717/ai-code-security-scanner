@@ -219,6 +219,39 @@ ${indent}    raise ValueError(${msg})`;
     },
   },
 
+  // ── SQL_INJECTION_CS: string concatenation → parameterized query hint ─────
+  {
+    types: ['SQL_INJECTION_CS'],
+    description: 'Replace SqlCommand string concatenation with parameterized query',
+    transform(line: string): string | null {
+      // Detect: new SqlCommand("... " + variable ...);
+      // Replace with a commented hint — cannot safely construct the full parameterized query inline
+      if (!/new\s+SqlCommand\s*\(/.test(line)) return null;
+      if (!/ \+/.test(line)) return null; // Only flag when there is concatenation
+      const fixed = line.replace(
+        /new\s+SqlCommand\s*\(([^)]+)\)/,
+        'new SqlCommand(/* TODO: use SqlParameter instead of string concatenation */ $1)',
+      );
+      return fixed !== line ? fixed : null;
+    },
+  },
+
+  // ── PATH_TRAVERSAL_CS: Path.Combine with user input → sanitize hint ───────
+  {
+    types: ['PATH_TRAVERSAL_CS'],
+    description: 'Add Path.GetFullPath validation to prevent directory traversal',
+    transform(line: string): string | null {
+      // Detect: File.ReadAllText( / Path.Combine( / new FileInfo( with variable
+      if (!/(?:File\.|new FileInfo\s*\(|Path\.Combine\s*\()/.test(line)) return null;
+      if (/GetFullPath|Sanitize|ValidatePath/.test(line)) return null;
+      const fixed = line.replace(
+        /(File\.\w+\s*\(|new FileInfo\s*\(|Path\.Combine\s*\()([^)]+)\)/,
+        '$1/* TODO: validate with Path.GetFullPath() and confirm it stays within allowed base dir */ $2)',
+      );
+      return fixed !== line ? fixed : null;
+    },
+  },
+
   // ── MASS_ASSIGNMENT: note-only rule (Rails-specific, needs manual review) ─
   {
     types: ['MASS_ASSIGNMENT'],
@@ -249,7 +282,7 @@ ${indent}    raise ValueError(${msg})`;
 
 // ── File extension guard ───────────────────────────────────────────────────────
 
-const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py']);
+const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs']);
 
 function isFixableFile(filePath: string): boolean {
   return FIXABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());

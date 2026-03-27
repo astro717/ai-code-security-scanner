@@ -39,6 +39,10 @@ export const KNOWN_TYPES = new Set([
   'MASS_ASSIGNMENT',
   'FORMAT_STRING',
   'SSTI',
+  'INSECURE_SHARED_PREFS',
+  'WEBVIEW_LOAD_URL',
+  'SQL_INJECTION_CS',
+  'PATH_TRAVERSAL_CS',
 ]);
 
 export interface Finding {

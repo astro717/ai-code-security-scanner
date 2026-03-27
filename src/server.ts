@@ -34,6 +34,7 @@ import { parseJavaCode, scanJava } from './scanner/java-parser';
 import { parseCSharpCode, scanCSharp } from './scanner/csharp-parser';
 import { parseCCode, scanC } from './scanner/c-parser';
 import { parseRubyCode, scanRuby } from './scanner/ruby-parser';
+import { scanKotlin } from './scanner/kotlin-parser';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
@@ -967,7 +968,7 @@ app.get('/watch', (req, res) => {
   res.write(`event: connected\ndata: ${JSON.stringify({ path: resolvedPath, ts: new Date().toISOString() })}\n\n`);
 
   const JS_TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-  const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb']);
+  const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb', '.kt', '.kts']);
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingFiles = new Set<string>();

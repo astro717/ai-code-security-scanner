@@ -631,6 +631,12 @@ program
     'Used with --fix: compute and display all remediations that would be applied without writing any files.',
   )
   .option(
+    '--severity-threshold <level>',
+    'Alias for --severity-exit: sets both --severity and --min-severity to <level>. ' +
+    'The process exits with code 1 only when findings at or above the threshold are present. ' +
+    'E.g. --severity-threshold high reports only high/critical findings and exits 1 only for those.',
+  )
+  .option(
     '--type-list',
     'Print all known finding types sorted alphabetically, then exit.',
   )
@@ -638,7 +644,7 @@ program
     '--summary-only',
     'Print only the severity count line (critical/high/medium/low total) without the full finding list.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean; summaryOnly: boolean }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean; summaryOnly: boolean }) => {
     // --type-list: print all known finding types and exit immediately.
     if (options.typeList) {
       const types = [...KNOWN_TYPES].sort();
@@ -665,6 +671,11 @@ program
     if (options.severityExit) {
       if (!options.minSeverity) options.minSeverity = options.severityExit;
       if (options.severity === 'low') options.severity = options.severityExit;
+    }
+    // --severity-threshold is an alias for --severity-exit
+    if (options.severityThreshold) {
+      if (!options.minSeverity) options.minSeverity = options.severityThreshold;
+      if (options.severity === 'low') options.severity = options.severityThreshold;
     }
 
     // Load config file first; CLI flags override config values

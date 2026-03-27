@@ -456,3 +456,121 @@ describe('buildUnifiedDiff', () => {
     expect(diff).toBe('');
   });
 });
+
+// ── LDAP_INJECTION fixes ──────────────────────────────────────────────────────
+
+describe('applyFixes — LDAP_INJECTION', () => {
+  test('isFixable returns true for LDAP_INJECTION', () => {
+    expect(isFixable('LDAP_INJECTION')).toBe(true);
+  });
+
+  test('returns applied=false (note-only rule — language-specific escaping required)', () => {
+    const code = 'String query = "(&(uid=" + userId + "))";\n';
+    const filePath = writeTempFile('ldap.ts', code);
+    const finding = makeFinding({ type: 'LDAP_INJECTION', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(false);
+    expect(results[0]!.description).toMatch(/LDAP/i);
+  });
+});
+
+// ── XML_INJECTION fixes ───────────────────────────────────────────────────────
+
+describe('applyFixes — XML_INJECTION', () => {
+  test('isFixable returns true for XML_INJECTION', () => {
+    expect(isFixable('XML_INJECTION')).toBe(true);
+  });
+
+  test('returns applied=false (note-only rule — import swap required)', () => {
+    const code = 'import xml.etree.ElementTree as ET\n';
+    const filePath = writeTempFile('xml.ts', code);
+    const finding = makeFinding({ type: 'XML_INJECTION', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(false);
+    expect(results[0]!.description).toMatch(/defusedxml|external entities/i);
+  });
+});
+
+// ── INSECURE_ASSERT fixes ─────────────────────────────────────────────────────
+
+describe('applyFixes — INSECURE_ASSERT', () => {
+  test('isFixable returns true for INSECURE_ASSERT', () => {
+    expect(isFixable('INSECURE_ASSERT')).toBe(true);
+  });
+
+  test('replaces Python assert line with if/raise', () => {
+    const code = '    assert user.is_admin, "Not admin"\n';
+    const filePath = writeTempFile('assert.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_ASSERT', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('if not (');
+    expect(updated).toContain('raise ValueError(');
+    expect(updated).not.toContain('assert user.is_admin');
+  });
+
+  test('dry-run does NOT write the file', () => {
+    const code = '    assert user.is_admin, "Not admin"\n';
+    const filePath = writeTempFile('assert-dry.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_ASSERT', line: 1, file: filePath });
+
+    const results = applyFixes([finding], true);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('assert user.is_admin');
+  });
+});
+
+// ── INSECURE_BINDING fixes ────────────────────────────────────────────────────
+
+describe('applyFixes — INSECURE_BINDING', () => {
+  test('isFixable returns true for INSECURE_BINDING', () => {
+    expect(isFixable('INSECURE_BINDING')).toBe(true);
+  });
+
+  test("replaces '0.0.0.0' with '127.0.0.1' on the flagged line", () => {
+    const code = "app.run(host='0.0.0.0', port=5000)\n";
+    const filePath = writeTempFile('binding.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_BINDING', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("'127.0.0.1'");
+    expect(updated).not.toContain("'0.0.0.0'");
+  });
+
+  test('returns applied=false when 0.0.0.0 is not present on the line', () => {
+    const code = "app.run(host='localhost', port=5000)\n";
+    const filePath = writeTempFile('binding-safe.ts', code);
+    const finding = makeFinding({ type: 'INSECURE_BINDING', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(false);
+  });
+});
+
+// ── MASS_ASSIGNMENT fixes ─────────────────────────────────────────────────────
+
+describe('applyFixes — MASS_ASSIGNMENT', () => {
+  test('isFixable returns true for MASS_ASSIGNMENT', () => {
+    expect(isFixable('MASS_ASSIGNMENT')).toBe(true);
+  });
+
+  test('returns applied=false (note-only rule — manual parameter specification required)', () => {
+    const code = 'params.permit(:all)\n';
+    const filePath = writeTempFile('mass.ts', code);
+    const finding = makeFinding({ type: 'MASS_ASSIGNMENT', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(false);
+    expect(results[0]!.description).toMatch(/permit\(:all\)|specify allowed/i);
+  });
+});

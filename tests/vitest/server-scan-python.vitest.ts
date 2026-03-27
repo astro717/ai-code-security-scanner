@@ -225,3 +225,33 @@ describe('/scan with Python files', () => {
     expect(body.summary.total).toBeGreaterThan(0);
   });
 });
+
+// ── SSTI detection test ───────────────────────────────────────────────────────
+
+const SSTI_PYTHON = `
+from flask import render_template_string, request
+
+def render_page():
+    template = request.args.get('template', '')
+    return render_template_string(template)
+`;
+
+describe('/scan with Python — SSTI detection', () => {
+  test('render_template_string() call is detected as SSTI with critical severity', async () => {
+    const res = await post(serverPort, '/scan', {
+      code: SSTI_PYTHON,
+      filename: 'views.py',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.body as { findings: Array<{ type: string; severity: string }> };
+    expect(Array.isArray(body.findings)).toBe(true);
+
+    const types = new Set(body.findings.map((f) => f.type));
+    expect(types.has('SSTI')).toBe(true);
+
+    const ssti = body.findings.find((f) => f.type === 'SSTI');
+    expect(ssti).toBeDefined();
+    expect(ssti!.severity).toBe('critical');
+  });
+});
