@@ -119,16 +119,29 @@ function hashContent(content: string): string {
  * Safe to call multiple times — subsequent calls are no-ops if options match.
  */
 export function initCache(options: CacheOptions = {}): void {
-  _disabled = options.disabled ?? false;
-  if (_disabled) return;
+  const newDisabled = options.disabled ?? false;
 
-  const dir =
-    options.cacheDir ??
-    process.env['AI_SEC_SCAN_CACHE_DIR'] ??
-    defaultCacheDir();
+  if (!newDisabled) {
+    const dir =
+      options.cacheDir ??
+      process.env['AI_SEC_SCAN_CACHE_DIR'] ??
+      defaultCacheDir();
 
-  _cacheDir = dir;
-  _cachePath = path.join(dir, CACHE_FILENAME);
+    // Re-init guard: if already initialised with the same cacheDir, skip the
+    // disk reload and counter reset entirely. This prevents tests that call
+    // initCache() in beforeEach from accidentally discarding in-flight entries
+    // and resetting hit/miss counters on the second call.
+    if (_cacheDir === dir && !newDisabled && _disabled === false) {
+      return;
+    }
+
+    _disabled = false;
+    _cacheDir = dir;
+    _cachePath = path.join(dir, CACHE_FILENAME);
+  } else {
+    _disabled = true;
+    return;
+  }
 
   // Load existing cache from disk (failures are non-fatal)
   try {
@@ -255,6 +268,8 @@ export function getCacheStats(): {
 export function clearCache(): void {
   _entries = new Map();
   _dirty = false;
+  _hits = 0;
+  _misses = 0;
   if (_cachePath && fs.existsSync(_cachePath)) {
     try {
       fs.unlinkSync(_cachePath);
