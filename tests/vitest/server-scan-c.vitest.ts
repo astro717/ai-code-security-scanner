@@ -63,6 +63,29 @@ void print_message(const char *msg) {
 }
 `;
 
+// Fixture specifically for COMMAND_INJECTION_C detection
+const C_COMMAND_INJECTION = `
+#include <stdlib.h>
+
+void execute_user_cmd(char *argv[]) {
+    system(argv[1]);
+}
+
+void open_pipe(const char *user) {
+    FILE *fp = popen(user, "r");
+    fclose(fp);
+}
+`;
+
+const COMMAND_INJECTION_C_CODE = `
+#include <stdlib.h>
+#include <stdio.h>
+
+void run_user_cmd(int argc, char *argv[]) {
+    system(argv[1]);
+}
+`;
+
 // ── Helpers ────────���────────────────────────────���───────────────────────────
 
 function getFreePort(): Promise<number> {
@@ -228,4 +251,23 @@ describe('/scan with C/C++ files', () => {
     expect(typeof body.summary).toBe('object');
     expect(body.summary.total).toBeGreaterThan(0);
   });
+
+  test('C command injection via system() with argv is detected as COMMAND_INJECTION_C', async () => {
+    const res = await post(serverPort, '/scan', {
+      code: COMMAND_INJECTION_C_CODE,
+      filename: 'cmd_inject.c',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.body as { findings: Array<{ type: string; severity: string }> };
+    expect(Array.isArray(body.findings)).toBe(true);
+
+    const cmdInjectionFindings = body.findings.filter((f) => f.type === 'COMMAND_INJECTION_C');
+    expect(cmdInjectionFindings.length).toBeGreaterThan(0);
+
+    for (const f of cmdInjectionFindings) {
+      expect(f.severity).toBe('critical');
+    }
+  });
+
 });
