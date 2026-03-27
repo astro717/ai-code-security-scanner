@@ -55,7 +55,7 @@ import { parseJavaFile, scanJava } from './scanner/java-parser';
 import { parseCSharpFile, scanCSharp } from './scanner/csharp-parser';
 import { parseCFile, scanC } from './scanner/c-parser';
 import { parseRubyFile, scanRuby } from './scanner/ruby-parser';
-import { scanKotlin } from './scanner/kotlin-parser';
+import { parseKotlinCode, parseKotlinFile, scanKotlin } from './scanner/kotlin-parser';
 import { initCache, persistCache, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/scan-cache';
 import { applyFixes, printFixSummary, buildUnifiedDiff } from './scanner/fixer';
 import * as os from 'os';
@@ -232,8 +232,8 @@ function scanFileUncached(filePath: string): Finding[] {
   // Kotlin/Android files use the dedicated regex-based scanner.
   if (ext === '.kt' || ext === '.kts') {
     try {
-      const code = require('fs').readFileSync(filePath, 'utf-8');
-      return scanKotlin(code, filePath);
+      const parsed = parseKotlinFile(filePath);
+      return scanKotlin(parsed);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  [skip] ${filePath}: ${msg}`);

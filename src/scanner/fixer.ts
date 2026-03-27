@@ -262,6 +262,32 @@ ${indent}    raise ValueError(${msg})`;
     },
   },
 
+  // ── SQL_INJECTION_CS: add parameterized query note ──────────────────────────
+  // C# SQL injection: SqlCommand with concatenation → use SqlParameter
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Replace concatenated SQL string with parameterized query using SqlParameter',
+    transform(line: string, finding: Finding): string | null {
+      // Only applies to C# files
+      if (path.extname(finding.file ?? '').toLowerCase() !== '.cs') return null;
+      // Match: new SqlCommand("..." + variable or f"...{var}")
+      // Cannot safely rewrite multi-line queries inline — return null for manual fix.
+      return null;
+    },
+  },
+
+  // ── PATH_TRAVERSAL_CS: sanitize path with Path.GetFullPath check ─────────
+  {
+    types: ['PATH_TRAVERSAL'],
+    description: 'Wrap File path argument with Path.GetFullPath validation for C# files',
+    transform(line: string, finding: Finding): string | null {
+      // Only applies to C# files
+      if (path.extname(finding.file ?? '').toLowerCase() !== '.cs') return null;
+      // Path traversal fix requires understanding the call context — manual fix required.
+      return null;
+    },
+  },
+
   // ── EVAL_INJECTION (Python): eval(x) → ast.literal_eval(x) ───────────────
   // Separate from the JS rule because Python files use ast.literal_eval instead
   // of JSON.parse. This rule only fires for .py files (guarded below).

@@ -34,7 +34,7 @@ import { parseJavaCode, scanJava } from './scanner/java-parser';
 import { parseCSharpCode, scanCSharp } from './scanner/csharp-parser';
 import { parseCCode, scanC } from './scanner/c-parser';
 import { parseRubyCode, scanRuby } from './scanner/ruby-parser';
-import { scanKotlin } from './scanner/kotlin-parser';
+import { parseKotlinCode, scanKotlin } from './scanner/kotlin-parser';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
@@ -861,6 +861,9 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
           } else if (ext === '.rb') {
             const parsed = parseRubyCode(code, item.path);
             findings = scanRuby(parsed);
+          } else if (ext === '.kt' || ext === '.kts') {
+            const parsed = parseKotlinCode(code, item.path);
+            findings = scanKotlin(parsed);
           } else {
             // JS/TS — use AST-based detectors
             const parsed = parseCode(code, item.path);
@@ -996,6 +999,9 @@ app.get('/watch', (req, res) => {
       } else if (ext === '.rb') {
         const parsed = parseRubyCode(code, filePath);
         return scanRuby(parsed);
+      } else if (ext === '.kt' || ext === '.kts') {
+        const parsed = parseKotlinCode(code, filePath);
+        return scanKotlin(parsed);
       } else if (JS_TS_EXTENSIONS.has(ext)) {
         const parsed = parseCode(code, filePath);
         return [
