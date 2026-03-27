@@ -157,6 +157,28 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'In production, bind to a specific interface or use a reverse proxy.',
   },
 
+  // ── XML injection (XXE) ────────────────────────────────────────────────────
+
+  // xml.etree.ElementTree usage without defusedxml
+  {
+    type: 'XML_INJECTION',
+    severity: 'high',
+    pattern: /\bxml\.etree\.ElementTree\b|(?<!\w)ET\.(?:fromstring|parse|iterparse|XMLParser)\s*\(/,
+    message:
+      'xml.etree.ElementTree is vulnerable to XML External Entity (XXE) attacks. ' +
+      'Use defusedxml.ElementTree instead, which disables external entity expansion by default.',
+  },
+
+  // Direct import of xml.etree.ElementTree (catches "import xml.etree.ElementTree")
+  {
+    type: 'XML_INJECTION',
+    severity: 'high',
+    pattern: /^(?:from|import)\s+xml\.etree/,
+    message:
+      'Importing xml.etree directly instead of defusedxml. The standard library XML parsers ' +
+      'are vulnerable to XXE attacks. Use defusedxml as a drop-in replacement.',
+  },
+
   // ── XSS / template injection ────────────────────────────────────────────────
 
   // Jinja2 / Mako render_template_string with user input (SSTI)

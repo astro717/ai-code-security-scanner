@@ -48,3 +48,8 @@ def render_page(template):
 
 # SECRET_HARDCODED: API key stored as a literal string
 api_key = "sk-abcdef1234567890abcdef1234567890"
+
+# XML_INJECTION: xml.etree.ElementTree.fromstring without defusedxml
+import xml.etree.ElementTree as ET
+def parse_xml(data):
+    tree = ET.fromstring(data)

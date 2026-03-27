@@ -64,6 +64,9 @@ const CACHE_FILENAME = 'scan-cache.json';
 /** Maximum number of entries stored in the in-memory cache. Oldest-accessed entry is evicted when exceeded. */
 const MAX_CACHE_ENTRIES = 5000;
 
+/** Default cache TTL: 7 days in milliseconds. */
+const DEFAULT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface CacheEntry {
@@ -80,6 +83,8 @@ export interface CacheOptions {
   cacheDir?: string;
   /** Disable the cache entirely (useful for --no-cache flag). */
   disabled?: boolean;
+  /** Cache entry TTL in milliseconds. Entries older than this are evicted. Default: 7 days. */
+  cacheTtlMs?: number;
 }
 
 interface CacheFile {
@@ -98,6 +103,7 @@ let _dirty = false;
 let _disabled = false;
 let _hits = 0;
 let _misses = 0;
+let _cacheTtlMs: number = DEFAULT_CACHE_TTL_MS;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -138,6 +144,7 @@ export function initCache(options: CacheOptions = {}): void {
     _disabled = false;
     _cacheDir = dir;
     _cachePath = path.join(dir, CACHE_FILENAME);
+    _cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   } else {
     _disabled = true;
     return;
@@ -184,6 +191,12 @@ export function getCachedFindings(
   if (_disabled) { _misses++; return null; }
   const entry = _entries.get(filePath);
   if (!entry) { _misses++; return null; }
+  // Evict stale entries by age (TTL check)
+  if (Date.now() - new Date(entry.scannedAt).getTime() > _cacheTtlMs) {
+    _entries.delete(filePath);
+    _misses++;
+    return null;
+  }
   const currentHash = hashContent(content);
   if (entry.hash !== currentHash) { _misses++; return null; }
   // Promote to most-recently-used: delete and re-insert so it moves to the end.
@@ -251,6 +264,7 @@ export function getCacheStats(): {
   disabled: boolean;
   hits: number;
   misses: number;
+  cacheTtlMs: number;
 } {
   return {
     entries: _entries.size,
@@ -258,6 +272,7 @@ export function getCacheStats(): {
     disabled: _disabled,
     hits: _hits,
     misses: _misses,
+    cacheTtlMs: _cacheTtlMs,
   };
 }
 

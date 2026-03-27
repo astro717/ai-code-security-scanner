@@ -16,6 +16,7 @@
  *   - WEAK_CRYPTO (MD5, SHA1 via Digest library)
  *   - OPEN_REDIRECT (redirect_to with user input)
  *   - EVAL_INJECTION (eval with user input)
+ *   - LDAP_INJECTION (Net::LDAP search with string interpolation)
  */
 
 import * as fs from 'fs';
@@ -196,6 +197,32 @@ const RUBY_PATTERNS: RubyPattern[] = [
     message:
       'eval() called with user-controlled or interpolated input. This executes arbitrary Ruby ' +
       'code and must never receive untrusted input.',
+  },
+
+  // LDAP injection via Net::LDAP with string interpolation
+  {
+    type: 'LDAP_INJECTION',
+    severity: 'high',
+    pattern: /Net::LDAP.*\.search\s*\([^)]*(?:#\{|params|request)/,
+    message:
+      'Net::LDAP search built with string interpolation or user-controlled input. This allows ' +
+      'LDAP injection. Use Net::LDAP::Filter.eq or other filter constructors to build safe queries.',
+  },
+  {
+    type: 'LDAP_INJECTION',
+    severity: 'high',
+    pattern: /\.search\s*\(\s*(?:filter|base)\s*:\s*"[^"]*#\{.*\}.*".*Net::LDAP/,
+    message:
+      'Net::LDAP search filter built with string interpolation. This allows LDAP injection. ' +
+      'Use Net::LDAP::Filter.eq or other filter constructors to build safe queries.',
+  },
+  {
+    type: 'LDAP_INJECTION',
+    severity: 'high',
+    pattern: /\.search\s*\(.*filter:\s*"[^"]*#\{/,
+    message:
+      'LDAP search filter built with string interpolation. User input in LDAP filter strings ' +
+      'leads to LDAP injection. Use Net::LDAP::Filter.eq to construct filters safely.',
   },
 ];
 

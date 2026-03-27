@@ -29,6 +29,7 @@ describe('Ruby scanner — fixture files', () => {
     expect(types.has('MASS_ASSIGNMENT')).toBe(true);
     expect(types.has('WEAK_CRYPTO')).toBe(true);
     expect(types.has('EVAL_INJECTION')).toBe(true);
+    expect(types.has('LDAP_INJECTION')).toBe(true);
   });
 
   test('clean.rb produces zero findings', () => {

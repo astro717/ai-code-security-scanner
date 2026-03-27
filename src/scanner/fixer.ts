@@ -77,8 +77,8 @@ const FIX_RULES: FixRule[] = [
   // ── EVAL_INJECTION: eval(x) → JSON.parse(x) ───────────────────────────────
   {
     types: ['EVAL_INJECTION'],
-    description: 'Replace eval(<expr>) with JSON.parse(<expr>)',
-    transform(line: string): string | null {
+    description: 'Replace eval(<expr>) with JSON.parse (JS/TS) or ast.literal_eval (Python)',
+    transform(line: string, finding: Finding): string | null {
       // Only handle simple eval(identifier) or eval(variable) patterns.
       // Do not attempt to rewrite new Function() or setTimeout(str) — too risky.
       const evalMatch = line.match(/\beval\s*\(([^)]+)\)/);
@@ -87,12 +87,17 @@ const FIX_RULES: FixRule[] = [
       const inner = evalMatch[1]?.trim() ?? '';
       // Skip if the inner expression is already a string literal (eval('...') is
       // a code smell but not a dynamic injection risk — leave as-is).
-      if (/^['"`]/.test(inner)) return null;
+      if (/^['"\`]/.test(inner)) return null;
+
+      // Python files: use ast.literal_eval instead of JSON.parse
+      if (path.extname(finding.file ?? '').toLowerCase() === '.py') {
+        const fixed = line.replace(/\beval\s*\(([^)]+)\)/, 'ast.literal_eval($1)');
+        return fixed !== line ? fixed : null;
+      }
 
       const fixed = line.replace(/\beval\s*\(([^)]+)\)/, `JSON.parse($1)`);
       return fixed !== line ? fixed : null;
     },
-  },
 
   // ── WEAK_CRYPTO: createHash('md5'|'md4'|'sha1'|'sha-1') → createHash('sha256') ──
   {
@@ -223,11 +228,28 @@ ${indent}    raise ValueError(${msg})`;
       return null;
     },
   },
+
+  // ── EVAL_INJECTION (Python): eval(x) → ast.literal_eval(x) ───────────────
+  // Separate from the JS rule because Python files use ast.literal_eval instead
+  // of JSON.parse. This rule only fires for .py files (guarded below).
+  {
+    types: ['EVAL_INJECTION_PY'],
+    description: 'Replace eval(<expr>) with ast.literal_eval(<expr>) in Python files',
+    transform(line: string): string | null {
+      const evalMatch = line.match(/eval\s*\(([^)]+)\)/);
+      if (!evalMatch) return null;
+      const inner = evalMatch[1]?.trim() ?? '';
+      // Skip literal string arguments — they are not dynamic injection
+      if (/^['"`]/.test(inner)) return null;
+      const fixed = line.replace(/eval\s*\(([^)]+)\)/, 'ast.literal_eval($1)');
+      return fixed !== line ? fixed : null;
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────
 
-const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py']);
 
 function isFixableFile(filePath: string): boolean {
   return FIXABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());

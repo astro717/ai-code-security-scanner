@@ -102,6 +102,17 @@ describe('Python scanner — vulnerable.py fixture', () => {
     expect(hits[0].severity).toBe('critical');
     expect(hits[0].line).toBe(45);
   });
+
+  test('XML_INJECTION — detects xml.etree.ElementTree import and ET.fromstring() (lines 53, 55)', () => {
+    const hits = findings.filter((f) => f.type === 'XML_INJECTION');
+    expect(hits.length).toBeGreaterThanOrEqual(2);
+    expect(hits[0].severity).toBe('high');
+    // Import line triggers at least one XML_INJECTION finding
+    expect(hits[0].line).toBe(53);
+    // ET.fromstring() call is also detected
+    const fromstringHits = hits.filter((f) => f.line === 55);
+    expect(fromstringHits.length).toBeGreaterThan(0);
+  });
 });
 
 describe('Python scanner — clean.py fixture', () => {

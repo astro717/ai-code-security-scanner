@@ -53,4 +53,10 @@ class VulnerableController < ApplicationController
   def dynamic_eval
     eval(params[:code])
   end
+
+  # LDAP injection via Net::LDAP with string interpolation
+  def find_user_ldap
+    ldap = Net::LDAP.new(host: 'ldap.example.com')
+    ldap.search(filter: "(uid=#{params[:username]})")
+  end
 end

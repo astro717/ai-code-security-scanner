@@ -25,6 +25,7 @@ import { detectReDoS } from './scanner/detectors/redos';
 import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
 import { summarize, Finding, deduplicateFindings, KNOWN_TYPES } from './scanner/reporter';
+import { FINDING_TO_OWASP } from './scanner/owasp';
 import { buildSARIF } from './scanner/sarif';
 import { detectUnsafeDepsFromJson } from './scanner/detectors/deps';
 import { parsePythonCode, scanPython } from './scanner/python-parser';
@@ -230,9 +231,52 @@ function logScan(fields: Record<string, unknown>): void {
 // ── Webhook delivery ──────────────────────────────────────────────────────────
 
 const WEBHOOK_TIMEOUT_MS = 10_000;
+const WEBHOOK_MAX_RETRIES = 3;
+const WEBHOOK_BACKOFF_BASE_MS = 1_000;
+
+/**
+ * Send a single webhook HTTP request. Resolves with the status code on success,
+ * rejects on network error or timeout.
+ */
+function sendWebhookRequest(
+  webhookUrl: string,
+  body: string,
+  headers: Record<string, string>,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(webhookUrl);
+    const transport = parsed.protocol === 'https:' ? https : http;
+
+    const req = transport.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname + parsed.search,
+        method: 'POST',
+        headers,
+      },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      },
+    );
+    req.setTimeout(WEBHOOK_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Webhook timed out after ${WEBHOOK_TIMEOUT_MS}ms`));
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Fire-and-forget POST of scan results to a webhook URL.
+ * Retries up to 3 times with exponential backoff (1s, 2s, 4s) on non-2xx
+ * responses or network errors.
  * If `webhookSecret` is provided, an HMAC-SHA256 signature is sent in
  * the `X-Scanner-Signature` header so the receiver can verify authenticity.
  */
@@ -242,8 +286,6 @@ function deliverWebhook(
   webhookSecret?: string,
 ): void {
   const body = JSON.stringify(payload);
-  const parsed = new URL(webhookUrl);
-  const transport = parsed.protocol === 'https:' ? https : http;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -259,28 +301,37 @@ function deliverWebhook(
     headers['X-Scanner-Signature'] = `sha256=${signature}`;
   }
 
-  const req = transport.request(
-    {
-      hostname: parsed.hostname,
-      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
-      path: parsed.pathname + parsed.search,
-      method: 'POST',
-      headers,
-    },
-    (res) => {
-      // Drain response to free socket
-      res.resume();
-      console.log(`[webhook] POST ${webhookUrl} → ${res.statusCode}`);
-    },
-  );
-  req.setTimeout(WEBHOOK_TIMEOUT_MS, () => {
-    req.destroy(new Error(`Webhook timed out after ${WEBHOOK_TIMEOUT_MS}ms`));
-  });
-  req.on('error', (err) => {
-    console.error(`[webhook] POST ${webhookUrl} failed:`, err.message);
-  });
-  req.write(body);
-  req.end();
+  // Fire-and-forget: launch async retry loop without awaiting
+  (async () => {
+    for (let attempt = 0; attempt <= WEBHOOK_MAX_RETRIES; attempt++) {
+      try {
+        const statusCode = await sendWebhookRequest(webhookUrl, body, headers);
+        console.log(`[webhook] POST ${webhookUrl} → ${statusCode} (attempt ${attempt + 1})`);
+
+        if (statusCode >= 200 && statusCode < 300) {
+          return; // Success — done
+        }
+
+        // Non-2xx: fall through to retry
+        if (attempt < WEBHOOK_MAX_RETRIES) {
+          const delayMs = WEBHOOK_BACKOFF_BASE_MS * Math.pow(2, attempt);
+          console.log(`[webhook] non-2xx (${statusCode}), retrying in ${delayMs}ms…`);
+          await sleep(delayMs);
+        } else {
+          console.error(`[webhook] POST ${webhookUrl} failed after ${WEBHOOK_MAX_RETRIES + 1} attempts (last status: ${statusCode})`);
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (attempt < WEBHOOK_MAX_RETRIES) {
+          const delayMs = WEBHOOK_BACKOFF_BASE_MS * Math.pow(2, attempt);
+          console.log(`[webhook] error: ${message}, retrying in ${delayMs}ms…`);
+          await sleep(delayMs);
+        } else {
+          console.error(`[webhook] POST ${webhookUrl} failed after ${WEBHOOK_MAX_RETRIES + 1} attempts: ${message}`);
+        }
+      }
+    }
+  })();
 }
 
 const app = express();
@@ -406,6 +457,10 @@ export async function resetRateLimiters(): Promise<void> {
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.1.0' });
+});
+
+app.get('/types', (_req, res) => {
+  res.json({ types: [...KNOWN_TYPES], owasp: FINDING_TO_OWASP });
 });
 
 app.post('/scan', scanLimiter, async (req, res): Promise<void> => {

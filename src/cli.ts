@@ -576,7 +576,19 @@ program
     '--dry-run',
     'Used with --fix: compute and display all remediations that would be applied without writing any files.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean }) => {
+  .option(
+    '--type-list',
+    'Print all known finding types sorted alphabetically, then exit.',
+  )
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean }) => {
+    // --type-list: print all known finding types and exit immediately.
+    if (options.typeList) {
+      const types = [...KNOWN_TYPES].sort();
+      for (const t of types) {
+        console.log(t);
+      }
+      process.exit(0);
+    }
     // --html <path>: shorthand for --format html --output <path>.
     // Explicit --format / --output take precedence if both are provided.
     if (options.html) {
