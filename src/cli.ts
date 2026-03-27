@@ -26,12 +26,36 @@ import { detectUnsafeDeps } from './scanner/detectors/deps';
 import { buildSARIF } from './scanner/sarif';
 import { buildHTMLReport } from './scanner/htmlReport';
 import { buildJUnit } from './scanner/junit';
+
+/** Build a SonarQube Generic Issue Import format JSON string. */
+function buildSonarQube(findings: import('./scanner/reporter').Finding[]): string {
+  const issues = findings.map((f) => ({
+    engineId: 'ai-code-security-scanner',
+    ruleId: f.type,
+    severity:
+      f.severity === 'critical' || f.severity === 'high' ? 'MAJOR' :
+      f.severity === 'medium' ? 'MINOR' : 'INFO',
+    type: 'VULNERABILITY',
+    primaryLocation: {
+      message: f.message,
+      filePath: f.file ?? '',
+      textRange: {
+        startLine: f.line,
+        endLine: f.line,
+        startColumn: f.column ?? 0,
+        endColumn: (f.column ?? 0) + 1,
+      },
+    },
+  }));
+  return JSON.stringify({ issues }, null, 2);
+}
 import { parsePythonFile, scanPython } from './scanner/python-parser';
 import { parseGoFile, scanGo } from './scanner/go-parser';
 import { parseJavaFile, scanJava } from './scanner/java-parser';
 import { parseCSharpFile, scanCSharp } from './scanner/csharp-parser';
 import { parseCFile, scanC } from './scanner/c-parser';
 import { parseRubyFile, scanRuby } from './scanner/ruby-parser';
+import { scanKotlin } from './scanner/kotlin-parser';
 import { initCache, persistCache, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/scan-cache';
 import { applyFixes, printFixSummary, buildUnifiedDiff } from './scanner/fixer';
 import * as os from 'os';
@@ -46,6 +70,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   '.cs',
   '.c', '.cpp', '.cc', '.cxx', '.h', '.hpp',
   '.rb',
+  '.kt', '.kts',
 ]);
 
 // ── .aiscanner ignore file ────────────────────────────────────────────────────
@@ -204,6 +229,18 @@ function scanFileUncached(filePath: string): Finding[] {
     }
   }
 
+  // Kotlin/Android files use the dedicated regex-based scanner.
+  if (ext === '.kt' || ext === '.kts') {
+    try {
+      const code = require('fs').readFileSync(filePath, 'utf-8');
+      return scanKotlin(code, filePath);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  [skip] ${filePath}: ${msg}`);
+      return [];
+    }
+  }
+
   // JS/TS files use the TypeScript ESLint AST pipeline.
   try {
     const parsed = parseFile(filePath);
@@ -237,8 +274,10 @@ function scanFileUncached(filePath: string): Finding[] {
 interface AiSecScanConfig {
   ignore?: string[];
   severity?: string;
-  format?: 'text' | 'json' | 'sarif' | 'html' | 'junit';
+  format?: 'text' | 'json' | 'sarif' | 'html' | 'junit' | 'sonarqube';
   fix?: boolean;
+  /** Per-rule severity overrides. Maps finding type (e.g. "SQL_INJECTION") to a severity level. */
+  rules?: Record<string, 'critical' | 'high' | 'medium' | 'low'>;
 }
 
 /** Validates a parsed config object against the AiSecScanConfig schema.
@@ -249,9 +288,9 @@ function validateConfig(obj: unknown): string[] {
     return ['Config root must be a JSON object, got: ' + (Array.isArray(obj) ? 'array' : typeof obj)];
   }
 
-  const allowed = new Set(['ignore', 'severity', 'format', 'fix']);
+  const allowed = new Set(['ignore', 'severity', 'format', 'fix', 'rules']);
   const knownSeverities = new Set(['critical', 'high', 'medium', 'low']);
-  const knownFormats = new Set(['text', 'json', 'sarif', 'html', 'junit']);
+  const knownFormats = new Set(['text', 'json', 'sarif', 'html', 'junit', 'sonarqube']);
 
   // Check for unknown keys — a typo here silently dropped config before this fix
   for (const key of Object.keys(obj as Record<string, unknown>)) {
@@ -263,6 +302,21 @@ function validateConfig(obj: unknown): string[] {
   }
 
   const record = obj as Record<string, unknown>;
+
+  // rules: must be an object of string -> severity string
+  if ('rules' in record) {
+    const rulesVal = record['rules'];
+    if (typeof rulesVal !== 'object' || rulesVal === null || Array.isArray(rulesVal)) {
+      errors.push('"rules" must be a plain object mapping finding types to severity strings, got: ' + typeof rulesVal);
+    } else {
+      const validSeverities = new Set(['critical', 'high', 'medium', 'low']);
+      for (const [type, sev] of Object.entries(rulesVal as Record<string, unknown>)) {
+        if (typeof sev !== 'string' || !validSeverities.has(sev)) {
+          errors.push(`"rules.${type}" must be one of: critical, high, medium, low. Got: ${JSON.stringify(sev)}`);
+        }
+      }
+    }
+  }
 
   // ignore: must be an array of strings
   if ('ignore' in record) {
@@ -485,7 +539,7 @@ program
     'Write a self-contained HTML report to <output-path>. Shorthand for --format html --output <output-path>. ' +
     'The file can be opened directly in a browser without a server.',
   )
-  .option('--format <format>', 'Output format: text | json | sarif | html | junit (overrides --json / --sarif flags)')
+  .option('--format <format>', 'Output format: text | json | sarif | html | junit | sonarqube (overrides --json / --sarif flags)')
   .option('--severity <level>', 'Minimum severity to report (critical|high|medium|low)', 'low')
   .option(
     '--min-severity <level>',
@@ -580,7 +634,11 @@ program
     '--type-list',
     'Print all known finding types sorted alphabetically, then exit.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean }) => {
+  .option(
+    '--summary-only',
+    'Print only the severity count line (critical/high/medium/low total) without the full finding list.',
+  )
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean; summaryOnly: boolean }) => {
     // --type-list: print all known finding types and exit immediately.
     if (options.typeList) {
       const types = [...KNOWN_TYPES].sort();
@@ -631,6 +689,9 @@ program
     if (config.fix && !options.fix) {
       options.fix = true;
     }
+
+    // Per-rule severity overrides from config — applied to findings after scanning
+    const ruleOverrides: Record<string, string> = config.rules ?? {};
 
     // Config-driven severity: only apply if CLI used the default ('low')
     if (config.severity && options.severity === 'low') {
@@ -866,6 +927,8 @@ program
       }
     }
 
+    // --summary-only: skip full findings output; just print the count line below
+    if (!options.summaryOnly) {
     if (effectiveFormat === 'sarif') {
       emit(JSON.stringify(buildSARIF(filtered), null, 2));
     } else if (effectiveFormat === 'json') {
@@ -874,6 +937,11 @@ program
       emit(buildJUnit(filtered, scanRoot));
       if (outputPath) {
         console.error('[junit] JUnit XML report written. Import into your CI system as a test result artifact.');
+      }
+    } else if (effectiveFormat === 'sonarqube') {
+      emit(buildSonarQube(filtered));
+      if (outputPath) {
+        console.error('[sonarqube] SonarQube Generic Issue Import JSON written. Import via sonar.externalIssuesReportPaths.');
       }
     } else if (effectiveFormat === 'html') {
       emit(buildHTMLReport(filtered, scanRoot, undefined, _fixResults));
@@ -889,7 +957,26 @@ program
       }
     }
 
+    } // end !summaryOnly
+    // Apply per-rule severity overrides from config
+    if (Object.keys(ruleOverrides).length > 0) {
+      filtered = filtered.map((f) => {
+        const override = ruleOverrides[f.type];
+        return override ? { ...f, severity: override as Finding['severity'] } : f;
+      });
+    }
+
     const summary = summarize(filtered);
+    if (options.summaryOnly) {
+      const s = summarize(filtered);
+      const parts: string[] = [];
+      if (s.critical > 0) parts.push(`critical: ${s.critical}`);
+      if (s.high > 0) parts.push(`high: ${s.high}`);
+      if (s.medium > 0) parts.push(`medium: ${s.medium}`);
+      if (s.low > 0) parts.push(`low: ${s.low}`);
+      const line = parts.length > 0 ? parts.join(', ') : 'no findings';
+      console.log(`${s.total} finding${s.total !== 1 ? 's' : ''} — ${line}`);
+    }
 
     // --exit-code <N>: force process to exit with the given code, bypassing all
     // severity-based exit logic. Useful for advisory-only CI scans.
