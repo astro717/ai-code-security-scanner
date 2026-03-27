@@ -9,7 +9,7 @@
  * Covered vulnerability classes:
  *   - BUFFER_OVERFLOW (unsafe string/buffer functions: gets, strcpy, strcat, sprintf, scanf)
  *   - FORMAT_STRING (printf/fprintf family with non-literal format strings)
- *   - COMMAND_INJECTION (system() / popen() with string concatenation or user input)
+ *   - COMMAND_INJECTION_C (system() / popen() / exec*() family — user-controlled command execution)
  *   - SECRET_HARDCODED (hardcoded credentials in string literals)
  *   - PATH_TRAVERSAL (fopen/open with user-controlled paths)
  *   - INSECURE_RANDOM (rand() / srand(time()) for security use)
@@ -105,9 +105,9 @@ const C_PATTERNS: CPattern[] = [
       'Always use a literal format string: printf("%s", user_input).',
   },
 
-  // Command injection via system() and popen()
+  // Command injection via system() and popen() — C/C++-specific type
   {
-    type: 'COMMAND_INJECTION',
+    type: 'COMMAND_INJECTION_C',
     severity: 'critical',
     pattern: /\bsystem\s*\([^)]*(?:sprintf|strcat|snprintf|argv|input|user|param)/,
     message:
@@ -116,12 +116,21 @@ const C_PATTERNS: CPattern[] = [
       'Use execve() with a fixed argument list instead.',
   },
   {
-    type: 'COMMAND_INJECTION',
+    type: 'COMMAND_INJECTION_C',
     severity: 'critical',
     pattern: /\bpopen\s*\([^)]*(?:sprintf|strcat|argv|input|user)/,
     message:
       'popen() called with a dynamically-constructed command. User-controlled input in shell ' +
       'commands allows command injection. Use execve() with individual arguments.',
+  },
+  {
+    type: 'COMMAND_INJECTION_C',
+    severity: 'high',
+    pattern: /\bexecl\s*\(|execlp\s*\(|execle\s*\(|execv\s*\(|execvp\s*\(|execvpe\s*\(/,
+    message:
+      'exec() family function detected. Ensure the executable path and all arguments are ' +
+      'fully controlled by the application and never derived from user input without strict ' +
+      'allowlisting, as this could enable arbitrary command execution.',
   },
 
   // Hardcoded secrets
