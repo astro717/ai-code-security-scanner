@@ -29,10 +29,8 @@ void log_message(const char *msg) {
 }
 
 // Command injection via system() with user input
-void run_cmd(const char *input) {
-    char cmd[256];
-    sprintf(cmd, "echo %s", input);
-    system(cmd);
+void run_cmd(int argc, char *argv[]) {
+    system(argv[1]);
 }
 
 // Hardcoded secret
