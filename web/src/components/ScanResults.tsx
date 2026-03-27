@@ -45,6 +45,16 @@ const FINDING_TYPE_META: Record<string, { label: string; description: string }> 
   UNSAFE_DEPENDENCY:     { label: 'Unsafe Dependency',       description: 'A dependency is pinned to an unpinned or wildcard version, risking supply-chain attacks.' },
   VULNERABLE_DEPENDENCY: { label: 'Vulnerable Dependency',   description: 'A dependency with a known CVE is in use; upgrade to the minimum safe version.' },
   CORS_MISCONFIGURATION: { label: 'CORS Misconfiguration',   description: 'CORS is configured to allow any origin with credentials, enabling cross-site request forgery.' },
+  JWT_DECODE_NO_VERIFY:  { label: 'JWT Decode No Verify',    description: 'jwt.decode() is used instead of jwt.verify(), meaning the signature is not checked and tokens can be forged.' },
+  WEAK_CRYPTO:           { label: 'Weak Cryptography',       description: 'A cryptographically broken algorithm (MD5, SHA-1) is used for security-sensitive hashing or signing.' },
+  BUFFER_OVERFLOW:       { label: 'Buffer Overflow',         description: 'An unsafe C/C++ buffer function (gets, strcpy, sprintf, etc.) is used without bounds checking, risking memory corruption.' },
+  FORMAT_STRING:         { label: 'Format String',           description: 'A non-literal format string is passed to printf/fprintf, potentially allowing attackers to read or write arbitrary memory.' },
+  MASS_ASSIGNMENT:       { label: 'Mass Assignment',         description: 'Mass assignment via permit(:all) or unrestricted parameter binding allows attackers to set arbitrary model fields.' },
+  LDAP_INJECTION:        { label: 'LDAP Injection',          description: 'User-controlled input is interpolated into an LDAP query without escaping, allowing directory manipulation or auth bypass.' },
+  XML_INJECTION:         { label: 'XML Injection (XXE)',     description: 'The XML parser is configured without disabling external entities, allowing XXE attacks that can read local files or trigger SSRF.' },
+  INSECURE_ASSERT:       { label: 'Insecure Assert',         description: 'A security check is implemented with assert(), which is silently stripped in optimized/production mode.' },
+  INSECURE_BINDING:      { label: 'Insecure Binding',        description: 'The server is bound to 0.0.0.0, exposing the service on all network interfaces including external ones.' },
+  UNSAFE_DESERIALIZATION:{ label: 'Unsafe Deserialization',  description: 'Untrusted data is deserialized via pickle or equivalent, enabling arbitrary code execution on the server.' },
 }
 
 // OWASP Top 10 2021 mapping — mirrors src/scanner/owasp.ts FINDING_TO_OWASP
