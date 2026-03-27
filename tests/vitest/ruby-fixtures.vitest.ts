@@ -9,7 +9,7 @@
 
 import { describe, test, expect } from 'vitest';
 import path from 'path';
-import { parseRubyFile, scanRuby } from '../../src/scanner/ruby-parser';
+import { parseRubyFile, parseRubyCode, scanRuby } from '../../src/scanner/ruby-parser';
 
 const FIXTURES = path.join(__dirname, '..', 'fixtures');
 
@@ -68,5 +68,78 @@ describe('Ruby scanner — fixture files', () => {
     for (const f of sqlFindings) {
       expect(f.severity).toBe('critical');
     }
+  });
+});
+
+// ── Rails-specific inline detector tests ─────────────────────────────────────
+
+describe('Ruby scanner — Rails SQL injection via string concatenation', () => {
+  test('detects .where() with string concatenation', () => {
+    const parsed = parseRubyCode('User.where("id = " + params[:id])');
+    const findings = scanRuby(parsed);
+    expect(findings.some((f) => f.type === 'SQL_INJECTION')).toBe(true);
+  });
+
+  test('detects find_by_sql with string concatenation', () => {
+    const parsed = parseRubyCode('User.find_by_sql("SELECT * FROM users WHERE id = " + user_id)');
+    const findings = scanRuby(parsed);
+    expect(findings.some((f) => f.type === 'SQL_INJECTION')).toBe(true);
+  });
+
+  test('does NOT flag .where() with parameterized question mark', () => {
+    const parsed = parseRubyCode('User.where("id = ?", params[:id])');
+    const findings = scanRuby(parsed);
+    // No SQL injection finding expected for parameterized queries
+    const sqlConcat = findings.filter((f) => f.type === 'SQL_INJECTION' && f.message.includes('concatenation'));
+    expect(sqlConcat.length).toBe(0);
+  });
+});
+
+describe('Ruby scanner — unsafe use of send()', () => {
+  test('detects .send() with params', () => {
+    const parsed = parseRubyCode('@user.send(params[:method])');
+    const findings = scanRuby(parsed);
+    expect(findings.some((f) => f.type === 'COMMAND_INJECTION' && f.message.includes('send()'))).toBe(true);
+  });
+
+  test('detects .public_send() with request params', () => {
+    const parsed = parseRubyCode('model.public_send(request.params[:action])');
+    const findings = scanRuby(parsed);
+    expect(findings.some((f) => f.type === 'COMMAND_INJECTION' && f.message.includes('public_send()'))).toBe(true);
+  });
+
+  test('does NOT flag .send() with a hardcoded symbol', () => {
+    const parsed = parseRubyCode('obj.send(:save)');
+    const findings = scanRuby(parsed);
+    const sendFindings = findings.filter((f) => f.message.includes('send()'));
+    expect(sendFindings.length).toBe(0);
+  });
+});
+
+describe('Ruby scanner — unsafe mass assignment patterns', () => {
+  test('detects assign_attributes with raw params', () => {
+    const parsed = parseRubyCode('@user.assign_attributes(params[:user])');
+    const findings = scanRuby(parsed);
+    expect(findings.some((f) => f.type === 'MASS_ASSIGNMENT')).toBe(true);
+  });
+
+  test('detects update() with raw params', () => {
+    const parsed = parseRubyCode('@user.update(params)');
+    const findings = scanRuby(parsed);
+    expect(findings.some((f) => f.type === 'MASS_ASSIGNMENT')).toBe(true);
+  });
+
+  test('detects attr_accessible :all', () => {
+    const parsed = parseRubyCode('attr_accessible :all');
+    const findings = scanRuby(parsed);
+    expect(findings.some((f) => f.type === 'MASS_ASSIGNMENT')).toBe(true);
+  });
+
+  test('does NOT flag update() with permitted params', () => {
+    const parsed = parseRubyCode('@user.update(params.require(:user).permit(:name, :email))');
+    const findings = scanRuby(parsed);
+    // The permit pattern breaks the raw params regex — should not match
+    const massFindings = findings.filter((f) => f.type === 'MASS_ASSIGNMENT' && f.message.includes('params hash'));
+    expect(massFindings.length).toBe(0);
   });
 });

@@ -224,6 +224,90 @@ const RUBY_PATTERNS: RubyPattern[] = [
       'LDAP search filter built with string interpolation. User input in LDAP filter strings ' +
       'leads to LDAP injection. Use Net::LDAP::Filter.eq to construct filters safely.',
   },
+
+  // ── Rails-specific: SQL injection via string concatenation ────────────────
+  // (complement to the interpolation patterns above — covers "..."+var patterns)
+  {
+    type: 'SQL_INJECTION',
+    severity: 'critical',
+    pattern: /\.where\s*\(\s*"[^"]*"\s*\+/,
+    message:
+      'ActiveRecord .where() called with SQL string built via concatenation. This allows SQL ' +
+      'injection. Use parameterised form: .where("column = ?", value) or a hash condition.',
+  },
+  {
+    type: 'SQL_INJECTION',
+    severity: 'critical',
+    pattern: /\.(?:find_by_sql|execute|select|joins)\s*\([^)]*"\s*\+/,
+    message:
+      'Raw SQL query built via string concatenation. Use ActiveRecord parameterised queries or ' +
+      'ActiveRecord::Base.sanitize_sql to prevent SQL injection.',
+  },
+
+  // ── Rails-specific: unsafe use of send() with user input ─────────────────
+  // send() and public_send() with user-controlled method names allow arbitrary method dispatch
+  {
+    type: 'COMMAND_INJECTION',
+    severity: 'critical',
+    pattern: /\.send\s*\(\s*(?:params|request|#\{)/,
+    message:
+      'send() called with user-controlled method name. An attacker can invoke any method on the ' +
+      'object, including dangerous ones. Use a whitelist of allowed method names before dispatching.',
+  },
+  {
+    type: 'COMMAND_INJECTION',
+    severity: 'high',
+    pattern: /\.public_send\s*\(\s*(?:params|request|#\{)/,
+    message:
+      'public_send() called with user-controlled method name. While restricted to public methods, ' +
+      'this still allows an attacker to call unintended methods. Validate against an allowlist first.',
+  },
+
+  // ── Rails-specific: N+1 query patterns ────────────────────────────────────
+  // Accessing an association inside an each loop without eager loading
+  {
+    type: 'SQL_INJECTION',
+    severity: 'low',
+    pattern: /\beach\s+do\s*\|[^|]+\|\s*\n[^e]*\.\w+\s*\.\s*(?:each|map|select|count|first|last|find)/,
+    message:
+      'Potential N+1 query: association accessed in a loop without eager loading. Use ' +
+      '.includes(:association), .preload(:association), or .eager_load(:association) to batch load.',
+  },
+  {
+    type: 'SQL_INJECTION',
+    severity: 'low',
+    pattern: /\.each\s*\{[^}]*\.[a-z_]+s\s*\./,
+    message:
+      'Potential N+1 query: collection association accessed inside an iteration block. ' +
+      'Eager-load with .includes(:relation) to avoid one query per record.',
+  },
+
+  // ── Rails-specific: unsafe mass assignment via strong params bypass ────────
+  // assign_attributes / update / update_attributes with raw params hash
+  {
+    type: 'MASS_ASSIGNMENT',
+    severity: 'high',
+    pattern: /\.(?:assign_attributes|update|update_attributes)\s*\(\s*params(?:\[:[^\]]+\])?\s*\)/,
+    message:
+      'Model updated directly with raw params hash. Without strong parameters (.permit), any ' +
+      'attribute can be set including privileged fields. Use params.require(:model).permit(...).',
+  },
+  {
+    type: 'MASS_ASSIGNMENT',
+    severity: 'high',
+    pattern: /\bModel\.new\s*\(\s*params(?:\[:[^\]]+\])?\s*\)/,
+    message:
+      'ActiveRecord model instantiated directly from params hash without strong parameters. ' +
+      'Use params.require(:model).permit(:field1, :field2) to limit assignable attributes.',
+  },
+  {
+    type: 'MASS_ASSIGNMENT',
+    severity: 'medium',
+    pattern: /attr_accessible\s*:all/,
+    message:
+      'attr_accessible :all grants mass assignment of every attribute. This is dangerous in ' +
+      'Rails 3.x apps. Explicitly list safe attributes or migrate to strong parameters.',
+  },
 ];
 
 /**
