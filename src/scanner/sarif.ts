@@ -10,15 +10,19 @@ import { getOwaspCategory } from './owasp';
 export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   SECRET_HARDCODED:      'Hardcoded secret or API key detected in source code.',
   SQL_INJECTION:         'User-controlled input used in a SQL query without parameterisation.',
+  SQL_INJECTION_CS:      'User-controlled input used in a SQL query without parameterisation (C#).',
   SHELL_INJECTION:       'User-controlled input passed to a shell execution function.',
   EVAL_INJECTION:        'User-controlled input passed to eval() or equivalent.',
   XSS:                   'User-controlled value assigned to an HTML sink (e.g. innerHTML).',
   PATH_TRAVERSAL:        'User-controlled path used in a filesystem call without sanitisation.',
+  PATH_TRAVERSAL_CS:     'User-controlled path used in a filesystem call without sanitisation (C#).',
   PROTOTYPE_POLLUTION:   'Dynamic key assignment or Object.assign with user-controlled data.',
   INSECURE_RANDOM:       'Math.random() used in a security-sensitive context.',
   OPEN_REDIRECT:         'Redirect target derived from user-controlled input.',
   SSRF:                  'HTTP request made to a URL derived from user-controlled input.',
   COMMAND_INJECTION:     'User-controlled value used as the command in a child_process call.',
+  COMMAND_INJECTION_C:   'User-controlled value used as the command in a system/popen call (C/C++).',
+  COMMAND_INJECTION_CS:  'User-controlled value used in Process.Start() or ProcessStartInfo (C#), enabling arbitrary command execution.',
   CORS_MISCONFIGURATION: 'CORS policy allows wildcard or reflected origin with credentials.',
   JWT_HARDCODED_SECRET:  'JWT signed with a hardcoded secret literal.',
   JWT_WEAK_SECRET:       'JWT signed with a secret shorter than 32 characters.',
@@ -36,6 +40,9 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   BUFFER_OVERFLOW:       'Unsafe buffer operation (gets, strcpy, sprintf, etc.) without bounds checking.',
   MASS_ASSIGNMENT:       'Mass assignment via permit(:all) or unrestricted parameter binding.',
   FORMAT_STRING:         'Non-literal format string passed to printf/fprintf family — memory read/write risk.',
+  SSTI:                  'Template string rendered from user-controlled input — arbitrary server-side code execution via SSTI.',
+  INSECURE_SHARED_PREFS: 'SharedPreferences or local storage used for sensitive data without encryption (Kotlin/Android).',
+  WEBVIEW_LOAD_URL:      'WebView loadUrl() or loadData() used with untrusted or user-controlled URL, enabling code injection (Kotlin/Android).',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';

@@ -78,6 +78,7 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   // A01 — Broken Access Control
   OPEN_REDIRECT:          'A01:2021',
   PATH_TRAVERSAL:         'A01:2021',
+  PATH_TRAVERSAL_CS:      'A01:2021',
   MASS_ASSIGNMENT:        'A01:2021',
 
   // A02 — Cryptographic Failures
@@ -89,7 +90,10 @@ export const FINDING_TO_OWASP: Record<string, string> = {
 
   // A03 — Injection
   SQL_INJECTION:          'A03:2021',
+  SQL_INJECTION_CS:       'A03:2021',
   COMMAND_INJECTION:      'A03:2021',
+  COMMAND_INJECTION_C:    'A03:2021',
+  COMMAND_INJECTION_CS:   'A03:2021',
   SHELL_INJECTION:        'A03:2021',
   EVAL_INJECTION:         'A03:2021',
   XSS:                    'A03:2021',
@@ -120,6 +124,10 @@ export const FINDING_TO_OWASP: Record<string, string> = {
 
   // A10 — SSRF
   SSRF:                   'A10:2021',
+
+  // Kotlin/Android-specific types
+  INSECURE_SHARED_PREFS:  'A02:2021',
+  WEBVIEW_LOAD_URL:       'A03:2021',
 };
 
 /**

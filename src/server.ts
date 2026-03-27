@@ -33,6 +33,7 @@ import { parseJavaCode, scanJava } from './scanner/java-parser';
 import { parseCSharpCode, scanCSharp } from './scanner/csharp-parser';
 import { parseCCode, scanC } from './scanner/c-parser';
 import { parseRubyCode, scanRuby } from './scanner/ruby-parser';
+import { parseKotlinCode, scanKotlin } from './scanner/kotlin-parser';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
@@ -528,6 +529,10 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     // Ruby files use the dedicated regex-based Ruby scanner
     const rbResult = parseRubyCode(code, effectiveFilename);
     findings = scanRuby(rbResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+  } else if (['.kt', '.kts'].includes(ext)) {
+    // Kotlin files use the dedicated regex-based Kotlin scanner
+    const ktResult = parseKotlinCode(code, effectiveFilename);
+    findings = scanKotlin(ktResult).map((f) => ({ ...f, file: filename ?? 'input' }));
   } else {
     // JS/TS files use the AST-based parser and detector suite
     let parsed;
