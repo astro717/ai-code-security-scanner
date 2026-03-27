@@ -164,6 +164,65 @@ const FIX_RULES: FixRule[] = [
       return fixed !== line ? fixed : null;
     },
   },
+
+  // ── LDAP_INJECTION: note-only rule (language-specific escape required) ────
+  {
+    types: ['LDAP_INJECTION'],
+    description: 'Escape LDAP filter characters using a library function',
+    transform(_line: string): string | null {
+      // LDAP injection requires language-specific escaping — cannot auto-fix.
+      return null;
+    },
+  },
+
+  // ── XML_INJECTION: note-only rule (parser config change required) ─────────
+  {
+    types: ['XML_INJECTION'],
+    description: 'Replace xml.etree with defusedxml to disable external entities',
+    transform(_line: string): string | null {
+      // XXE mitigation requires swapping the import — cannot safe-rewrite inline.
+      return null;
+    },
+  },
+
+  // ── INSECURE_ASSERT: replace assert with explicit raise ───────────────────
+  {
+    types: ['INSECURE_ASSERT'],
+    description: 'Replace assert with explicit conditional raise',
+    transform(line: string): string | null {
+      // Match Python-style: assert <expr> (optionally: , "message")
+      const assertMatch = line.match(/^(\s*)assert\s+(.+?)(?:\s*,\s*(.+))?\s*$/);
+      if (!assertMatch) return null;
+      const indent = assertMatch[1] ?? '';
+      const condition = assertMatch[2]?.trim() ?? '';
+      const msg = assertMatch[3]?.trim() ?? '"Security check failed"';
+      const fixed = `${indent}if not (${condition}):
+${indent}    raise ValueError(${msg})`;
+      return fixed;
+    },
+  },
+
+  // ── INSECURE_BINDING: note-only rule (requires config change) ────────────
+  {
+    types: ['INSECURE_BINDING'],
+    description: 'Change binding host from 0.0.0.0 to 127.0.0.1',
+    transform(line: string): string | null {
+      // Replace 0.0.0.0 with 127.0.0.1 in host/bind strings
+      if (!/0\.0\.0\.0/.test(line)) return null;
+      const fixed = line.replace(/['"]0\.0\.0\.0['"]/g, "'127.0.0.1'");
+      return fixed !== line ? fixed : null;
+    },
+  },
+
+  // ── MASS_ASSIGNMENT: note-only rule (Rails-specific, needs manual review) ─
+  {
+    types: ['MASS_ASSIGNMENT'],
+    description: 'Replace permit(:all) with explicit attribute allowlist',
+    transform(line: string): string | null {
+      // Cannot safely enumerate permitted attributes — require developer input.
+      return null;
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────
