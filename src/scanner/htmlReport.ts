@@ -100,6 +100,8 @@ const REMEDIATION_SNIPPETS: Record<string, string> = {
     `// Avoid user-controlled regex, or use safe-regex:\nimport safe from 'safe-regex';\nif (!safe(pattern)) throw new Error('Unsafe regex');`,
   COMMAND_INJECTION_C:
     `// Use execve() with explicit args:\nexecve("/usr/bin/ls", args, envp);`,
+  COMMAND_INJECTION_CS:
+    `// Use ProcessStartInfo with explicit arguments and no shell:\nvar psi = new ProcessStartInfo("cmd", "/c echo safe") { UseShellExecute = false };\nProcess.Start(psi);`,
 };
 
 /** Renders a single finding row. */
