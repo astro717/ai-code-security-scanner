@@ -61,6 +61,9 @@ const SCANNER_VERSION = readScannerVersion();
 
 const CACHE_FILENAME = 'scan-cache.json';
 
+/** Maximum number of entries stored in the in-memory cache. Oldest-accessed entry is evicted when exceeded. */
+const MAX_CACHE_ENTRIES = 5000;
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface CacheEntry {
@@ -89,7 +92,8 @@ interface CacheFile {
 
 let _cacheDir: string | null = null;
 let _cachePath: string | null = null;
-let _entries: Record<string, CacheEntry> = {};
+// Map preserves insertion order — we use it as an LRU queue: oldest key first.
+let _entries: Map<string, CacheEntry> = new Map();
 let _dirty = false;
 let _disabled = false;
 let _hits = 0;
@@ -139,16 +143,16 @@ export function initCache(options: CacheOptions = {}): void {
         parsed.scannerVersion === SCANNER_VERSION &&
         typeof parsed.entries === 'object'
       ) {
-        _entries = parsed.entries ?? {};
+        _entries = new Map(Object.entries(parsed.entries ?? {}));
       } else {
         // Version mismatch — start fresh
-        _entries = {};
+        _entries = new Map();
         _dirty = true; // Will overwrite the stale file on next persist
       }
     }
   } catch {
     // Corrupt or unreadable cache — start fresh
-    _entries = {};
+    _entries = new Map();
   }
 }
 
@@ -165,10 +169,13 @@ export function getCachedFindings(
   content: string,
 ): Finding[] | null {
   if (_disabled) { _misses++; return null; }
-  const entry = _entries[filePath];
+  const entry = _entries.get(filePath);
   if (!entry) { _misses++; return null; }
   const currentHash = hashContent(content);
   if (entry.hash !== currentHash) { _misses++; return null; }
+  // Promote to most-recently-used: delete and re-insert so it moves to the end.
+  _entries.delete(filePath);
+  _entries.set(filePath, entry);
   _hits++;
   return entry.findings;
 }
@@ -187,11 +194,18 @@ export function setCachedFindings(
   findings: Finding[],
 ): void {
   if (_disabled) return;
-  _entries[filePath] = {
+  // If this key already exists, remove it first so it is re-inserted at the end.
+  if (_entries.has(filePath)) _entries.delete(filePath);
+  _entries.set(filePath, {
     hash: hashContent(content),
     scannedAt: new Date().toISOString(),
     findings,
-  };
+  });
+  // Evict the least-recently-used (first / oldest) entry if we exceed the limit.
+  if (_entries.size > MAX_CACHE_ENTRIES) {
+    const lruKey = _entries.keys().next().value;
+    if (lruKey !== undefined) _entries.delete(lruKey);
+  }
   _dirty = true;
 }
 
@@ -206,7 +220,7 @@ export function persistCache(): void {
     fs.mkdirSync(_cacheDir, { recursive: true });
     const data: CacheFile = {
       scannerVersion: SCANNER_VERSION,
-      entries: _entries,
+      entries: Object.fromEntries(_entries),
     };
     fs.writeFileSync(_cachePath, JSON.stringify(data, null, 2), 'utf8');
     _dirty = false;
@@ -226,7 +240,7 @@ export function getCacheStats(): {
   misses: number;
 } {
   return {
-    entries: Object.keys(_entries).length,
+    entries: _entries.size,
     cachePath: _cachePath,
     disabled: _disabled,
     hits: _hits,
@@ -239,7 +253,7 @@ export function getCacheStats(): {
  * Primarily useful in tests and for a future --clear-cache flag.
  */
 export function clearCache(): void {
-  _entries = {};
+  _entries = new Map();
   _dirty = false;
   if (_cachePath && fs.existsSync(_cachePath)) {
     try {
