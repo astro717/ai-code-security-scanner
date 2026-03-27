@@ -39,6 +39,8 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   MASS_ASSIGNMENT:       'Mass assignment via permit(:all) or unrestricted parameter binding.',
   FORMAT_STRING:         'Non-literal format string passed to printf/fprintf family — memory read/write risk.',
   SSTI:                  'Template string rendered from user-controlled input — arbitrary server-side code execution via SSTI.',
+  INSECURE_SHARED_PREFS: 'SharedPreferences used to store sensitive data (password, token, secret, or key) without EncryptedSharedPreferences — data readable by any app with root or backup access.',
+  WEBVIEW_LOAD_URL:      'WebView.loadUrl called with a non-literal, potentially user-controlled URL — enables open redirect and cross-site scripting attacks inside the WebView.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
