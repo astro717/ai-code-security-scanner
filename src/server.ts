@@ -105,7 +105,20 @@ const SCAN_REPO_BODY_SCHEMA: Record<string, FieldSchema> = {
   webhookSecret:  { type: 'string' },
 };
 
-// ── Anthropic AI explain ──────────────────────────────────────────────────────
+// ── AI explain — multi-provider LLM backend ───────────────────────────────────
+//
+// Supports two remote LLM backends:
+//   • Anthropic (default) — set ANTHROPIC_API_KEY; optionally override model via
+//     AI_EXPLAIN_MODEL (default: claude-haiku-4-5-20251001)
+//   • OpenAI — set OPENAI_API_KEY; optionally override model via AI_EXPLAIN_MODEL
+//     (default: gpt-4o-mini) and endpoint via AI_EXPLAIN_ENDPOINT
+//     (default: https://api.openai.com/v1/chat/completions)
+//
+// Provider selection: if AI_EXPLAIN_PROVIDER=openai (or the per-request
+// X-AI-Provider header is "openai"), the OpenAI path is used. Otherwise
+// Anthropic is the default. The per-request auth key header (X-Anthropic-Key
+// for Anthropic, X-OpenAI-Key for OpenAI) always takes precedence over the
+// corresponding environment variable.
 
 interface FindingWithAI extends Finding {
   explanation?: string;
@@ -114,7 +127,10 @@ interface FindingWithAI extends Finding {
 
 // LLM calls can be slow — 30 s gives ample time for a response while bounding
 // the maximum time a single /scan?aiExplain=true request can block the server.
-const ANTHROPIC_REQUEST_TIMEOUT_MS = 30_000;
+const AI_REQUEST_TIMEOUT_MS = 30_000;
+
+/** @deprecated use AI_REQUEST_TIMEOUT_MS */
+const ANTHROPIC_REQUEST_TIMEOUT_MS = AI_REQUEST_TIMEOUT_MS;
 
 /**
  * Makes a request to the Anthropic Messages API.
@@ -143,8 +159,8 @@ async function anthropicRequest(body: object, apiKey?: string): Promise<unknown>
         catch { reject(new Error('Invalid JSON from Anthropic')); }
       });
     });
-    req.setTimeout(ANTHROPIC_REQUEST_TIMEOUT_MS, () => {
-      req.destroy(new Error(`Anthropic API request timed out after ${ANTHROPIC_REQUEST_TIMEOUT_MS}ms`));
+    req.setTimeout(AI_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Anthropic API request timed out after ${AI_REQUEST_TIMEOUT_MS}ms`));
     });
     req.on('error', reject);
     req.write(payload);
@@ -152,14 +168,79 @@ async function anthropicRequest(body: object, apiKey?: string): Promise<unknown>
   });
 }
 
-async function explainFinding(finding: Finding, apiKey?: string): Promise<{ explanation: string; fixSuggestion: string }> {
-  const response = await anthropicRequest({
-    model: 'claude-haiku-4-5-20251001',
+/**
+ * Makes a request to an OpenAI-compatible Chat Completions endpoint.
+ *
+ * @param prompt     - User message prompt text
+ * @param apiKey     - OpenAI API key; falls back to OPENAI_API_KEY env var
+ * @param model      - Model name; falls back to AI_EXPLAIN_MODEL env var or 'gpt-4o-mini'
+ * @param endpoint   - Full URL of the chat completions endpoint; falls back to
+ *                     AI_EXPLAIN_ENDPOINT env var or https://api.openai.com/v1/chat/completions
+ */
+async function openaiRequest(
+  prompt: string,
+  apiKey?: string,
+  model?: string,
+  endpoint?: string,
+): Promise<unknown> {
+  const effectiveKey = apiKey ?? process.env.OPENAI_API_KEY ?? '';
+  const effectiveModel = model ?? process.env.AI_EXPLAIN_MODEL ?? 'gpt-4o-mini';
+  const effectiveEndpoint = endpoint ?? process.env.AI_EXPLAIN_ENDPOINT ?? 'https://api.openai.com/v1/chat/completions';
+
+  const parsed = new URL(effectiveEndpoint);
+  const isHttps = parsed.protocol === 'https:';
+  const transport = isHttps ? https : http;
+
+  const body = {
+    model: effectiveModel,
     max_tokens: 512,
-    messages: [
-      {
-        role: 'user',
-        content: `You are a security expert. Analyze this vulnerability finding and respond with ONLY a JSON object (no markdown, no extra text):
+    messages: [{ role: 'user', content: prompt }],
+  };
+
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const req = transport.request({
+      hostname: parsed.hostname,
+      port: parsed.port || (isHttps ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${effectiveKey}`,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { reject(new Error('Invalid JSON from OpenAI-compatible endpoint')); }
+      });
+    });
+    req.setTimeout(AI_REQUEST_TIMEOUT_MS, () => {
+      req.destroy(new Error(`OpenAI API request timed out after ${AI_REQUEST_TIMEOUT_MS}ms`));
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+type AiProvider = 'anthropic' | 'openai';
+
+/**
+ * Resolves the active AI provider. Priority:
+ *   1. per-request provider parameter (from X-AI-Provider header)
+ *   2. AI_EXPLAIN_PROVIDER environment variable
+ *   3. 'anthropic' default
+ */
+function resolveAiProvider(requestProvider?: string): AiProvider {
+  const raw = (requestProvider ?? process.env.AI_EXPLAIN_PROVIDER ?? 'anthropic').toLowerCase();
+  return raw === 'openai' ? 'openai' : 'anthropic';
+}
+
+const EXPLAIN_PROMPT_TEMPLATE = (finding: Finding): string =>
+  `You are a security expert. Analyze this vulnerability finding and respond with ONLY a JSON object (no markdown, no extra text):
 
 Vulnerability type: ${finding.type}
 Severity: ${finding.severity}
@@ -167,7 +248,46 @@ Code snippet: ${finding.snippet ?? '(not available)'}
 Message: ${finding.message}
 
 Respond with exactly this JSON structure:
-{"explanation": "2-sentence explanation of why this is dangerous and what could be exploited", "fixSuggestion": "the corrected code snippet, just the code, no explanation"}`,
+{"explanation": "2-sentence explanation of why this is dangerous and what could be exploited", "fixSuggestion": "the corrected code snippet, just the code, no explanation"}`;
+
+async function explainFinding(
+  finding: Finding,
+  apiKey?: string,
+  provider?: AiProvider,
+  openaiEndpoint?: string,
+): Promise<{ explanation: string; fixSuggestion: string }> {
+  const activeProvider = provider ?? resolveAiProvider();
+
+  if (activeProvider === 'openai') {
+    const effectiveModel = process.env.AI_EXPLAIN_MODEL ?? 'gpt-4o-mini';
+    const response = await openaiRequest(
+      EXPLAIN_PROMPT_TEMPLATE(finding),
+      apiKey,
+      effectiveModel,
+      openaiEndpoint,
+    ) as { choices?: Array<{ message?: { content?: string } }> };
+
+    const text = response.choices?.[0]?.message?.content ?? '';
+    try {
+      const parsed = JSON.parse(text) as { explanation?: string; fixSuggestion?: string };
+      return {
+        explanation: parsed.explanation ?? '',
+        fixSuggestion: parsed.fixSuggestion ?? '',
+      };
+    } catch {
+      return { explanation: text.slice(0, 200), fixSuggestion: '' };
+    }
+  }
+
+  // Default: Anthropic
+  const effectiveModel = process.env.AI_EXPLAIN_MODEL ?? 'claude-haiku-4-5-20251001';
+  const response = await anthropicRequest({
+    model: effectiveModel,
+    max_tokens: 512,
+    messages: [
+      {
+        role: 'user',
+        content: EXPLAIN_PROMPT_TEMPLATE(finding),
       },
     ],
   }, apiKey) as { content?: Array<{ text?: string }> };
@@ -186,13 +306,30 @@ Respond with exactly this JSON structure:
 
 /**
  * Enriches up to 5 findings with AI-generated explanations.
- * @param findings  - Findings to enrich
- * @param apiKey    - Optional per-request Anthropic key; falls back to env var
+ *
+ * @param findings       - Findings to enrich
+ * @param apiKey         - Optional per-request API key; falls back to ANTHROPIC_API_KEY or OPENAI_API_KEY
+ * @param provider       - LLM provider to use ('anthropic' | 'openai'); resolved from env when absent
+ * @param openaiEndpoint - Optional custom OpenAI-compatible endpoint URL
  */
-async function enrichWithAI(findings: Finding[], apiKey?: string): Promise<FindingWithAI[]> {
-  const effectiveKey = apiKey ?? process.env.ANTHROPIC_API_KEY;
+async function enrichWithAI(
+  findings: Finding[],
+  apiKey?: string,
+  provider?: AiProvider,
+  openaiEndpoint?: string,
+): Promise<FindingWithAI[]> {
+  const activeProvider = provider ?? resolveAiProvider();
+
+  // Resolve effective key depending on provider
+  const effectiveKey = apiKey ?? (
+    activeProvider === 'openai'
+      ? process.env.OPENAI_API_KEY
+      : process.env.ANTHROPIC_API_KEY
+  );
+
   if (!effectiveKey) {
-    console.warn('[ai-explain] ANTHROPIC_API_KEY not set — skipping AI enrichment');
+    const envVar = activeProvider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
+    console.warn(`[ai-explain] ${envVar} not set — skipping AI enrichment`);
     return findings;
   }
 
@@ -206,7 +343,7 @@ async function enrichWithAI(findings: Finding[], apiKey?: string): Promise<Findi
   await Promise.all(
     toEnrich.map(async (f) => {
       try {
-        const ai = await explainFinding(f, effectiveKey);
+        const ai = await explainFinding(f, effectiveKey, activeProvider, openaiEndpoint);
         enriched.set(f, { ...f, ...ai });
       } catch (err) {
         console.error(`[ai-explain] failed for ${f.type}:`, err);
@@ -476,6 +613,27 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     return;
   }
 
+  // ── Per-request AI provider and key resolution ────────────────────────────
+  //
+  // X-AI-Provider header: "anthropic" (default) | "openai"
+  // X-Anthropic-Key header: Anthropic API key (validated format)
+  // X-OpenAI-Key header: OpenAI API key (or any sk-... token for compatible endpoints)
+  // X-AI-Endpoint header: optional custom OpenAI-compatible base URL
+
+  const requestAiProvider = resolveAiProvider(
+    (() => { const h = req.headers['x-ai-provider']; return typeof h === 'string' ? h : undefined; })(),
+  );
+
+  const requestOpenAiKey = (() => {
+    const h = req.headers['x-openai-key'];
+    return typeof h === 'string' && h.length > 0 ? h : undefined;
+  })();
+
+  const requestOpenAiEndpoint = (() => {
+    const h = req.headers['x-ai-endpoint'];
+    return typeof h === 'string' && h.length > 0 ? h : undefined;
+  })();
+
   // Per-request Anthropic key: the caller may supply their own key via the
   // X-Anthropic-Key header. This lets individual callers use ?aiExplain=true
   // without the server having a shared ANTHROPIC_API_KEY. Falls back to the
@@ -499,6 +657,11 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
 
   // If requestAnthropicKey is null, the response was already sent (invalid key).
   if (requestAnthropicKey === null) return;
+
+  // Resolve the per-request API key: prefer provider-specific header, fall back to Anthropic key
+  const resolvedApiKey = requestAiProvider === 'openai'
+    ? (requestOpenAiKey ?? requestAnthropicKey)
+    : (requestAnthropicKey ?? requestOpenAiKey);
 
   // Schema validation — reject malformed requests early with detailed errors.
   const scanValidation = validateRequestBody(req.body, SCAN_BODY_SCHEMA, '/scan');
@@ -636,10 +799,16 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     }
   }
 
-  // AI explain enrichment — uses per-request key (X-Anthropic-Key header) when
-  // present, otherwise falls back to the server-level ANTHROPIC_API_KEY env var.
+  // AI explain enrichment — supports Anthropic (default) and OpenAI backends.
+  // Provider resolved from X-AI-Provider header → AI_EXPLAIN_PROVIDER env var → 'anthropic'.
+  // API key resolved from X-Anthropic-Key / X-OpenAI-Key headers → env vars.
   if (aiExplain && findings.length > 0) {
-    findings = await enrichWithAI(findings, requestAnthropicKey);
+    findings = await enrichWithAI(
+      findings,
+      resolvedApiKey,
+      requestAiProvider,
+      requestOpenAiEndpoint,
+    );
   }
 
   const scanSummary = findings.reduce<Record<string, number>>((acc, f) => {
