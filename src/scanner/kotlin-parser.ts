@@ -10,7 +10,7 @@
  *   INSECURE_RANDOM        — java.util.Random for security-sensitive values
  *   WEAK_CRYPTO            — MD5 / SHA-1 MessageDigest calls
  *   INSECURE_SHARED_PREFS  — SharedPreferences storing sensitive data unencrypted
- *   WEBVIEW_UNSAFE_URL     — WebView.loadUrl with user-controlled input
+ *   WEBVIEW_LOAD_URL     — WebView.loadUrl with user-controlled input
  *   SQL_INJECTION          — rawQuery / execSQL with string concatenation
  *   PATH_TRAVERSAL         — File() constructor with user-controlled path
  */
@@ -86,7 +86,7 @@ const KOTLIN_PATTERNS: KotlinPattern[] = [
 
   // WebView.loadUrl with non-literal URL (potential open redirect / XSS)
   {
-    type: 'WEBVIEW_UNSAFE_URL',
+    type: 'WEBVIEW_LOAD_URL',
     severity: 'high',
     pattern: /\.loadUrl\s*\(\s*(?!["']https?:\/\/)[^)]*(?:intent|uri|url|param|input|request|get|query)/i,
     message:
