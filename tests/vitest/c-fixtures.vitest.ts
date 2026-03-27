@@ -28,6 +28,7 @@ describe('C/C++ scanner — fixture files', () => {
     expect(types.has('SECRET_HARDCODED')).toBe(true);
     expect(types.has('INSECURE_RANDOM')).toBe(true);
     expect(types.has('WEAK_CRYPTO')).toBe(true);
+    expect(types.has('COMMAND_INJECTION_C')).toBe(true);
   });
 
   test('clean.c produces zero findings', () => {
