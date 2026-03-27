@@ -39,6 +39,10 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   MASS_ASSIGNMENT:       'Mass assignment via permit(:all) or unrestricted parameter binding.',
   FORMAT_STRING:         'Non-literal format string passed to printf/fprintf family — memory read/write risk.',
   SSTI:                  'Template string rendered from user-controlled input — arbitrary server-side code execution via SSTI.',
+
+  // Kotlin / Android finding types
+  INSECURE_SHARED_PREFS: 'SharedPreferences used to store sensitive data without EncryptedSharedPreferences — data is unencrypted at rest.',
+  WEBVIEW_LOAD_URL:      'WebView.loadUrl called with a user-controlled URL — may enable open redirect or cross-site scripting attacks.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
