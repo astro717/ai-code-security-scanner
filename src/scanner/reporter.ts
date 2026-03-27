@@ -10,6 +10,7 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low';
 export const KNOWN_TYPES = new Set([
   'COMMAND_INJECTION',
   'COMMAND_INJECTION_C',
+  'COMMAND_INJECTION_CS',
   'CORS_MISCONFIGURATION',
   'EVAL_INJECTION',
   'INSECURE_RANDOM',

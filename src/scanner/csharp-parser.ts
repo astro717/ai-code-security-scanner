@@ -7,7 +7,7 @@
  *
  * Covered vulnerability classes:
  *   - SQL_INJECTION (string interpolation / concatenation in ADO.NET / EF queries)
- *   - COMMAND_INJECTION (Process.Start with user input)
+ *   - COMMAND_INJECTION_CS (Process.Start with user input)
  *   - SECRET_HARDCODED (hardcoded credentials)
  *   - WEAK_CRYPTO (MD5, SHA1, DES, RC2)
  *   - PATH_TRAVERSAL (File/Directory access with user input)
@@ -75,7 +75,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
 
   // Command injection via Process.Start
   {
-    type: 'COMMAND_INJECTION',
+    type: 'COMMAND_INJECTION_CS',
     severity: 'critical',
     pattern: /Process\.Start\s*\([^)]*(?:Request\.|input|param|user|args)/i,
     message:
@@ -83,7 +83,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
       'injection. Validate and whitelist all arguments before spawning external processes.',
   },
   {
-    type: 'COMMAND_INJECTION',
+    type: 'COMMAND_INJECTION_CS',
     severity: 'critical',
     pattern: /ProcessStartInfo\s*\([^)]*(?:Request\.|input|param|user)/i,
     message:
