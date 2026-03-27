@@ -105,4 +105,58 @@ describe('CLI E2E — full scan pipeline', () => {
     expect(Array.isArray(parsed.findings)).toBe(true);
     expect((parsed.findings as unknown[]).length).toBe(0);
   });
+
+  test('--format html produces a valid self-contained HTML report', () => {
+    const result = spawnSync(
+      process.execPath,
+      [DIST_CLI, FIXTURE, '--format', 'html'],
+      {
+        cwd: PROJECT_ROOT,
+        encoding: 'utf-8',
+        timeout: 30_000,
+      },
+    );
+
+    // CLI exits 1 because findings are present
+    expect(result.status).toBe(1);
+
+    const html = result.stdout;
+    // Must be a valid HTML document
+    expect(html).toContain('<!DOCTYPE html>');
+    expect(html).toContain('<html');
+    // Must contain the report title
+    expect(html).toContain('Security Scan Report');
+    // Must include at least one finding — the fixture has SQL injection
+    expect(html).toContain('SQL_INJECTION');
+    // Summary bar with severity counts must be present
+    expect(html).toMatch(/critical|high|medium|low/i);
+    // OWASP breakdown must be rendered for known finding types
+    expect(html).toContain('OWASP Top 10');
+  });
+
+  test('--format html --output writes HTML file and prints confirmation', () => {
+    const tmpOut = path.join(PROJECT_ROOT, 'dist', '_test-report.html');
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [DIST_CLI, FIXTURE, '--format', 'html', '--output', tmpOut],
+        {
+          cwd: PROJECT_ROOT,
+          encoding: 'utf-8',
+          timeout: 30_000,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      // Output file must have been written
+      expect(fs.existsSync(tmpOut)).toBe(true);
+      const written = fs.readFileSync(tmpOut, 'utf-8');
+      expect(written).toContain('<!DOCTYPE html>');
+      expect(written).toContain('Security Scan Report');
+      // CLI must print the confirmation hint to stderr
+      expect(result.stderr).toContain('[html]');
+    } finally {
+      if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
+    }
+  });
 });
