@@ -128,6 +128,24 @@ function postJSON(serverUrl: string, body: object, apiKey?: string): Promise<Sca
 
 const DIAGNOSTIC_SOURCE = 'AI Security Scanner';
 
+// Known C/C++-specific finding types returned by c-parser.ts.
+// Severity mapping and diagnostic rendering below are intentionally type-agnostic
+// (driven by f.severity), so these types are handled automatically without special cases.
+const C_FINDING_TYPES = new Set([
+  'COMMAND_INJECTION_C',
+  'BUFFER_OVERFLOW',
+  'FORMAT_STRING',
+  'WEAK_CRYPTO',
+]);
+
+// Known C#-specific finding types.
+const CSHARP_FINDING_TYPES = new Set([
+  'COMMAND_INJECTION_CS',
+]);
+
+// Export for use in tests
+export { C_FINDING_TYPES, CSHARP_FINDING_TYPES };
+
 function findingsToDiagnostics(findings: Finding[]): vscode.Diagnostic[] {
   return findings.map((f) => {
     const line = Math.max(0, f.line - 1); // VS Code is 0-indexed
