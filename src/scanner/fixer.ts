@@ -98,6 +98,7 @@ const FIX_RULES: FixRule[] = [
       const fixed = line.replace(/\beval\s*\(([^)]+)\)/, `JSON.parse($1)`);
       return fixed !== line ? fixed : null;
     },
+  },
 
   // ── WEAK_CRYPTO: createHash('md5'|'md4'|'sha1'|'sha-1') → createHash('sha256') ──
   {
