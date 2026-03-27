@@ -47,7 +47,7 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
 
-export function buildSARIF(findings: Finding[]): object {
+export function buildSARIF(findings: Finding[], toolName = 'ai-code-security-scanner'): object {
   const rules = Array.from(new Set(findings.map((f) => f.type))).map((id) => {
     const owasp = getOwaspCategory(id);
     const rule: Record<string, unknown> = {
@@ -93,7 +93,7 @@ export function buildSARIF(findings: Finding[]): object {
     runs: [{
       tool: {
         driver: {
-          name: 'ai-code-security-scanner',
+          name: toolName,
           version: '0.1.0',
           informationUri: 'https://github.com/rouco-industries/ai-code-security-scanner',
           rules,
