@@ -104,6 +104,14 @@ const REMEDIATION_SNIPPETS: Record<string, string> = {
     `# Use render_template() with a static template file:\nfrom flask import render_template\n# Pass data as context variables, never as part of the template string:\nreturn render_template('page.html', user_name=user_name)`,
   COMMAND_INJECTION_CS:
     `// Use ProcessStartInfo with explicit arguments and no shell:\nvar psi = new ProcessStartInfo("cmd", "/c echo safe") { UseShellExecute = false };\nProcess.Start(psi);`,
+  LDAP_INJECTION:
+    `# Escape all user-supplied values before embedding in LDAP filters:\nfrom ldap3.utils.conv import escape_filter_chars\nsafe_value = escape_filter_chars(user_input)\nldap_filter = f"(uid={safe_value})"`,
+  XML_INJECTION:
+    `# Disable external entities to prevent XXE:\n# Use defusedxml instead of xml.etree:\nimport defusedxml.ElementTree as ET\ntree = ET.fromstring(xml_string)`,
+  INSECURE_ASSERT:
+    `# Replace assert with an explicit runtime check that cannot be optimised away:\nif not condition:\n    raise ValueError("Security check failed: <describe invariant>")`,
+  INSECURE_BINDING:
+    `# Bind only to localhost unless external access is required:\napp.run(host='127.0.0.1', port=5000)\n# If external access is needed, place behind a reverse proxy (nginx/caddy).`,
 };
 
 /** Renders a single finding row. */
