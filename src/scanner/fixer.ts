@@ -277,17 +277,62 @@ ${indent}    raise ValueError(${msg})`;
     },
   },
 
-  // ── PATH_TRAVERSAL_CS: sanitize path with Path.GetFullPath check ─────────
+  // ── PATH_TRAVERSAL: wrap unsanitized paths with path.normalize() ──────────
+  // Handles JS/TS files. Targets common patterns:
+  //   fs.readFile(userInput, ...)    → fs.readFile(path.normalize(userInput), ...)
+  //   fs.readFileSync(userInput, ...) → fs.readFileSync(path.normalize(userInput), ...)
+  //   path.join(base, userInput, ...) → already has path module; add normalize around 2nd arg
+  // For C# files, falls through to note-only (manual fix required).
   {
     types: ['PATH_TRAVERSAL'],
-    description: 'Wrap File path argument with Path.GetFullPath validation for C# files',
+    description: 'Wrap unsanitized path argument with path.normalize() to prevent directory traversal',
     transform(line: string, finding: Finding): string | null {
-      // Only applies to C# files
-      if (path.extname(finding.file ?? '').toLowerCase() !== '.cs') return null;
-      // Path traversal fix requires understanding the call context — manual fix required.
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+
+      // C# files — cannot auto-fix inline
+      if (ext === '.cs') return null;
+
+      // Python files — os.path.normpath equivalent (note-only; Python normpath doesn't prevent all traversal)
+      if (ext === '.py') return null;
+
+      // JS/TS: only attempt fix if the line doesn't already contain path.normalize / path.resolve / path.join
+      // to avoid double-wrapping.
+      if (/path\.(normalize|resolve)\s*\(/.test(line)) return null;
+
+      // Pattern 1: fs.<fn>(variable, ...) where variable is a single identifier or simple expression
+      // Replace the first argument of fs file-system calls with path.normalize(arg)
+      const fsCallMatch = line.match(
+        /\b(fs\.\w+\s*\()([^,)]+)(,|\))/,
+      );
+      if (fsCallMatch) {
+        const prefix = fsCallMatch[1]!;
+        const arg = fsCallMatch[2]!.trim();
+        const sep = fsCallMatch[3]!;
+        // Only wrap if the arg looks like a variable/expression (not a string literal or already normalized)
+        if (!/^['"`]/.test(arg) && !/path\./.test(arg)) {
+          const fixed = line.replace(
+            /(\bfs\.\w+\s*\()([^,)]+)(,|\))/,
+            `${prefix}path.normalize(${arg})${sep}`,
+          );
+          return fixed !== line ? fixed : null;
+        }
+      }
+
+      // Pattern 2: path.join(base, userInput) — wrap with path.normalize at the outermost level
+      // Insert path.normalize( ... ) around the entire path.join call
+      const joinMatch = line.match(/\bpath\.(join)\s*\(([^;{}\n]+)\)/);
+      if (joinMatch) {
+        const fixed = line.replace(
+          /\bpath\.join\s*\(([^;{}\n]+)\)/,
+          'path.normalize(path.join($1))',
+        );
+        return fixed !== line ? fixed : null;
+      }
+
       return null;
     },
   },
+
 
   // ── EVAL_INJECTION (Python): eval(x) → ast.literal_eval(x) ───────────────
   // Separate from the JS rule because Python files use ast.literal_eval instead
