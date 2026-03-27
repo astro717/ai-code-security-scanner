@@ -584,6 +584,10 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     // Ruby files use the dedicated regex-based Ruby scanner
     const rbResult = parseRubyCode(code, effectiveFilename);
     findings = scanRuby(rbResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+  } else if (ext === '.kt' || ext === '.kts') {
+    // Kotlin/Android files use the dedicated regex-based Kotlin scanner
+    const ktResult = parseKotlinCode(code, effectiveFilename);
+    findings = scanKotlin(ktResult).map((f) => ({ ...f, file: filename ?? 'input' }));
   } else {
     // JS/TS files use the AST-based parser and detector suite
     let parsed;
