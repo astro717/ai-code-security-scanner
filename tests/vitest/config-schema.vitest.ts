@@ -62,3 +62,69 @@ describe('.ai-sec-scan.json — fix and severity schema', () => {
     }
   });
 });
+
+// ── CLI runner helper ─────────────────────────────────────────────────────────
+// Used by the validation tests below to exercise the real validateConfig path.
+
+const CLI_ENTRY = require('path').resolve(__dirname, '../../dist/cli.js');
+const FIXTURE_FILE = require('path').resolve(__dirname, '../fixtures/vulnerable.js');
+
+function runCLIWithConfig(configDir: string): { stderr: string; code: number } {
+  const { execFileSync } = require('child_process');
+  try {
+    execFileSync(
+      process.execPath,
+      [CLI_ENTRY, FIXTURE_FILE, '--config', require('path').join(configDir, '.ai-sec-scan.json')],
+      { encoding: 'utf-8', cwd: configDir },
+    );
+    return { stderr: '', code: 0 };
+  } catch (err: unknown) {
+    const e = err as { stderr?: string; status?: number };
+    return { stderr: e.stderr ?? '', code: e.status ?? 1 };
+  }
+}
+
+describe('.ai-sec-scan.json — cacheTtlDays validation', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-ttl-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('cacheTtlDays with a positive integer is stored correctly', () => {
+    const configPath = writeTempConfig(tmpDir, { cacheTtlDays: 14 });
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    expect(parsed.cacheTtlDays).toBe(14);
+  });
+
+  test('cacheTtlDays with a positive fractional value is stored correctly', () => {
+    const configPath = writeTempConfig(tmpDir, { cacheTtlDays: 0.5 });
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    expect(parsed.cacheTtlDays).toBe(0.5);
+  });
+
+  test('cacheTtlDays of 0 causes CLI validation error (must be positive)', () => {
+    writeTempConfig(tmpDir, { cacheTtlDays: 0 });
+    const { stderr, code } = runCLIWithConfig(tmpDir);
+    expect(code).not.toBe(0);
+    expect(stderr).toMatch(/cacheTtlDays|positive/i);
+  });
+
+  test('cacheTtlDays of -5 causes CLI validation error', () => {
+    writeTempConfig(tmpDir, { cacheTtlDays: -5 });
+    const { stderr, code } = runCLIWithConfig(tmpDir);
+    expect(code).not.toBe(0);
+    expect(stderr).toMatch(/cacheTtlDays|positive/i);
+  });
+
+  test('cacheTtlDays as a string causes CLI validation error', () => {
+    writeTempConfig(tmpDir, { cacheTtlDays: '7' });
+    const { stderr, code } = runCLIWithConfig(tmpDir);
+    expect(code).not.toBe(0);
+    expect(stderr).toMatch(/cacheTtlDays|positive number/i);
+  });
+});
