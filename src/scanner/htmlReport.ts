@@ -100,6 +100,8 @@ const REMEDIATION_SNIPPETS: Record<string, string> = {
     `// Avoid user-controlled regex, or use safe-regex:\nimport safe from 'safe-regex';\nif (!safe(pattern)) throw new Error('Unsafe regex');`,
   COMMAND_INJECTION_C:
     `// Use execve() with explicit args:\nexecve("/usr/bin/ls", args, envp);`,
+  SSTI:
+    `# Use render_template() with a static template file:\nfrom flask import render_template\n# Pass data as context variables, never as part of the template string:\nreturn render_template('page.html', user_name=user_name)`,
 };
 
 /** Renders a single finding row. */

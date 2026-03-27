@@ -159,15 +159,16 @@ const PYTHON_PATTERNS: PythonPattern[] = [
 
   // ── XSS / template injection ────────────────────────────────────────────────
 
-  // Jinja2 / Mako render_template_string with user input (SSTI risk)
+  // Jinja2 / Mako render_template_string with user input (SSTI)
   {
-    type: 'XSS',
-    severity: 'high',
+    type: 'SSTI',
+    severity: 'critical',
     pattern: /render_template_string\s*\(/,
     message:
-      'render_template_string() renders a template from a string, which can lead to ' +
-      'Server-Side Template Injection (SSTI) if any part of the template string is ' +
-      'user-controlled. Use render_template() with a static template file instead.',
+      'render_template_string() renders a template from a string. If any part of the ' +
+      'template string is user-controlled, this allows Server-Side Template Injection (SSTI), ' +
+      'which can lead to arbitrary server-side code execution. Use render_template() with a ' +
+      'static template file and pass data as context variables instead.',
   },
 
   // Django mark_safe with variable content

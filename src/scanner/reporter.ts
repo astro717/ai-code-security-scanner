@@ -37,6 +37,7 @@ export const KNOWN_TYPES = new Set([
   'BUFFER_OVERFLOW',
   'MASS_ASSIGNMENT',
   'FORMAT_STRING',
+  'SSTI',
 ]);
 
 export interface Finding {

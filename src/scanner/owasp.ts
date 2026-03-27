@@ -97,6 +97,7 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   LDAP_INJECTION:         'A03:2021',
   XML_INJECTION:          'A03:2021',
   FORMAT_STRING:          'A03:2021',
+  SSTI:                   'A03:2021',
   PROTOTYPE_POLLUTION:    'A03:2021',
 
   // A04 — Insecure Design

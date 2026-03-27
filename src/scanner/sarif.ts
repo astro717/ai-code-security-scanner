@@ -37,6 +37,7 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   BUFFER_OVERFLOW:       'Unsafe buffer operation (gets, strcpy, sprintf, etc.) without bounds checking.',
   MASS_ASSIGNMENT:       'Mass assignment via permit(:all) or unrestricted parameter binding.',
   FORMAT_STRING:         'Non-literal format string passed to printf/fprintf family — memory read/write risk.',
+  SSTI:                  'Template string rendered from user-controlled input — arbitrary server-side code execution via SSTI.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';

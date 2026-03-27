@@ -41,5 +41,10 @@ def read_file(filename):
 def fetch_url(url):
     return requests.get(url)
 
+# SSTI: render_template_string with user-controlled template
+from flask import render_template_string
+def render_page(template):
+    return render_template_string(template)
+
 # SECRET_HARDCODED: API key stored as a literal string
 api_key = "sk-abcdef1234567890abcdef1234567890"

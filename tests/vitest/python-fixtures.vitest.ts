@@ -93,6 +93,13 @@ describe('Python scanner — vulnerable.py fixture', () => {
     const hits = findings.filter((f) => f.type === 'SECRET_HARDCODED');
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].severity).toBe('high');
+    expect(hits[0].line).toBe(49);
+  });
+
+  test('SSTI — detects render_template_string() call (line 45)', () => {
+    const hits = findings.filter((f) => f.type === 'SSTI');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('critical');
     expect(hits[0].line).toBe(45);
   });
 });
