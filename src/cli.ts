@@ -278,6 +278,8 @@ interface AiSecScanConfig {
   fix?: boolean;
   /** Per-rule severity overrides. Maps finding type (e.g. "SQL_INJECTION") to a severity level. */
   rules?: Record<string, 'critical' | 'high' | 'medium' | 'low'>;
+  /** Scan cache TTL in days. Entries older than this are automatically evicted. Default: 7. */
+  cacheTtlDays?: number;
 }
 
 /** Validates a parsed config object against the AiSecScanConfig schema.
@@ -288,7 +290,7 @@ function validateConfig(obj: unknown): string[] {
     return ['Config root must be a JSON object, got: ' + (Array.isArray(obj) ? 'array' : typeof obj)];
   }
 
-  const allowed = new Set(['ignore', 'severity', 'format', 'fix', 'rules']);
+  const allowed = new Set(['ignore', 'severity', 'format', 'fix', 'rules', 'cacheTtlDays']);
   const knownSeverities = new Set(['critical', 'high', 'medium', 'low']);
   const knownFormats = new Set(['text', 'json', 'sarif', 'html', 'junit', 'sonarqube']);
 
@@ -302,6 +304,14 @@ function validateConfig(obj: unknown): string[] {
   }
 
   const record = obj as Record<string, unknown>;
+
+  // cacheTtlDays: must be a positive number
+  if ('cacheTtlDays' in record) {
+    const ttl = record['cacheTtlDays'];
+    if (typeof ttl !== 'number' || isNaN(ttl as number) || (ttl as number) <= 0) {
+      errors.push('"cacheTtlDays" must be a positive number, got: ' + ttl);
+    }
+  }
 
   // rules: must be an object of string -> severity string
   if ('rules' in record) {
@@ -730,7 +740,8 @@ program
     // ── One-shot scan ───────────────────────────────────────────────────────
     // Initialise the disk-backed scan cache so results are persisted across runs.
     // Watch mode already calls initCache() inside startWatchMode().
-    initCache();
+    const cacheTtlMs = config.cacheTtlDays != null ? config.cacheTtlDays * 24 * 60 * 60 * 1000 : undefined;
+    initCache({ cacheTtlMs });
 
     let files = collectFiles(scanRoot, effectiveIgnore);
 
