@@ -56,6 +56,7 @@ import { parseCSharpFile, scanCSharp } from './scanner/csharp-parser';
 import { parseCFile, scanC } from './scanner/c-parser';
 import { parseRubyFile, scanRuby } from './scanner/ruby-parser';
 import { parseKotlinCode, parseKotlinFile, scanKotlin } from './scanner/kotlin-parser';
+import { parseSwiftFile, scanSwift } from './scanner/swift-parser';
 import { initCache, persistCache, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/scan-cache';
 import { applyFixes, printFixSummary, buildUnifiedDiff } from './scanner/fixer';
 import * as os from 'os';
@@ -71,6 +72,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   '.c', '.cpp', '.cc', '.cxx', '.h', '.hpp',
   '.rb',
   '.kt', '.kts',
+  '.swift',
 ]);
 
 // ── .aiscanner ignore file ────────────────────────────────────────────────────
@@ -234,6 +236,18 @@ function scanFileUncached(filePath: string): Finding[] {
     try {
       const parsed = parseKotlinFile(filePath);
       return scanKotlin(parsed);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  [skip] ${filePath}: ${msg}`);
+      return [];
+    }
+  }
+
+  // Swift/iOS files use the dedicated regex-based scanner.
+  if (ext === '.swift') {
+    try {
+      const parsed = parseSwiftFile(filePath);
+      return scanSwift(parsed);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  [skip] ${filePath}: ${msg}`);
