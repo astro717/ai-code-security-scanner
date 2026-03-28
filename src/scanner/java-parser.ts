@@ -215,25 +215,8 @@ const JAVA_PATTERNS: JavaPattern[] = [
       'User input in LDAP filters allows LDAP injection. Use parameterised queries.',
   },
 
-  // N+1 query pattern — JDBC/JPA call inside a for/foreach/while loop
-  // Matches patterns where a query method is called within a loop body.
-  {
-    type: 'PERFORMANCE_N_PLUS_ONE',
-    severity: 'low',
-    pattern: /for\s*\([^)]+\)\s*\{[^}]*(?:executeQuery|executeUpdate|createQuery|findById|\.get\s*\(\s*\w+\s*\)\.load)/,
-    message:
-      'JDBC/JPA query inside a for loop — N+1 query pattern detected. ' +
-      'Each loop iteration issues a separate SQL round-trip. ' +
-      'Use a JOIN FETCH, @BatchSize, or batch SELECT ... WHERE id IN (...) instead.',
-  },
-  {
-    type: 'PERFORMANCE_N_PLUS_ONE',
-    severity: 'low',
-    pattern: /for\s*\(\s*\w[\w\s<>]*:\s*\w+\s*\)\s*\{[^}]*(?:executeQuery|executeUpdate|findById|entityManager\.find|session\.get|session\.load)/,
-    message:
-      'JPA/Hibernate query inside an enhanced for-each loop — N+1 query pattern. ' +
-      'Use JOIN FETCH, Hibernate @BatchSize, or a bulk IN-query to eliminate the per-iteration round-trip.',
-  },
+  // N+1 query pattern — detected statefully in scanJava (see loop-tracking logic below)
+  // These placeholder entries are not used directly; the stateful detector handles them.
 ];
 
 /**
@@ -243,12 +226,70 @@ const JAVA_PATTERNS: JavaPattern[] = [
 export function scanJava(result: JavaParseResult): Finding[] {
   const findings: Finding[] = [];
 
+  // Stateful N+1 detection: track whether we are inside a for/for-each loop.
+  let inForLoop = false;
+  let loopBraceDepth = 0;
+
   result.lines.forEach((line, idx) => {
     const lineNum = idx + 1;
     const trimmed = line.trim();
 
     // Skip pure comments
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return;
+
+    // ── Stateful for-loop N+1 detection ───────────────────────────────────────
+    const openBraces = (line.match(/\{/g) ?? []).length;
+    const closeBraces = (line.match(/\}/g) ?? []).length;
+
+    // Detect entry into a for or enhanced for-each loop
+    if (/\bfor\s*\(/.test(line)) {
+      inForLoop = true;
+      loopBraceDepth = openBraces - closeBraces;
+      // Also check for DB calls on the same line as the for statement
+      const n1PatternInline = /\b(?:executeQuery|executeUpdate|createQuery|findById|entityManager\.find\b|session\.get\b|session\.load\b)/;
+      if (n1PatternInline.test(line)) {
+        findings.push({
+          type: 'PERFORMANCE_N_PLUS_ONE',
+          severity: 'low',
+          line: lineNum,
+          column: line.search(/\S/),
+          snippet: trimmed.slice(0, 100),
+          message:
+            'JDBC/JPA/Hibernate query inside a for loop — N+1 query pattern detected. ' +
+            'Each loop iteration issues a separate SQL round-trip. ' +
+            'Use a JOIN FETCH, @BatchSize, or batch SELECT ... WHERE id IN (...) instead.',
+          file: result.filePath,
+        });
+      }
+      if (loopBraceDepth <= 0) {
+        inForLoop = false;
+        loopBraceDepth = 0;
+      }
+    } else if (inForLoop) {
+      loopBraceDepth += openBraces - closeBraces;
+      if (loopBraceDepth <= 0) {
+        inForLoop = false;
+        loopBraceDepth = 0;
+      } else {
+        // Check for JDBC/JPA/Hibernate DB calls inside the loop body
+        const n1Pattern = /\b(?:executeQuery|executeUpdate|createQuery|findById|entityManager\.find\b|session\.get\b|session\.load\b)/;
+        if (n1Pattern.test(line)) {
+          findings.push({
+            type: 'PERFORMANCE_N_PLUS_ONE',
+            severity: 'low',
+            line: lineNum,
+            column: line.search(/\S/),
+            snippet: trimmed.slice(0, 100),
+            message:
+              'JDBC/JPA/Hibernate query inside a for loop — N+1 query pattern detected. ' +
+              'Each loop iteration issues a separate SQL round-trip. ' +
+              'Use a JOIN FETCH, @BatchSize, or batch SELECT ... WHERE id IN (...) instead.',
+            file: result.filePath,
+          });
+        }
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     for (const { type, severity, pattern, message, confidence } of JAVA_PATTERNS) {
       if (pattern.test(line)) {
