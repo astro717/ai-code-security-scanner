@@ -824,13 +824,23 @@ program
     // ── --cache-stats output ─────────────────────────────────────────────────
     if (options.cacheStats) {
       const stats = getCacheStats();
-      const totalLookups = stats.hits + stats.misses;
-      const hitRatio = totalLookups > 0 ? ((stats.hits / totalLookups) * 100).toFixed(1) : '0.0';
-      console.error(
-        `[cache-stats] hits: ${stats.hits}  misses: ${stats.misses}  ` +
-        `ratio: ${hitRatio}%  entries: ${stats.entries}  ` +
-        `path: ${stats.cachePath ?? '(disabled)'}`
-      );
+      const hitRatePct = stats.hitRatePct === '—' ? '— (no lookups)' : `${stats.hitRatePct}%`;
+      const age = stats.ageDistribution;
+      process.stderr.write('\n[cache-stats]\n');
+      process.stderr.write(`  hit rate :  ${hitRatePct}\n`);
+      process.stderr.write(`  hits     :  ${stats.hits}\n`);
+      process.stderr.write(`  misses   :  ${stats.misses}\n`);
+      process.stderr.write(`  entries  :  ${stats.entries}\n`);
+      process.stderr.write(`  ttl      :  ${(stats.cacheTtlMs / 3_600_000).toFixed(1)}h\n`);
+      process.stderr.write(`  path     :  ${stats.cachePath ?? '(disabled)'}\n`);
+      if (stats.entries > 0) {
+        process.stderr.write(`\n  age distribution:\n`);
+        process.stderr.write(`    < 1 hour   : ${age.lastHour}\n`);
+        process.stderr.write(`    1h – 24h   : ${age.lastDay}\n`);
+        process.stderr.write(`    1d – 7d    : ${age.lastWeek}\n`);
+        process.stderr.write(`    > 7 days   : ${age.older}\n`);
+      }
+      process.stderr.write('\n');
     }
 
     // ── Dependency scanning (directory targets only) ─────────────────────────
@@ -982,7 +992,7 @@ program
         console.error('[sonarqube] SonarQube Generic Issue Import JSON written. Import via sonar.externalIssuesReportPaths.');
       }
     } else if (effectiveFormat === 'html') {
-      emit(buildHTMLReport(filtered, scanRoot, undefined, _fixResults));
+      emit(buildHTMLReport(filtered, scanRoot, undefined, _fixResults, options.cacheStats ? getCacheStats() : undefined));
       if (outputPath) {
         console.error('[html] Self-contained HTML report written. Open in a browser to review.');
       }
