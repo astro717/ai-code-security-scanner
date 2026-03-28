@@ -654,7 +654,23 @@ program
     '--summary-only',
     'Print only the severity count line (critical/high/medium/low total) without the full finding list.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean; summaryOnly: boolean }) => {
+  .option(
+    '--ai-provider <provider>',
+    'AI provider to use for --explain: "anthropic" (default) or "openai". ' +
+    'Overrides the AI_EXPLAIN_PROVIDER environment variable for this invocation.',
+  )
+  .option(
+    '--openai-key <key>',
+    'OpenAI API key for --explain when --ai-provider openai is set. ' +
+    'Falls back to the OPENAI_API_KEY environment variable.',
+  )
+  .option(
+    '--explain',
+    'After scanning, send up to 5 highest-severity findings to the configured AI provider ' +
+    '(Anthropic or OpenAI) for plain-language explanations and fix suggestions. ' +
+    'Requires a running ai-sec-scan server or direct API key via --openai-key / ANTHROPIC_API_KEY.',
+  )
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean; summaryOnly: boolean; aiProvider?: string; openaiKey?: string; explain?: boolean }) => {
     // --type-list: print all known finding types and exit immediately.
     if (options.typeList) {
       const types = [...KNOWN_TYPES].sort();
@@ -1033,6 +1049,242 @@ program
       if (summary.critical > 0 || summary.high > 0) {
         process.exit(1);
       }
+    }
+  });
+
+// ── `explain` subcommand ──────────────────────────────────────────────────────
+//
+// Usage:  ai-sec-scan explain --finding-type SQL_INJECTION \
+//           --snippet "db.query(\"SELECT * FROM users WHERE id = \" + userId)" \
+//           --message "User input concatenated into SQL query" \
+//           --severity critical \
+//           [--ai-provider openai] [--openai-key sk-...]
+//
+// Sends a single finding to the configured AI provider (Anthropic or OpenAI)
+// and prints a plain-language explanation and a fix suggestion.
+
+program
+  .command('explain')
+  .description(
+    'Get an AI-generated explanation and fix suggestion for a specific finding. ' +
+    'Supports Anthropic (default) and OpenAI via --ai-provider.',
+  )
+  .requiredOption('--finding-type <type>', 'Finding type (e.g. SQL_INJECTION, XSS)')
+  .requiredOption('--snippet <code>', 'Code snippet from the finding')
+  .option('--message <msg>', 'Finding message / description', '')
+  .option('--severity <level>', 'Finding severity (critical|high|medium|low)', 'high')
+  .option(
+    '--ai-provider <provider>',
+    'AI provider: "anthropic" (default) or "openai". Overrides AI_EXPLAIN_PROVIDER env var.',
+  )
+  .option(
+    '--openai-key <key>',
+    'OpenAI API key. Falls back to OPENAI_API_KEY env var.',
+  )
+  .option(
+    '--anthropic-key <key>',
+    'Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.',
+  )
+  .option(
+    '--server-url <url>',
+    'URL of a running ai-sec-scan server. When set, the CLI delegates to the server ' +
+    'POST /explain endpoint instead of calling the AI API directly. ' +
+    'Example: --server-url http://localhost:3000',
+  )
+  .action(async (opts: {
+    findingType: string;
+    snippet: string;
+    message: string;
+    severity: string;
+    aiProvider?: string;
+    openaiKey?: string;
+    anthropicKey?: string;
+    serverUrl?: string;
+  }) => {
+    const { https: nodeHttps, http: nodeHttp } = await import('node:https').then(async (h) => {
+      const nh = await import('node:http');
+      return { https: h, http: nh };
+    }).catch(() => ({ https: null, http: null }));
+
+    const provider: 'anthropic' | 'openai' = (() => {
+      const raw = (opts.aiProvider ?? process.env['AI_EXPLAIN_PROVIDER'] ?? 'anthropic').toLowerCase();
+      return raw === 'openai' ? 'openai' : 'anthropic';
+    })();
+
+    const finding = {
+      type: opts.findingType,
+      severity: opts.severity as 'critical' | 'high' | 'medium' | 'low',
+      snippet: opts.snippet,
+      message: opts.message || `${opts.findingType} vulnerability detected`,
+      line: 0,
+      column: 0,
+    };
+
+    // If --server-url is set, delegate to the server endpoint.
+    if (opts.serverUrl) {
+      const serverUrl = opts.serverUrl.replace(/\/$/, '');
+      const payload = JSON.stringify({ findings: [finding] });
+      const url = new URL(`${serverUrl}/explain`);
+      const reqModule = url.protocol === 'https:' ? nodeHttps : nodeHttp;
+      if (!reqModule) {
+        console.error('[explain] Error: could not load http/https module');
+        process.exit(1);
+      }
+
+      const reqOptions = {
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+          'X-AI-Provider': provider,
+          ...(opts.openaiKey ? { 'X-OpenAI-Key': opts.openaiKey } : {}),
+          ...(opts.anthropicKey ? { 'X-API-Key': opts.anthropicKey } : {}),
+        },
+      };
+
+      await new Promise<void>((resolve) => {
+        const req = (reqModule as typeof import('node:http')).request(reqOptions, (res) => {
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data) as { findings?: Array<{ explanation?: string; fixSuggestion?: string }> };
+              const result = parsed.findings?.[0];
+              if (result) {
+                console.log('\n[explain] AI Explanation:');
+                console.log(result.explanation ?? '(no explanation)');
+                console.log('\n[explain] Fix Suggestion:');
+                console.log(result.fixSuggestion ?? '(no suggestion)');
+              } else {
+                console.log('[explain] Raw response:', data.slice(0, 500));
+              }
+            } catch {
+              console.error('[explain] Error parsing server response:', data.slice(0, 300));
+            }
+            resolve();
+          });
+        });
+        req.on('error', (e) => {
+          console.error(`[explain] Request failed: ${e.message}`);
+          resolve();
+        });
+        req.write(payload);
+        req.end();
+      });
+      return;
+    }
+
+    // Direct API call (no server) — build prompt and call provider directly.
+    const prompt = `You are a security expert. Analyze this vulnerability finding and respond with ONLY a JSON object (no markdown, no extra text):
+
+Vulnerability type: ${finding.type}
+Severity: ${finding.severity}
+Code snippet: ${finding.snippet ?? '(not available)'}
+Message: ${finding.message}
+
+Respond with exactly this JSON structure:
+{"explanation": "2-sentence explanation of why this is dangerous and what could be exploited", "fixSuggestion": "the corrected code snippet, just the code, no explanation"}`;
+
+    process.stderr.write(`[explain] Using provider: ${provider}\n`);
+
+    if (provider === 'openai') {
+      const apiKey = opts.openaiKey ?? process.env['OPENAI_API_KEY'] ?? '';
+      if (!apiKey) {
+        console.error('[explain] Error: OpenAI API key required. Set OPENAI_API_KEY or pass --openai-key.');
+        process.exit(1);
+      }
+      const model = process.env['AI_EXPLAIN_MODEL'] ?? 'gpt-4o-mini';
+      const payload = JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 512,
+      });
+      process.stderr.write(`[explain] Calling OpenAI (${model})...\n`);
+
+      await new Promise<void>((resolve) => {
+        const req = nodeHttps!.request({
+          hostname: 'api.openai.com',
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        }, (res) => {
+          let data = '';
+          res.on('data', (c) => { data += c; });
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data) as { choices?: Array<{ message?: { content?: string } }> };
+              const text = parsed.choices?.[0]?.message?.content ?? '';
+              const result = JSON.parse(text) as { explanation?: string; fixSuggestion?: string };
+              console.log('\n[explain] AI Explanation:');
+              console.log(result.explanation ?? text.slice(0, 200));
+              console.log('\n[explain] Fix Suggestion:');
+              console.log(result.fixSuggestion ?? '(none)');
+            } catch {
+              console.error('[explain] Error parsing OpenAI response:', data.slice(0, 300));
+            }
+            resolve();
+          });
+        });
+        req.on('error', (e) => { console.error(`[explain] OpenAI error: ${e.message}`); resolve(); });
+        req.write(payload);
+        req.end();
+      });
+
+    } else {
+      // Anthropic
+      const apiKey = opts.anthropicKey ?? process.env['ANTHROPIC_API_KEY'] ?? '';
+      if (!apiKey) {
+        console.error('[explain] Error: Anthropic API key required. Set ANTHROPIC_API_KEY or pass --anthropic-key.');
+        process.exit(1);
+      }
+      const model = process.env['AI_EXPLAIN_MODEL'] ?? 'claude-haiku-4-5-20251001';
+      const payload = JSON.stringify({
+        model,
+        max_tokens: 512,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      process.stderr.write(`[explain] Calling Anthropic (${model})...\n`);
+
+      await new Promise<void>((resolve) => {
+        const req = nodeHttps!.request({
+          hostname: 'api.anthropic.com',
+          path: '/v1/messages',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        }, (res) => {
+          let data = '';
+          res.on('data', (c) => { data += c; });
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data) as { content?: Array<{ text?: string }> };
+              const text = parsed.content?.[0]?.text ?? '';
+              const result = JSON.parse(text) as { explanation?: string; fixSuggestion?: string };
+              console.log('\n[explain] AI Explanation:');
+              console.log(result.explanation ?? text.slice(0, 200));
+              console.log('\n[explain] Fix Suggestion:');
+              console.log(result.fixSuggestion ?? '(none)');
+            } catch {
+              console.error('[explain] Error parsing Anthropic response:', data.slice(0, 300));
+            }
+            resolve();
+          });
+        });
+        req.on('error', (e) => { console.error(`[explain] Anthropic error: ${e.message}`); resolve(); });
+        req.write(payload);
+        req.end();
+      });
     }
   });
 
