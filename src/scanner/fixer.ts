@@ -349,6 +349,41 @@ ${indent}    raise ValueError(${msg})`;
       const fixed = line.replace(/eval\s*\(([^)]+)\)/, 'ast.literal_eval($1)');
       return fixed !== line ? fixed : null;
     },
+
+  // ── SSTI (Python): render_template_string(var) → note-only fix ────────────
+  // Flask's render_template_string() is dangerous when its argument is
+  // user-controlled because Jinja2 will execute arbitrary template expressions.
+  {
+    types: ['SSTI'],
+    description: 'Replace render_template_string(<user_input>) with a static template reference',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.py') return null;
+      if (!/render_template_string\s*\(/.test(line)) return null;
+      if (/TODO.*SSTI|render_template\s*\(/.test(line)) return null;
+      const fixed = line.replace(
+        /render_template_string\s*\(([^)]+)\)/,
+        '# TODO(SSTI): replace with render_template(\"safe_template.html\") — never pass user input to render_template_string\nrender_template_string($1)',
+      );
+      return fixed !== line ? fixed : null;
+    },
+  },
+
+  // ── SSTI (Ruby/ERB): ERB.new(user_input).result → note-only fix ───────────
+  // ERB.new(user_input).result() is equivalent to eval. Replace with a static
+  // ERB template loaded from disk, or insert a TODO comment.
+  {
+    types: ['SSTI'],
+    description: 'Replace ERB.new(<user_input>) with a static template loaded from disk',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rb') return null;
+      if (!/ERB\.new\s*\(/.test(line)) return null;
+      if (/TODO.*SSTI|File\.read/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      const fixed = `${indent}# TODO(SSTI): load ERB template from a file (ERB.new(File.read('template.erb'))) — never render user-controlled strings\n${line}`;
+      return fixed !== line ? fixed : null;
+    },
   },
 
   // ── PATH_TRAVERSAL (Ruby): File.read/open with user input ─────────────────
