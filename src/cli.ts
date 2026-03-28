@@ -27,28 +27,7 @@ import { buildSARIF } from './scanner/sarif';
 import { buildHTMLReport } from './scanner/htmlReport';
 import { buildJUnit } from './scanner/junit';
 
-/** Build a SonarQube Generic Issue Import format JSON string. */
-function buildSonarQube(findings: import('./scanner/reporter').Finding[]): string {
-  const issues = findings.map((f) => ({
-    engineId: 'ai-code-security-scanner',
-    ruleId: f.type,
-    severity:
-      f.severity === 'critical' || f.severity === 'high' ? 'MAJOR' :
-      f.severity === 'medium' ? 'MINOR' : 'INFO',
-    type: 'VULNERABILITY',
-    primaryLocation: {
-      message: f.message,
-      filePath: f.file ?? '',
-      textRange: {
-        startLine: f.line,
-        endLine: f.line,
-        startColumn: f.column ?? 0,
-        endColumn: (f.column ?? 0) + 1,
-      },
-    },
-  }));
-  return JSON.stringify({ issues }, null, 2);
-}
+import { buildSonarQube } from './scanner/sonarqube';
 import { parsePythonFile, scanPython } from './scanner/python-parser';
 import { parseGoFile, scanGo } from './scanner/go-parser';
 import { parseJavaFile, scanJava } from './scanner/java-parser';
