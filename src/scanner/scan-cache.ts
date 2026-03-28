@@ -255,17 +255,65 @@ export function persistCache(): void {
   }
 }
 
-/**
- * Return basic cache statistics for diagnostic output.
- */
-export function getCacheStats(): {
+export interface CacheAgeDistribution {
+  /** Entries cached within the last hour. */
+  lastHour: number;
+  /** Entries cached between 1 hour and 1 day ago. */
+  lastDay: number;
+  /** Entries cached between 1 day and 7 days ago. */
+  lastWeek: number;
+  /** Entries older than 7 days. */
+  older: number;
+}
+
+export interface CacheStatsResult {
   entries: number;
   cachePath: string | null;
   disabled: boolean;
   hits: number;
   misses: number;
   cacheTtlMs: number;
-} {
+  /** Hit rate as a percentage string e.g. "72.4". Empty string when no lookups. */
+  hitRatePct: string;
+  /** Distribution of cache entry ages across four buckets. */
+  ageDistribution: CacheAgeDistribution;
+}
+
+/**
+ * Return cache statistics for diagnostic output, including hit rate percentage
+ * and a distribution of entry ages across four time buckets.
+ */
+export function getCacheStats(): CacheStatsResult {
+  const totalLookups = _hits + _misses;
+  const hitRatePct = totalLookups > 0
+    ? ((_hits / totalLookups) * 100).toFixed(1)
+    : '—';
+
+  const now = Date.now();
+  const ONE_HOUR = 60 * 60 * 1000;
+  const ONE_DAY = 24 * ONE_HOUR;
+  const ONE_WEEK = 7 * ONE_DAY;
+
+  const ageDistribution: CacheAgeDistribution = {
+    lastHour: 0,
+    lastDay: 0,
+    lastWeek: 0,
+    older: 0,
+  };
+
+  for (const entry of _entries.values()) {
+    const ageMs = now - new Date(entry.scannedAt).getTime();
+    if (ageMs < ONE_HOUR) {
+      ageDistribution.lastHour++;
+    } else if (ageMs < ONE_DAY) {
+      ageDistribution.lastDay++;
+    } else if (ageMs < ONE_WEEK) {
+      ageDistribution.lastWeek++;
+    } else {
+      ageDistribution.older++;
+    }
+  }
+
   return {
     entries: _entries.size,
     cachePath: _cachePath,
@@ -273,6 +321,8 @@ export function getCacheStats(): {
     hits: _hits,
     misses: _misses,
     cacheTtlMs: _cacheTtlMs,
+    hitRatePct,
+    ageDistribution,
   };
 }
 
