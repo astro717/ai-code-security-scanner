@@ -7,6 +7,7 @@
  *
  * Covered vulnerability classes:
  *   - SQL_INJECTION (string interpolation in ActiveRecord queries)
+ *   - PERFORMANCE_N_PLUS_ONE (N+1 query anti-patterns in loops)
  *   - XSS (html_safe, raw with user input)
  *   - COMMAND_INJECTION (backtick execution, system(), exec(), Open3 with interpolation)
  *   - SECRET_HARDCODED (hardcoded credentials)
@@ -266,7 +267,7 @@ const RUBY_PATTERNS: RubyPattern[] = [
   // ── Rails-specific: N+1 query patterns ────────────────────────────────────
   // Accessing an association inside an each loop without eager loading
   {
-    type: 'SQL_INJECTION',
+    type: 'PERFORMANCE_N_PLUS_ONE',
     severity: 'low',
     pattern: /\beach\s+do\s*\|[^|]+\|\s*\n[^e]*\.\w+\s*\.\s*(?:each|map|select|count|first|last|find)/,
     message:
@@ -274,7 +275,7 @@ const RUBY_PATTERNS: RubyPattern[] = [
       '.includes(:association), .preload(:association), or .eager_load(:association) to batch load.',
   },
   {
-    type: 'SQL_INJECTION',
+    type: 'PERFORMANCE_N_PLUS_ONE',
     severity: 'low',
     pattern: /\.each\s*\{[^}]*\.[a-z_]+s\s*\./,
     message:
