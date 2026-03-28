@@ -133,6 +133,30 @@ function renderFinding(f: Finding, anchorId?: string): string {
          style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#1d4ed8;background:#dbeafe;padding:2px 7px;border-radius:3px;text-decoration:none;white-space:nowrap;">${escapeHtml(owasp.id)}</a>`
     : '';
 
+  // Language badge — shown for language-specific finding types
+  const KOTLIN_ANDROID_TYPES = new Set([
+    'INSECURE_SHARED_PREFS', 'WEBVIEW_LOAD_URL', 'PERFORMANCE_N_PLUS_ONE',
+  ]);
+  const SWIFT_IOS_TYPES = new Set(['SSRF']); // SSRF is cross-language; only badge on .swift files
+  const fileExt = f.file ? f.file.split('.').pop()?.toLowerCase() : undefined;
+
+  let langBadge = '';
+  if (KOTLIN_ANDROID_TYPES.has(f.type) || fileExt === 'kt' || fileExt === 'kts') {
+    langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#7c3aed;background:#ede9fe;padding:2px 7px;border-radius:3px;white-space:nowrap;">Kotlin/Android</span>`;
+  } else if (fileExt === 'swift') {
+    langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#ea580c;background:#fff7ed;padding:2px 7px;border-radius:3px;white-space:nowrap;">Swift/iOS</span>`;
+  } else if (fileExt === 'rb') {
+    langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#b91c1c;background:#fef2f2;padding:2px 7px;border-radius:3px;white-space:nowrap;">Ruby</span>`;
+  } else if (fileExt === 'py') {
+    langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#15803d;background:#f0fdf4;padding:2px 7px;border-radius:3px;white-space:nowrap;">Python</span>`;
+  } else if (fileExt === 'go') {
+    langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#0369a1;background:#f0f9ff;padding:2px 7px;border-radius:3px;white-space:nowrap;">Go</span>`;
+  } else if (fileExt === 'java') {
+    langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#b45309;background:#fffbeb;padding:2px 7px;border-radius:3px;white-space:nowrap;">Java</span>`;
+  } else if (fileExt === 'cs') {
+    langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#7c3aed;background:#f5f3ff;padding:2px 7px;border-radius:3px;white-space:nowrap;">C#</span>`;
+  }
+
   const anchor = anchorId ? ` id="${anchorId}"` : '';
   return `
     <div class="finding"${anchor} style="border-left: 4px solid ${color}; background: ${bg}; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;">
@@ -140,6 +164,7 @@ function renderFinding(f: Finding, anchorId?: string): string {
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${color};background:${color}22;padding:2px 8px;border-radius:3px;">${escapeHtml(f.severity)}</span>
         <code style="font-size:12px;color:#374151;background:#f3f4f6;padding:1px 6px;border-radius:3px;">${escapeHtml(f.type)}</code>
         ${owaspBadge}
+        ${langBadge}
         <span style="font-size:12px;color:#6b7280;">line ${f.line}, col ${f.column}</span>
       </div>
       <p style="margin:0;font-size:14px;color:#1f2937;">${escapeHtml(f.message)}</p>
