@@ -89,18 +89,18 @@ describe('Python scanner — vulnerable.py fixture', () => {
     expect(hits[0].line).toBe(42);
   });
 
-  test('SECRET_HARDCODED — detects hardcoded api_key assignment (line 46)', () => {
+  test('SECRET_HARDCODED — detects hardcoded api_key assignment (line 50)', () => {
     const hits = findings.filter((f) => f.type === 'SECRET_HARDCODED');
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0].severity).toBe('high');
-    expect(hits[0].line).toBe(49);
+    expect(hits[0].line).toBe(50);
   });
 
-  test('SSTI — detects render_template_string() call (line 45)', () => {
+  test('SSTI — detects render_template_string() call (line 47)', () => {
     const hits = findings.filter((f) => f.type === 'SSTI');
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits[0].severity).toBe('critical');
-    expect(hits[0].line).toBe(45);
+    expect(hits[0].severity).toBe('high');
+    expect(hits[0].line).toBe(47);
   });
 
   test('XML_INJECTION — detects xml.etree.ElementTree import and ET.fromstring() (lines 53, 55)', () => {

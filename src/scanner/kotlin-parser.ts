@@ -100,7 +100,7 @@ const KOTLIN_PATTERNS: KotlinPattern[] = [
   {
     type: 'SQL_INJECTION',
     severity: 'critical',
-    pattern: /(?:rawQuery|execSQL)\s*\(\s*(?:"[^"]*(?:\+|\$\{)|[^"]\w+)/,
+    pattern: /(?:rawQuery|execSQL)\s*\(\s*(?:"[^"]*"\s*\+|"[^"]*\$\{|\$\{[^}]+\})/,
     message:
       'rawQuery() or execSQL() called with a query string that appears to include string ' +
       'concatenation or interpolation. Use parameterised queries with selectionArgs instead.',
@@ -124,6 +124,19 @@ const KOTLIN_PATTERNS: KotlinPattern[] = [
     message:
       'ExportedPreferenceActivity suppression detected. Exported activities without ' +
       'android:permission are accessible to any app on the device.',
+  },
+
+  // N+1 query pattern — database query call indented inside a loop body
+  // Because the scanner is line-by-line, matches query lines deeply indented (8+ spaces)
+  // inside a forEach/for block where the surrounding context suggests a loop.
+  {
+    type: 'PERFORMANCE_N_PLUS_ONE',
+    severity: 'medium',
+    pattern: /^\s{8,}(?:db|repository|dao|userRepository|orderRepository|itemRepository)\s*\.\s*(?:rawQuery|execSQL|findBy\w+|query|get\w+|fetch\w+)\s*\(/,
+    message:
+      'Database query appears to be called from inside a loop body (deeply indented). ' +
+      'This is a classic N+1 query pattern: one query per iteration causes O(n) database ' +
+      'roundtrips. Batch the query outside the loop or use a JOIN/IN clause instead.',
   },
 ];
 

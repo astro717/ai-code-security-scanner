@@ -180,7 +180,7 @@ describe('/scan with C# files', () => {
     const types = new Set(body.findings.map((f) => f.type));
 
     // The vulnerable fixture should trigger at least these C#-detected types
-    expect(types.has('SQL_INJECTION')).toBe(true);
+    expect(types.has('SQL_INJECTION_CS')).toBe(true);
     expect(types.has('WEAK_CRYPTO')).toBe(true);
   });
 

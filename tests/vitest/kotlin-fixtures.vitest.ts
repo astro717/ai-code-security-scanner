@@ -1,14 +1,82 @@
 /**
- * Unit tests for kotlin-parser.ts — exercises all detector patterns using
- * inline code strings so no fixture files are required.
+ * Tests for kotlin-parser.ts — both fixture-file-based and inline.
+ *
+ * Fixture tests (Part 1) verify end-to-end coverage via parseKotlinFile(),
+ * mirroring the pattern used by ruby-fixtures.vitest.ts.
+ *
+ * Inline tests (Part 2) verify individual detector patterns in isolation.
  *
  * Run with: npm run test:vitest
  */
 
 import { describe, test, expect } from 'vitest';
-import { parseKotlinCode, scanKotlin } from '../../src/scanner/kotlin-parser';
+import path from 'path';
+import { parseKotlinFile, parseKotlinCode, scanKotlin } from '../../src/scanner/kotlin-parser';
+
+const FIXTURES = path.join(__dirname, '..', 'fixtures');
+
+// ── Part 1 — Fixture-file-based tests ────────────────────────────────────────
+
+describe('Kotlin scanner — fixture files', () => {
+  test('vulnerable.kt produces expected findings', () => {
+    const parsed = parseKotlinFile(path.join(FIXTURES, 'vulnerable.kt'));
+    const findings = scanKotlin(parsed);
+
+    expect(findings.length).toBeGreaterThan(0);
+
+    const types = new Set(findings.map((f) => f.type));
+
+    expect(types.has('SECRET_HARDCODED')).toBe(true);
+    expect(types.has('INSECURE_RANDOM')).toBe(true);
+    expect(types.has('WEAK_CRYPTO')).toBe(true);
+    expect(types.has('SQL_INJECTION')).toBe(true);
+    expect(types.has('PATH_TRAVERSAL')).toBe(true);
+    expect(types.has('INSECURE_SHARED_PREFS')).toBe(true);
+    expect(types.has('PERFORMANCE_N_PLUS_ONE')).toBe(true);
+  });
+
+  test('clean.kt produces zero findings', () => {
+    const parsed = parseKotlinFile(path.join(FIXTURES, 'clean.kt'));
+    const findings = scanKotlin(parsed);
+
+    expect(findings.length).toBe(0);
+  });
+
+  test('findings from vulnerable.kt include the correct file path', () => {
+    const filePath = path.join(FIXTURES, 'vulnerable.kt');
+    const parsed = parseKotlinFile(filePath);
+    const findings = scanKotlin(parsed);
+
+    for (const f of findings) {
+      expect(f.file).toBe(filePath);
+    }
+  });
+
+  test('findings from vulnerable.kt have valid severity levels', () => {
+    const parsed = parseKotlinFile(path.join(FIXTURES, 'vulnerable.kt'));
+    const findings = scanKotlin(parsed);
+
+    const validSeverities = new Set(['critical', 'high', 'medium', 'low']);
+    for (const f of findings) {
+      expect(validSeverities.has(f.severity)).toBe(true);
+    }
+  });
+
+  test('SQL_INJECTION findings are critical', () => {
+    const parsed = parseKotlinFile(path.join(FIXTURES, 'vulnerable.kt'));
+    const findings = scanKotlin(parsed);
+
+    const sqlFindings = findings.filter((f) => f.type === 'SQL_INJECTION');
+    expect(sqlFindings.length).toBeGreaterThan(0);
+    for (const f of sqlFindings) {
+      expect(f.severity).toBe('critical');
+    }
+  });
+});
 
 // ── Helper ────────────────────────────────────────────────────────────────────
+
+// ── Part 2 — Inline detector tests ───────────────────────────────────────────
 
 function scan(code: string, filePath = 'input.kt') {
   return scanKotlin(parseKotlinCode(code, filePath));

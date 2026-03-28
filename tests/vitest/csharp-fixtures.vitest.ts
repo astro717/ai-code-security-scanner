@@ -23,7 +23,7 @@ describe('C# scanner — fixture files', () => {
     const types = new Set(findings.map((f) => f.type));
 
     // Expected vulnerability classes in vulnerable.cs
-    expect(types.has('SQL_INJECTION')).toBe(true);
+    expect(types.has('SQL_INJECTION_CS')).toBe(true);
     expect(types.has('COMMAND_INJECTION_CS')).toBe(true);
     expect(types.has('SECRET_HARDCODED')).toBe(true);
     expect(types.has('WEAK_CRYPTO')).toBe(true);

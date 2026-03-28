@@ -134,6 +134,41 @@ export function detectInsecureRandom(result: ParseResult): Finding[] {
 
     // 4. Math.random() concatenated in a string that's assigned to a security-sensitive var
     // (Covered by patterns 1 & 2 via the recursive walkNode on the right-hand side)
+
+    // 5. return Math.random() inside a security-sensitive function (e.g. generateToken)
+    if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression') {
+      const fnNode = node as TSESTree.FunctionDeclaration | TSESTree.FunctionExpression | TSESTree.ArrowFunctionExpression;
+      const fnName =
+        'id' in fnNode && fnNode.id ? (fnNode.id as TSESTree.Identifier).name : '';
+      if (fnName && isSecuritySensitiveName(fnName)) {
+        // Walk the body looking for a return with Math.random()
+        walkNode(fnNode.body as TSESTree.Node, (child) => {
+          if (child.type === 'ReturnStatement') {
+            const ret = child as TSESTree.ReturnStatement;
+            if (ret.argument) {
+              let foundRandom = false;
+              walkNode(ret.argument as TSESTree.Node, (grandchild) => {
+                if (isMathRandomCall(grandchild)) foundRandom = true;
+              });
+              if (foundRandom) {
+                const line = child.loc!.start.line;
+                if (!reported.has(line)) {
+                  reported.add(line);
+                  findings.push({
+                    type: 'INSECURE_RANDOM',
+                    severity: 'medium',
+                    line,
+                    column: child.loc!.start.column,
+                    snippet: result.lines[line - 1]?.trim() ?? '',
+                    message: `Math.random() returned from "${fnName}()". Math.random() is not cryptographically secure — use crypto.randomBytes() or crypto.getRandomValues() instead.`,
+                  });
+                }
+              }
+            }
+          }
+        });
+      }
+    }
   });
 
   return findings;

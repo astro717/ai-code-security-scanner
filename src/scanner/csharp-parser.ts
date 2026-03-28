@@ -49,7 +49,7 @@ interface CSharpPattern {
 const CSHARP_PATTERNS: CSharpPattern[] = [
   // SQL injection via string interpolation/concatenation in ADO.NET
   {
-    type: 'SQL_INJECTION',
+    type: 'SQL_INJECTION_CS',
     severity: 'critical',
     pattern: /new\s+SqlCommand\s*\(\s*(?:\$"|"[^"]*"\s*\+)/,
     message:
@@ -57,7 +57,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
       'strings leads to SQL injection. Use SqlParameter or parameterised queries instead.',
   },
   {
-    type: 'SQL_INJECTION',
+    type: 'SQL_INJECTION_CS',
     severity: 'critical',
     pattern: /\.CommandText\s*=\s*(?:\$"|"[^"]*"\s*\+)/,
     message:
@@ -65,7 +65,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
       'to prevent SQL injection.',
   },
   {
-    type: 'SQL_INJECTION',
+    type: 'SQL_INJECTION_CS',
     severity: 'critical',
     pattern: /(?:FromSqlRaw|ExecuteSqlRaw|ExecuteSqlCommand)\s*\(\s*(?:\$"|"[^"]*"\s*\+)/,
     message:
@@ -121,7 +121,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
 
   // Path traversal
   {
-    type: 'PATH_TRAVERSAL',
+    type: 'PATH_TRAVERSAL_CS',
     severity: 'high',
     pattern: /(?:File\.|Directory\.|Path\.Combine)\s*(?:\w+\s*\()?\s*[^;]*(?:Request\.|input|param|user)/i,
     message:
