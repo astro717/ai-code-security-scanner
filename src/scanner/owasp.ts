@@ -123,6 +123,12 @@ export const FINDING_TO_OWASP: Record<string, string> = {
 
   // A10 — SSRF
   SSRF:                   'A10:2021',
+
+  // Additional types
+  SQL_INJECTION_CS:       'A03:2021',
+  PATH_TRAVERSAL_CS:      'A01:2021',
+  INSECURE_SHARED_PREFS:  'A02:2021',
+  WEBVIEW_LOAD_URL:       'A03:2021',
 };
 
 /**
