@@ -126,8 +126,14 @@ export const FINDING_TO_OWASP: Record<string, string> = {
 
   // Additional types — Kotlin / Android
   SQL_INJECTION_CS:       'A03:2021',
-  INSECURE_SHARED_PREFS:  'A02:2021',
+  INSECURE_SHARED_PREFS:  'A04:2021',
   WEBVIEW_LOAD_URL:       'A03:2021',
+
+  // A04 — Insecure Design (Android / performance)
+  PERFORMANCE_N_PLUS_ONE: 'A04:2021',
+
+  // A05 — Security Misconfiguration (iOS WebView)
+  UNSAFE_WEBVIEW:         'A05:2021',
 };
 
 /**
