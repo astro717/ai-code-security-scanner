@@ -125,38 +125,20 @@ const KOTLIN_PATTERNS: KotlinPattern[] = [
       'android:permission are accessible to any app on the device.',
   },
 
-  // N+1 query patterns — Room/Exposed ORM query call inside a for loop or forEach block
-  // Pattern 1: for-loop with a DAO/db call on each iteration
-  {
-    type: 'PERFORMANCE_N_PLUS_ONE',
-    severity: 'low',
-    pattern: /\bfor\s*\([^)]+\)\s*\{[^}]*(?:dao|Dao|\.find|\.query|\.select|\.load|runBlocking\s*\{)[^}]*\}/,
-    message:
-      'Potential N+1 query: a database call appears inside a for loop. Each iteration triggers ' +
-      'a separate query. Batch-load related data before the loop using a single query with IN ' +
-      'or use Room relationships with @Relation to load associations in one shot.',
-  },
-  // Pattern 2: forEach / map / filter lambda with a DAO/Room/Exposed call
-  {
-    type: 'PERFORMANCE_N_PLUS_ONE',
-    severity: 'low',
-    pattern: /\.(?:forEach|map|filter|flatMap)\s*\{[^}]*(?:dao|Dao|\.find|\.query|\.select|\.load|runBlocking\s*\{)/,
-    message:
-      'Potential N+1 query: a database call appears inside a collection iteration (forEach/map). ' +
-      'Fetch related records in bulk before iterating, or use Room @Relation / Exposed JOIN queries ' +
-      'to avoid one database round-trip per item.',
-  },
-  // Pattern 3: coroutine launch/async inside a loop containing a suspend DB call
-  {
-    type: 'PERFORMANCE_N_PLUS_ONE',
-    severity: 'low',
-    pattern: /(?:launch|async)\s*\{[^}]*(?:dao|Dao|\.find|\.query|\.select|suspend)/,
-    message:
-      'Potential N+1 query: a coroutine with a database call is launched inside what may be a ' +
-      'loop context. Consolidate coroutine launches and use a single bulk DB call to avoid ' +
-      'excessive round-trips.',
-  },
 ];
+
+// ── N+1 query detection helpers ───────────────────────────────────────────────
+
+/** Matches lines that look like a loop or iteration start. */
+const N1_LOOP_PATTERN = /\b(?:for\s*\(|\.(?:forEach|map|filter|flatMap|mapNotNull|flatMapIndexed)\s*\{)/;
+
+/** Matches lines that look like a DAO / ORM query call. */
+const N1_QUERY_PATTERN = /(?:\b(?:dao|Dao|db|DB)\s*\.|\b(?:find|query|select|load|get|fetch|insert|update|delete)\w*\s*\(|\.rawQuery\s*\(|runBlocking\s*\{)/;
+
+const N1_MESSAGE =
+  'Potential N+1 query: a database call appears inside a loop or iteration block. Each ' +
+  'iteration triggers a separate query. Batch-load related data before the loop using a ' +
+  'single query with IN, or use Room @Relation / Exposed JOIN to avoid one round-trip per item.';
 
 /**
  * Scans a parsed Kotlin source for security vulnerabilities using pattern matching.
@@ -186,6 +168,39 @@ export function scanKotlin(result: KotlinParseResult): Finding[] {
       }
     }
   });
+
+  // ── Multi-line N+1 detection ─────────────────────────────────────────────────
+  // Scan a sliding window: if a loop-start line is followed within 6 lines by a
+  // DAO/query call, report N+1 at the loop line.
+  const lines = result.lines;
+  const alreadyFlagged = new Set<number>();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
+
+    if (N1_LOOP_PATTERN.test(line)) {
+      // Look ahead up to 6 lines for a DB call
+      const windowEnd = Math.min(i + 7, lines.length);
+      for (let j = i + 1; j < windowEnd; j++) {
+        const inner = lines[j]!;
+        if (inner.trim().startsWith('//') || inner.trim().startsWith('*')) continue;
+        if (N1_QUERY_PATTERN.test(inner) && !alreadyFlagged.has(i)) {
+          alreadyFlagged.add(i);
+          findings.push({
+            type: 'PERFORMANCE_N_PLUS_ONE',
+            severity: 'low',
+            line: i + 1,
+            column: line.search(/\S/),
+            snippet: line.trim().slice(0, 100),
+            message: N1_MESSAGE,
+            file: result.filePath,
+          });
+          break;
+        }
+      }
+    }
+  }
 
   return findings;
 }
