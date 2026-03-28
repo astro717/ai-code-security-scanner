@@ -625,6 +625,13 @@ program
     'Dramatically faster for PR-gating workflows where only changed files matter.',
   )
   .option(
+    '--diff',
+    'Scan only git-staged files (uses git diff --staged --name-only). ' +
+    'Use this in a pre-commit hook to scan only what you are about to commit. ' +
+    'Integrates with the existing scan-cache: staged file content is hashed and ' +
+    'cached results are reused when the file has not changed since the last scan.',
+  )
+  .option(
     '--severity-exit <level>',
     'Convenience shorthand: sets both --severity and --min-severity to <level> in one option. ' +
     'E.g. --severity-exit critical reports only critical findings AND exits non-zero only for those.',
@@ -654,7 +661,7 @@ program
     '--summary-only',
     'Print only the severity count line (critical/high/medium/low total) without the full finding list.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean; summaryOnly: boolean }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; diff: boolean; fix: boolean; dryRun: boolean; typeList: boolean; summaryOnly: boolean }) => {
     // --type-list: print all known finding types and exit immediately.
     if (options.typeList) {
       const types = [...KNOWN_TYPES].sort();
@@ -745,7 +752,7 @@ program
 
     let files = collectFiles(scanRoot, effectiveIgnore);
 
-    // --diff-only: restrict to git-changed files only
+    // --diff-only: restrict to git-changed files only (unstaged + staged vs HEAD)
     if (options.diffOnly) {
       try {
         const gitOutput = execSync('git diff --name-only HEAD', {
@@ -766,6 +773,37 @@ program
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[diff-only] Warning: git diff failed (${msg}). Falling back to full scan.`);
+      }
+    }
+
+    // --diff: restrict to git-staged files only (pre-commit hook use-case)
+    if (options.diff) {
+      try {
+        const gitOutput = execSync('git diff --staged --name-only', {
+          cwd: scanRootDir,
+          encoding: 'utf-8',
+          timeout: 10_000,
+        });
+        const stagedRelPaths = gitOutput
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0);
+
+        if (stagedRelPaths.length === 0) {
+          console.error('[diff] No staged files found. Run "git add <files>" before scanning with --diff.');
+          // No staged files — exit cleanly (no findings to report)
+          process.exit(0);
+        }
+
+        const stagedAbsPaths = new Set(
+          stagedRelPaths.map((rel) => path.resolve(scanRootDir, rel)),
+        );
+        const before = files.length;
+        files = files.filter((f) => stagedAbsPaths.has(path.resolve(f)));
+        console.error(`[diff] ${files.length} staged file(s) to scan (${before} total in tree)`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[diff] Warning: git diff --staged failed (${msg}). Falling back to full scan.`);
       }
     }
     const allFindings: Finding[] = [];
