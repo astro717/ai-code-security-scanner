@@ -17,6 +17,7 @@
  *   - UNSAFE_DESERIALIZATION (ObjectInputStream.readObject)
  *   - XSS (direct output of user input in servlets)
  *   - SSRF (URL/HttpURLConnection with user input)
+ *   - PERFORMANCE_N_PLUS_ONE (JDBC/JPA query inside a loop)
  */
 
 import * as fs from 'fs';
@@ -212,6 +213,26 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'LDAP DirContext.search() called with a concatenated filter string. ' +
       'User input in LDAP filters allows LDAP injection. Use parameterised queries.',
+  },
+
+  // N+1 query pattern — JDBC/JPA call inside a for/foreach/while loop
+  // Matches patterns where a query method is called within a loop body.
+  {
+    type: 'PERFORMANCE_N_PLUS_ONE',
+    severity: 'low',
+    pattern: /for\s*\([^)]+\)\s*\{[^}]*(?:executeQuery|executeUpdate|createQuery|findById|\.get\s*\(\s*\w+\s*\)\.load)/,
+    message:
+      'JDBC/JPA query inside a for loop — N+1 query pattern detected. ' +
+      'Each loop iteration issues a separate SQL round-trip. ' +
+      'Use a JOIN FETCH, @BatchSize, or batch SELECT ... WHERE id IN (...) instead.',
+  },
+  {
+    type: 'PERFORMANCE_N_PLUS_ONE',
+    severity: 'low',
+    pattern: /for\s*\(\s*\w[\w\s<>]*:\s*\w+\s*\)\s*\{[^}]*(?:executeQuery|executeUpdate|findById|entityManager\.find|session\.get|session\.load)/,
+    message:
+      'JPA/Hibernate query inside an enhanced for-each loop — N+1 query pattern. ' +
+      'Use JOIN FETCH, Hibernate @BatchSize, or a bulk IN-query to eliminate the per-iteration round-trip.',
   },
 ];
 
