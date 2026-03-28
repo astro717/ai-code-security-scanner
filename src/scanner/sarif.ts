@@ -41,8 +41,9 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   SSTI:                  'Template string rendered from user-controlled input — arbitrary server-side code execution via SSTI.',
 
   // Kotlin / Android finding types
-  INSECURE_SHARED_PREFS: 'SharedPreferences used to store sensitive data without EncryptedSharedPreferences — data is unencrypted at rest.',
-  WEBVIEW_LOAD_URL:      'WebView.loadUrl called with a user-controlled URL — may enable open redirect or cross-site scripting attacks.',
+  INSECURE_SHARED_PREFS:  'SharedPreferences used to store sensitive data without EncryptedSharedPreferences — data is unencrypted at rest.',
+  WEBVIEW_LOAD_URL:       'WebView.loadUrl called with a user-controlled URL — may enable open redirect or cross-site scripting attacks.',
+  PERFORMANCE_N_PLUS_ONE: 'N+1 query pattern detected — association accessed in a loop without eager loading, causing one DB query per iteration.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
