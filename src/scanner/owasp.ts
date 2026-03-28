@@ -101,12 +101,17 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   SSTI:                   'A03:2021',
   PROTOTYPE_POLLUTION:    'A03:2021',
 
+  // A03 — Injection (C# variants)
+  SQL_INJECTION_CS:       'A03:2021',
+  PATH_TRAVERSAL_CS:      'A01:2021',
+
   // A04 — Insecure Design
   REDOS:                  'A04:2021',
   INSECURE_BINDING:       'A04:2021',
   CORS_MISCONFIGURATION:  'A04:2021',
   BUFFER_OVERFLOW:        'A04:2021',
   INSECURE_ASSERT:        'A04:2021',
+  PERFORMANCE_N_PLUS_ONE: 'A04:2021',
 
   // A05 — Security Misconfiguration
   JWT_NONE_ALGORITHM:     'A05:2021',
@@ -120,6 +125,10 @@ export const FINDING_TO_OWASP: Record<string, string> = {
 
   // A08 — Software and Data Integrity Failures
   UNSAFE_DESERIALIZATION: 'A08:2021',
+
+  // Android-specific
+  INSECURE_SHARED_PREFS:  'A02:2021',  // unencrypted sensitive storage → Cryptographic Failures
+  WEBVIEW_LOAD_URL:       'A03:2021',  // user-controlled WebView URL → Injection
 
   // A10 — SSRF
   SSRF:                   'A10:2021',
