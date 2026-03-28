@@ -9,6 +9,7 @@
 
 import { describe, test, expect } from 'vitest';
 import { buildSARIF, SARIF_RULE_DESCRIPTIONS } from '../../src/scanner/sarif';
+import { KNOWN_TYPES } from '../../src/scanner/reporter';
 import type { Finding } from '../../src/scanner/reporter';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -136,6 +137,30 @@ describe('SARIF_RULE_DESCRIPTIONS', () => {
     for (const t of cTypes) {
       expect(SARIF_RULE_DESCRIPTIONS[t], `Missing description for ${t}`).toBeDefined();
     }
+  });
+});
+
+// ── SARIF_RULE_DESCRIPTIONS ↔ KNOWN_TYPES completeness ────────────────────────
+
+describe('SARIF_RULE_DESCRIPTIONS completeness vs KNOWN_TYPES', () => {
+  test('every KNOWN_TYPES entry has a corresponding SARIF_RULE_DESCRIPTIONS entry', () => {
+    const missing: string[] = [];
+    for (const type of KNOWN_TYPES) {
+      if (!SARIF_RULE_DESCRIPTIONS[type]) {
+        missing.push(type);
+      }
+    }
+    expect(missing, `SARIF_RULE_DESCRIPTIONS is missing entries for: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  test('every SARIF_RULE_DESCRIPTIONS key is a recognised KNOWN_TYPES entry', () => {
+    const unknown: string[] = [];
+    for (const type of Object.keys(SARIF_RULE_DESCRIPTIONS)) {
+      if (!KNOWN_TYPES.has(type)) {
+        unknown.push(type);
+      }
+    }
+    expect(unknown, `SARIF_RULE_DESCRIPTIONS has entries not in KNOWN_TYPES: ${unknown.join(', ')}`).toEqual([]);
   });
 });
 

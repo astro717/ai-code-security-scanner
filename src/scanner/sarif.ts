@@ -39,6 +39,11 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   MASS_ASSIGNMENT:       'Mass assignment via permit(:all) or unrestricted parameter binding.',
   FORMAT_STRING:         'Non-literal format string passed to printf/fprintf family — memory read/write risk.',
   SSTI:                  'Template string rendered from user-controlled input — arbitrary server-side code execution via SSTI.',
+  INSECURE_SHARED_PREFS: 'Sensitive data stored in SharedPreferences without encryption — use EncryptedSharedPreferences.',
+  WEBVIEW_LOAD_URL:      'WebView.loadUrl called with user-controlled URL — open redirect and XSS risk.',
+  SQL_INJECTION_CS:      'User-controlled input used in a SQL query without parameterisation (C#).',
+  PATH_TRAVERSAL_CS:     'User-controlled path used in a filesystem call without sanitisation (C#).',
+  PERFORMANCE_N_PLUS_ONE:'N+1 query pattern detected — association accessed in a loop without eager loading.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
