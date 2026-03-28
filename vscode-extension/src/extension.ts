@@ -4,6 +4,7 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { URL } from 'url';
+import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
 
 // ── .aiscanner ignore support ─────────────────────────────────────────────────
 
@@ -477,6 +478,184 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ── Worker-thread scan-on-save ────────────────────────────────────────────────
+//
+// Scanning is offloaded to a Node.js worker thread so the VS Code extension
+// host (UI thread) is never blocked. Each save triggers a queued scan; a
+// per-file debounce prevents redundant scans when the user saves rapidly.
+//
+// Worker protocol:
+//   Main → Worker: { code: string; filename: string; serverUrl: string; apiKey: string }
+//   Worker → Main: { ok: true; findings: Finding[] } | { ok: false; error: string }
+//
+// The worker runs the HTTP /scan request (network I/O is already async, but
+// keeping it off the main thread avoids any JSON-parse or callback overhead
+// blocking the extension host's event loop on very large files).
+
+// Debounce timers: file URI string → NodeJS.Timeout
+const _saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const SAVE_DEBOUNCE_MS = 500; // wait 500 ms after last save before scanning
+
+/**
+ * Queues a worker-thread scan for the given document.
+ * If a scan is already queued for this file, the previous timer is cancelled
+ * and replaced, giving a debounced "only scan after N ms of inactivity" behaviour.
+ */
+function queueWorkerScan(
+  document: vscode.TextDocument,
+  collection: vscode.DiagnosticCollection,
+  statusBar: vscode.StatusBarItem,
+  codeLensProvider: SecurityCodeLensProvider,
+): void {
+  const uriKey = document.uri.toString();
+
+  // Cancel any pending scan for this file
+  const existing = _saveDebounceTimers.get(uriKey);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(() => {
+    _saveDebounceTimers.delete(uriKey);
+    _runWorkerScan(document, collection, statusBar, codeLensProvider);
+  }, SAVE_DEBOUNCE_MS);
+
+  _saveDebounceTimers.set(uriKey, timer);
+}
+
+/**
+ * Spawns a Node.js worker thread to POST the document code to the scanner
+ * server, then updates diagnostics on completion.
+ */
+function _runWorkerScan(
+  document: vscode.TextDocument,
+  collection: vscode.DiagnosticCollection,
+  statusBar: vscode.StatusBarItem,
+  codeLensProvider: SecurityCodeLensProvider,
+): void {
+  const config = vscode.workspace.getConfiguration('aiSecScan');
+  const serverUrl: string = config.get('serverUrl') ?? 'http://localhost:3001';
+  const apiKey: string = config.get('apiKey') ?? '';
+
+  updateStatusBar(statusBar, 'scanning');
+
+  const workerScript = `
+    const { workerData, parentPort } = require('worker_threads');
+    const https = require('https');
+    const http = require('http');
+    const { URL } = require('url');
+
+    const { code, filename, serverUrl, apiKey } = workerData;
+    const payload = JSON.stringify({ code, filename });
+    const parsed = new URL(serverUrl + '/scan');
+    const lib = parsed.protocol === 'https:' ? https : http;
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+    };
+    if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+
+    const req = lib.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname,
+        method: 'POST',
+        headers,
+        timeout: 15000,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (c) => { data += c; });
+        res.on('end', () => {
+          try {
+            const body = JSON.parse(data);
+            parentPort.postMessage({ ok: true, findings: body.findings ?? [] });
+          } catch (e) {
+            parentPort.postMessage({ ok: false, error: 'Invalid JSON: ' + String(e) });
+          }
+        });
+      },
+    );
+    req.on('error', (e) => parentPort.postMessage({ ok: false, error: e.message }));
+    req.on('timeout', () => { req.destroy(); parentPort.postMessage({ ok: false, error: 'Request timed out' }); });
+    req.write(payload);
+    req.end();
+  `;
+
+  let worker: Worker;
+  try {
+    worker = new Worker(workerScript, {
+      eval: true,
+      workerData: {
+        code: document.getText(),
+        filename: document.fileName,
+        serverUrl,
+        apiKey,
+      },
+    });
+  } catch {
+    // worker_threads unavailable — fall back to inline scan
+    void scanDocumentWithStatusFallback(document, collection, statusBar, codeLensProvider);
+    return;
+  }
+
+  worker.once('message', (msg: { ok: boolean; findings?: Finding[]; error?: string }) => {
+    if (!msg.ok) {
+      updateStatusBar(statusBar, 'offline');
+      return;
+    }
+
+    const findings = msg.findings ?? [];
+    const diagnostics = findingsToDiagnostics(findings);
+    collection.set(document.uri, diagnostics);
+    codeLensProvider.refresh();
+
+    if (diagnostics.length > 0) {
+      updateStatusBar(statusBar, 'issues', `${findings.length} issue${findings.length !== 1 ? 's' : ''}`);
+    } else {
+      updateStatusBar(statusBar, 'clean');
+    }
+  });
+
+  worker.once('error', () => {
+    updateStatusBar(statusBar, 'offline');
+  });
+}
+
+/**
+ * Fallback for environments where worker_threads is unavailable.
+ * Runs the scan inline (same as original implementation).
+ */
+async function scanDocumentWithStatusFallback(
+  document: vscode.TextDocument,
+  collection: vscode.DiagnosticCollection,
+  statusBar: vscode.StatusBarItem,
+  codeLensProvider: SecurityCodeLensProvider,
+): Promise<void> {
+  const config = vscode.workspace.getConfiguration('aiSecScan');
+  const serverUrl: string = config.get('serverUrl') ?? 'http://localhost:3001';
+  const apiKey: string = config.get('apiKey') ?? '';
+
+  let response: ScanResponse;
+  try {
+    response = await postJSON(serverUrl, { code: document.getText(), filename: document.fileName }, apiKey || undefined);
+  } catch {
+    updateStatusBar(statusBar, 'offline');
+    return;
+  }
+
+  const diagnostics = findingsToDiagnostics(response.findings);
+  collection.set(document.uri, diagnostics);
+  codeLensProvider.refresh();
+
+  if (diagnostics.length > 0) {
+    updateStatusBar(statusBar, 'issues', `${response.findings.length} issue${response.findings.length !== 1 ? 's' : ''}`);
+  } else {
+    updateStatusBar(statusBar, 'clean');
+  }
+}
+
 // ── Extension lifecycle ───────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -566,20 +745,29 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
-  // Scan active file on save
+  // Scan active file on save — uses a worker thread to avoid blocking the UI.
+  // A per-file 500 ms debounce prevents redundant scans on rapid saves.
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((document) => {
       const config = vscode.workspace.getConfiguration('aiSecScan');
       const autoScan: boolean = config.get('autoScanOnSave') ?? true;
       const supported = [
         'typescript', 'typescriptreact', 'javascript', 'javascriptreact',
-        'python', 'go', 'java', 'csharp', 'c', 'cpp', 'ruby',
+        'python', 'go', 'java', 'csharp', 'c', 'cpp', 'ruby', 'kotlin', 'swift',
       ];
       if (autoScan && supported.includes(document.languageId)) {
-        void scanDocumentWithStatus(document);
+        queueWorkerScan(document, collection, statusBar, codeLensProvider);
       }
     }),
   );
+
+  // Dispose debounce timers on deactivation
+  context.subscriptions.push({
+    dispose(): void {
+      for (const timer of _saveDebounceTimers.values()) clearTimeout(timer);
+      _saveDebounceTimers.clear();
+    },
+  });
 
   // Command: scan active file
   context.subscriptions.push(
