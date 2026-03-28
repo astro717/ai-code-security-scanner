@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/astro717/ai-code-security-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/astro717/ai-code-security-scanner/actions/workflows/ci.yml)
 
-AST-based security scanner for AI-generated code. Detects 17 categories of vulnerabilities across TypeScript and JavaScript files.
+AST-based security scanner for AI-generated code. Detects 32 vulnerability types across 8 languages: TypeScript, JavaScript, Python, Go, Java, C/C++, C#, Kotlin, and Ruby.
 
 ## Quick Start
 
@@ -167,29 +167,46 @@ npx ts-node tests/scanner.test.ts
 
 ## Detectors
 
-The scanner currently ships 17 detectors:
+The scanner ships 32 finding types across 8 languages (TypeScript/JavaScript, Python, Go, Java, C/C++, C#, Kotlin, Ruby):
 
-| # | Finding type | Severity | Description |
-|---|-------------|----------|-------------|
-| 1 | `SECRET_HARDCODED` | critical | API keys, tokens, and passwords assigned to variables |
-| 2 | `SQL_INJECTION` | critical | String concatenation or template literals inside SQL queries |
-| 3 | `XSS` | critical | Unsanitised user input in `innerHTML`, `dangerouslySetInnerHTML`, or `document.write` |
-| 4 | `SHELL_INJECTION` | high | `exec()` / `execSync()` with template literals or concatenated user input |
-| 5 | `EVAL_INJECTION` | high | `eval()` or `new Function()` with dynamic arguments |
-| 6 | `PATH_TRAVERSAL` | high | `fs` calls combined with `path.join` using unsanitised user input |
-| 7 | `PROTOTYPE_POLLUTION` | high | `Object.assign`, `_.merge`, or bracket notation writes that can pollute `__proto__` |
-| 8 | `INSECURE_RANDOM` | medium | `Math.random()` used in security-sensitive contexts (tokens, IDs, passwords) |
-| 9 | `OPEN_REDIRECT` | medium | `res.redirect()` with dynamic, unvalidated destination |
-| 10 | `SSRF` | high | `fetch()`, `axios`, or `http.get()` with dynamic, user-controlled URLs |
-| 11 | `COMMAND_INJECTION` | high | `spawn()` / `spawnSync()` with a dynamic, user-controlled command string |
-| 12 | `CORS_MISCONFIGURATION` | high | Wildcard origin with `credentials: true`, or reflected `req.headers.origin` |
-| 13 | `JWT_HARDCODED_SECRET` | high | `jwt.sign()` with a hardcoded string secret |
-| 14 | `JWT_WEAK_SECRET` | high | `jwt.sign()` with a short (< 32 char) secret |
-| 15 | `JWT_NONE_ALGORITHM` | high | `jwt.verify()` without an algorithms whitelist, or with `algorithms: ['none']` |
-| 16 | `REDOS` | medium | `new RegExp()` constructed from dynamic (user-controlled) input |
-| 17 | `WEAK_CRYPTO` | high | `crypto.createHash()` using MD5, SHA-1, MD4, or other weak algorithms |
-| — | `UNSAFE_DEPENDENCY` | medium | `package.json` dependency pinned to `*`, `latest`, or `x`; or missing lockfile |
-| — | `VULNERABLE_DEPENDENCY` | critical/high/medium | Known-vulnerable package version (CVE checked against a built-in list) |
+| # | Finding type | Severity | Languages | Description |
+|---|-------------|----------|-----------|-------------|
+| 1 | `SECRET_HARDCODED` | critical | all | API keys, tokens, and passwords assigned to variables |
+| 2 | `SQL_INJECTION` | critical | JS/TS, Python, Go, Java, Ruby | String concatenation or template literals inside SQL queries |
+| 3 | `SQL_INJECTION_CS` | critical | C# | SqlCommand built with string concatenation from user input |
+| 4 | `XSS` | critical | JS/TS | Unsanitised user input in `innerHTML`, `dangerouslySetInnerHTML`, or `document.write` |
+| 5 | `SHELL_INJECTION` | high | JS/TS | `exec()` / `execSync()` with template literals or concatenated user input |
+| 6 | `EVAL_INJECTION` | high | JS/TS, Python | `eval()` or `new Function()` with dynamic arguments |
+| 7 | `PATH_TRAVERSAL` | high | JS/TS, Python, Go | `fs` calls combined with `path.join` using unsanitised user input |
+| 8 | `PATH_TRAVERSAL_CS` | high | C# | `File.*` or `Path.Combine` with user-controlled path components |
+| 9 | `PROTOTYPE_POLLUTION` | high | JS/TS | `Object.assign`, `_.merge`, or bracket notation writes that can pollute `__proto__` |
+| 10 | `INSECURE_RANDOM` | medium | JS/TS | `Math.random()` used in security-sensitive contexts (tokens, IDs, passwords) |
+| 11 | `OPEN_REDIRECT` | medium | JS/TS | `res.redirect()` with dynamic, unvalidated destination |
+| 12 | `SSRF` | high | JS/TS, Python, Go | `fetch()`, `axios`, or `http.get()` with dynamic, user-controlled URLs |
+| 13 | `COMMAND_INJECTION` | high | JS/TS | `spawn()` / `spawnSync()` with a dynamic, user-controlled command string |
+| 14 | `COMMAND_INJECTION_C` | critical | C/C++ | `system()` / `popen()` with user-controlled command string |
+| 15 | `COMMAND_INJECTION_CS` | critical | C# | `Process.Start()` / `ProcessStartInfo` with user-controlled command |
+| 16 | `CORS_MISCONFIGURATION` | high | JS/TS | Wildcard origin with `credentials: true`, or reflected `req.headers.origin` |
+| 17 | `JWT_HARDCODED_SECRET` | critical | JS/TS | `jwt.sign()` with a hardcoded string secret |
+| 18 | `JWT_WEAK_SECRET` | high | JS/TS | `jwt.sign()` with a short (< 32 char) secret |
+| 19 | `JWT_NONE_ALGORITHM` | high | JS/TS | `jwt.verify()` without an algorithms whitelist, or with `algorithms: ['none']` |
+| 20 | `JWT_DECODE_NO_VERIFY` | high | JS/TS | `jwt.decode()` used instead of `jwt.verify()` — signature not checked |
+| 21 | `REDOS` | medium | JS/TS | `new RegExp()` constructed from dynamic (user-controlled) input |
+| 22 | `WEAK_CRYPTO` | medium | JS/TS, Python | `crypto.createHash()` using MD5, SHA-1, MD4, or other weak algorithms |
+| 23 | `UNSAFE_DESERIALIZATION` | critical | Python | `pickle.loads()` or equivalent with untrusted data |
+| 24 | `INSECURE_ASSERT` | medium | Python | Security check implemented with `assert`, which is stripped in optimised mode |
+| 25 | `INSECURE_BINDING` | medium | Python, Go | Server bound to `0.0.0.0`, exposing the service on all interfaces |
+| 26 | `XML_INJECTION` | high | Python, Java | XML parser configured without disabling external entities (XXE) |
+| 27 | `LDAP_INJECTION` | high | Python, Java | LDAP query built with string concatenation from user-controlled input |
+| 28 | `BUFFER_OVERFLOW` | critical | C/C++ | Unsafe buffer operations (`gets`, `strcpy`, `sprintf`) without bounds checking |
+| 29 | `FORMAT_STRING` | critical | C/C++ | Non-literal format string passed to `printf`/`fprintf` family |
+| 30 | `MASS_ASSIGNMENT` | high | Ruby | `permit(:all)` or unrestricted parameter binding in Rails controllers |
+| 31 | `SSTI` | critical | Python | Template string rendered from user-controlled input (Jinja2, Mako) |
+| 32 | `INSECURE_SHARED_PREFS` | medium | Kotlin/Android | Sensitive data written to `SharedPreferences` without encryption |
+| 33 | `WEBVIEW_LOAD_URL` | high | Kotlin/Android | `WebView.loadUrl()` called with user-controlled input |
+| 34 | `PERFORMANCE_N_PLUS_ONE` | medium | Kotlin | ORM or DB query executed inside a loop — N+1 query pattern |
+| — | `UNSAFE_DEPENDENCY` | medium | JS/TS | `package.json` dependency pinned to `*`, `latest`, or `x`; or missing lockfile |
+| — | `VULNERABLE_DEPENDENCY` | critical/high/medium | JS/TS | Known-vulnerable package version (CVE checked against a built-in list) |
 
 ## Use in CI
 
