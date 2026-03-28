@@ -1,6 +1,6 @@
 # AI Code Security Scanner
 
-[![CI](https://github.com/your-org/ai-code-security-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/ai-code-security-scanner/actions/workflows/ci.yml)
+[![CI](https://github.com/astro717/ai-code-security-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/astro717/ai-code-security-scanner/actions/workflows/ci.yml)
 
 AST-based security scanner for AI-generated code. Detects 17 categories of vulnerabilities across TypeScript and JavaScript files.
 
