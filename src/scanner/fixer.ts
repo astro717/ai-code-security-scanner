@@ -350,6 +350,77 @@ ${indent}    raise ValueError(${msg})`;
       return fixed !== line ? fixed : null;
     },
   },
+
+  // ── PATH_TRAVERSAL (Ruby): File.read/open with user input ─────────────────
+  // Wraps the path argument with File.expand_path and prepends a TODO guard comment.
+  {
+    types: ['PATH_TRAVERSAL'],
+    description: 'Wrap Ruby File path with File.expand_path and add base-dir guard comment',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rb') return null;
+
+      // Match File.read/open/write/readlines/delete with a non-literal argument
+      const rubyFileMatch = line.match(/(\bFile\.\w+\s*\()([^)]+)\)/);
+      if (!rubyFileMatch) return null;
+
+      const arg = rubyFileMatch[2]?.trim() ?? '';
+      // Skip if arg is already a string literal or already uses expand_path
+      if (/^['"]/.test(arg) || /expand_path/.test(arg)) return null;
+
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      const fixed = line.replace(
+        /(\bFile\.\w+\s*\()([^)]+)\)/,
+        `$1File.expand_path($2))`,
+      );
+      if (fixed === line) {
+        return (
+          `${indent}# TODO: validate File.expand_path(${arg}).start_with?(BASE_DIR) before use\n` +
+          line
+        );
+      }
+      return (
+        `${indent}# TODO: validate result.start_with?(BASE_DIR) to prevent directory traversal\n` +
+        fixed
+      );
+    },
+  },
+
+  // ── COMMAND_INJECTION (Ruby): system/exec with string interpolation ────────
+  // Converts system("cmd #{var}") to system("cmd", var) (array form, no shell).
+  // Backtick interpolation gets a TODO comment prepended.
+  {
+    types: ['COMMAND_INJECTION'],
+    description: 'Convert Ruby system/exec string call to array form to bypass shell',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rb') return null;
+
+      // Pattern 1: system("cmd #{var}") or exec("cmd #{var}")
+      const sysMatch = line.match(/\b(system|exec)\s*\(\s*"([^"]*#\{([^}]+)\}[^"]*)"\s*\)/);
+      if (sysMatch) {
+        const fn = sysMatch[1]!;
+        const interpolatedVar = sysMatch[3]!.trim();
+        const staticPart = sysMatch[2]!.split(`#{${interpolatedVar}}`)[0]?.trimEnd() ?? '';
+        const fixed = line.replace(
+          /\b(?:system|exec)\s*\(\s*"[^"]*"\s*\)/,
+          `${fn}(${staticPart ? `"${staticPart}", ` : ''}${interpolatedVar})`,
+        );
+        return fixed !== line ? fixed : null;
+      }
+
+      // Pattern 2: backtick with interpolation — prepend warning comment
+      if (/`[^`]*#\{/.test(line)) {
+        const indent = line.match(/^(\s*)/)?.[1] ?? '';
+        return (
+          `${indent}# TODO: replace backtick interpolation with array-form IO.popen to prevent command injection\n` +
+          line
+        );
+      }
+
+      return null;
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────
