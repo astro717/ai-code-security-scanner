@@ -460,11 +460,112 @@ ${indent}    raise ValueError(${msg})`;
       return null;
     },
   },
+
+  // ── INSECURE_RANDOM (Rust): rand::random / thread_rng → OsRng ──────────────
+  // rand::random::<u64>() and thread_rng() in security contexts should use
+  // the OS-backed OsRng instead of the pseudo-random thread-local source.
+  {
+    types: ['INSECURE_RANDOM'],
+    description: 'Replace rand::random / thread_rng with OsRng (cryptographically secure) in Rust',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+
+      // Pattern 1: rand::random::<T>() → OsRng call with TODO
+      if (/rand::random\s*(?:::<[^>]+>)?\s*\(\s*\)/.test(line)) {
+        const indent = line.match(/^(\s*)/)?.[1] ?? '';
+        const fixed = line.replace(
+          /rand::random\s*(?:::<[^>]+>)?\s*\(\s*\)/g,
+          '{ use rand::rngs::OsRng; use rand::RngCore; OsRng.next_u64() }',
+        );
+        if (fixed !== line) {
+          return `${indent}// TODO(INSECURE_RANDOM): OsRng requires the "os-rng" feature in Cargo.toml\n${fixed}`;
+        }
+      }
+
+      // Pattern 2: thread_rng() → OsRng
+      if (/\bthread_rng\s*\(\s*\)/.test(line)) {
+        const indent = line.match(/^(\s*)/)?.[1] ?? '';
+        const fixed = line.replace(/\bthread_rng\s*\(\s*\)/g, '{ use rand::rngs::OsRng; OsRng }');
+        if (fixed !== line) {
+          return `${indent}// TODO(INSECURE_RANDOM): replaced thread_rng with OsRng — add rand "os-rng" feature\n${fixed}`;
+        }
+      }
+
+      return null;
+    },
+  },
+
+  // ── WEAK_CRYPTO (Rust): md5/sha1 crate usage → sha2::Sha256 annotation ────
+  {
+    types: ['WEAK_CRYPTO'],
+    description: 'Annotate md5/sha1 crate usage with sha2::Sha256 migration hint in Rust',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+
+      // Pattern 1: md5::compute(...) → annotation
+      if (/\bmd5::compute\s*\(/.test(line)) {
+        const indent = line.match(/^(\s*)/)?.[1] ?? '';
+        return (
+          `${indent}// TODO(WEAK_CRYPTO): replace md5::compute with sha2::Sha256::digest() — add sha2 to Cargo.toml\n` +
+          line
+        );
+      }
+
+      // Pattern 2: Sha1::new() → Sha256::new() direct replacement
+      if (/\bSha1\s*::\s*new\s*\(\s*\)/.test(line)) {
+        const fixed = line.replace(/\bSha1\s*::\s*new\s*\(\s*\)/g, 'Sha256::new()');
+        if (fixed !== line) {
+          const indent = line.match(/^(\s*)/)?.[1] ?? '';
+          return (
+            `${indent}// TODO(WEAK_CRYPTO): updated SHA-1 → SHA-256; ensure sha2 is in Cargo.toml and import sha2::Sha256\n` +
+            fixed
+          );
+        }
+      }
+
+      // Pattern 3: use sha1:: or use md5:: import declaration → annotate
+      if (/^\s*use\s+(?:sha1|md5)::/.test(line)) {
+        const indent = line.match(/^(\s*)/)?.[1] ?? '';
+        return (
+          `${indent}// TODO(WEAK_CRYPTO): replace sha1/md5 dependency with sha2 crate (Sha256) — update Cargo.toml\n` +
+          line
+        );
+      }
+
+      return null;
+    },
+  },
+
+  // ── COMMAND_INJECTION (Rust): Command::new with user-controlled args ────────
+  // Adds a TODO annotation — full auto-fix requires argument allowlisting that
+  // is too context-dependent for a single-line transform.
+  {
+    types: ['COMMAND_INJECTION'],
+    description: 'Add TODO annotation for Command::new with potentially unsanitized args in Rust',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+
+      if (!/Command::new\s*\(|\.arg\s*\(/.test(line)) return null;
+      // Skip if already annotated
+      if (/TODO.*COMMAND_INJECTION/.test(line)) return null;
+      // Skip if the Command::new arg is a static string literal with no chained .arg()
+      if (/Command::new\s*\(\s*"[^"]*"\s*\)\s*;?\s*$/.test(line)) return null;
+
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(COMMAND_INJECTION): validate/allowlist all Command args — never pass raw user input\n` +
+        line
+      );
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────
 
-const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb']);
+const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb', '.rs']);
 
 function isFixableFile(filePath: string): boolean {
   return FIXABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
