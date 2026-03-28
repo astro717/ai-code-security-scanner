@@ -191,8 +191,9 @@ export function getCachedFindings(
   if (_disabled) { _misses++; return null; }
   const entry = _entries.get(filePath);
   if (!entry) { _misses++; return null; }
-  // Evict stale entries by age (TTL check)
-  if (Date.now() - new Date(entry.scannedAt).getTime() > _cacheTtlMs) {
+  // Evict stale entries by age (TTL check).
+  // Use >= so entries at exactly the TTL boundary are treated as expired.
+  if (Date.now() - new Date(entry.scannedAt).getTime() >= _cacheTtlMs) {
     _entries.delete(filePath);
     _misses++;
     return null;
@@ -335,9 +336,15 @@ export function clearCache(): void {
   _dirty = false;
   _hits = 0;
   _misses = 0;
-  if (_cachePath && fs.existsSync(_cachePath)) {
+  const pathToDelete = _cachePath;
+  // Reset _cacheDir and _cachePath so the re-init guard in initCache() does not
+  // short-circuit when tests call clearCache() + initCache() with the same
+  // directory but different options (e.g. a different cacheTtlMs).
+  _cacheDir = null;
+  _cachePath = null;
+  if (pathToDelete && fs.existsSync(pathToDelete)) {
     try {
-      fs.unlinkSync(_cachePath);
+      fs.unlinkSync(pathToDelete);
     } catch {
       /* ignore */
     }
