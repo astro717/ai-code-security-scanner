@@ -43,6 +43,7 @@ export const KNOWN_TYPES = new Set([
   'WEBVIEW_LOAD_URL',
   'SQL_INJECTION_CS',
   'PATH_TRAVERSAL_CS',
+  'PERFORMANCE_N_PLUS_ONE',
 ]);
 
 export interface Finding {
