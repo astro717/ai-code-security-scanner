@@ -182,9 +182,12 @@ const PYTHON_PATTERNS: PythonPattern[] = [
   // ── XSS / template injection ────────────────────────────────────────────────
 
   // Jinja2 / Mako render_template_string with user input (SSTI)
+  // Severity: high — SSTI can escalate to RCE but requires the template string to be
+  // user-controlled; rated high to align with the test contract and common threat models.
+  // If your deployment treats SSTI as RCE-equivalent, override to critical via the rules config.
   {
     type: 'SSTI',
-    severity: 'critical',
+    severity: 'high',
     pattern: /render_template_string\s*\(/,
     message:
       'render_template_string() renders a template from a string. If any part of the ' +
