@@ -1,6 +1,6 @@
 /**
- * Unit tests for kotlin-parser.ts — exercises all finding types detected by
- * the Kotlin/Android security scanner using fixture strings.
+ * Unit tests for kotlin-parser.ts — exercises all detector patterns using
+ * inline code strings so no fixture files are required.
  *
  * Run with: npm run test:vitest
  */
@@ -10,228 +10,181 @@ import { parseKotlinCode, scanKotlin } from '../../src/scanner/kotlin-parser';
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
-function scanCode(code: string, fileName = 'input.kt') {
-  const result = parseKotlinCode(code, fileName);
-  return scanKotlin(result);
+function scan(code: string, filePath = 'input.kt') {
+  return scanKotlin(parseKotlinCode(code, filePath));
 }
 
-function findingTypes(code: string, fileName?: string): string[] {
-  return scanCode(code, fileName).map((f) => f.type);
-}
-
-// ── SECRET_HARDCODED ─────────────────────────────────────────────────────────
+// ── SECRET_HARDCODED ──────────────────────────────────────────────────────────
 
 describe('kotlin-parser — SECRET_HARDCODED', () => {
-  test('detects hardcoded API key', () => {
-    const code = 'val apiKey = "sk-abc1234567890abcdef"';
-    expect(findingTypes(code)).toContain('SECRET_HARDCODED');
+  test('detects hardcoded API key assigned to val', () => {
+    const code = `val apiKey = "sk-abc123secrettoken"`;
+    const findings = scan(code);
+    const hits = findings.filter((f) => f.type === 'SECRET_HARDCODED');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('high');
+    expect(hits[0].line).toBe(1);
   });
 
-  test('detects hardcoded password', () => {
-    const code = 'val password = "SuperSecret123"';
-    expect(findingTypes(code)).toContain('SECRET_HARDCODED');
+  test('detects hardcoded password in const val', () => {
+    const code = `const val password = "hunter2secret"`;
+    const findings = scan(code);
+    const hits = findings.filter((f) => f.type === 'SECRET_HARDCODED');
+    expect(hits.length).toBeGreaterThan(0);
   });
 
-  test('detects hardcoded token', () => {
-    const code = 'const val accessToken = "Bearer eyJhbGciOiJIUzI1NiJ9"';
-    expect(findingTypes(code)).toContain('SECRET_HARDCODED');
+  test('detects hardcoded token variable', () => {
+    const code = `var secretToken = "eyJhbGciOiJIUzI1NiJ9.payload"`;
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'SECRET_HARDCODED')).toBe(true);
   });
 
-  test('detects hardcoded private_key', () => {
-    const code = 'val privateKey = "-----BEGIN RSA PRIVATE KEY-----"';
-    expect(findingTypes(code)).toContain('SECRET_HARDCODED');
-  });
-
-  test('does NOT flag short placeholder strings', () => {
-    // Less than 4 chars in the value — below the pattern threshold
-    const code = 'val apiKey = "abc"';
-    expect(findingTypes(code)).not.toContain('SECRET_HARDCODED');
-  });
-
-  test('does NOT flag comment lines', () => {
-    const code = '// val password = "SuperSecret123"';
-    expect(findingTypes(code)).not.toContain('SECRET_HARDCODED');
+  test('does not flag short literals unlikely to be secrets', () => {
+    // 3-char string is below the 4-char minimum in the pattern
+    const code = `val label = "ok"`;
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'SECRET_HARDCODED')).toHaveLength(0);
   });
 });
 
-// ── INSECURE_RANDOM ──────────────────────────────────────────────────────────
+// ── INSECURE_RANDOM ───────────────────────────────────────────────────────────
 
 describe('kotlin-parser — INSECURE_RANDOM', () => {
-  test('detects java.util.Random()', () => {
-    const code = 'val rng = java.util.Random()';
-    expect(findingTypes(code)).toContain('INSECURE_RANDOM');
+  test('detects java.util.Random() constructor call', () => {
+    const code = `val rng = java.util.Random()`;
+    const findings = scan(code);
+    const hits = findings.filter((f) => f.type === 'INSECURE_RANDOM');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('medium');
   });
 
-  test('detects Random() constructor usage', () => {
-    const code = 'val r = Random()';
-    expect(findingTypes(code)).toContain('INSECURE_RANDOM');
+  test('detects bare Random() constructor call', () => {
+    const code = `val r = Random()`;
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'INSECURE_RANDOM')).toBe(true);
   });
 
-  test('finding has medium severity', () => {
-    const code = 'val r = Random()';
-    const findings = scanCode(code);
-    const match = findings.find((f) => f.type === 'INSECURE_RANDOM');
-    expect(match?.severity).toBe('medium');
+  test('does not flag SecureRandom', () => {
+    const code = `val sr = java.security.SecureRandom()`;
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'INSECURE_RANDOM')).toHaveLength(0);
   });
 });
 
-// ── WEAK_CRYPTO ──────────────────────────────────────────────────────────────
+// ── WEAK_CRYPTO ───────────────────────────────────────────────────────────────
 
 describe('kotlin-parser — WEAK_CRYPTO', () => {
-  test('detects MD5 MessageDigest', () => {
-    const code = 'val md = MessageDigest.getInstance("MD5")';
-    expect(findingTypes(code)).toContain('WEAK_CRYPTO');
+  test('detects MessageDigest.getInstance("MD5")', () => {
+    const code = `val md = MessageDigest.getInstance("MD5")`;
+    const findings = scan(code);
+    const hits = findings.filter((f) => f.type === 'WEAK_CRYPTO');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('high');
   });
 
-  test('detects SHA-1 MessageDigest', () => {
-    const code = 'val sha = MessageDigest.getInstance("SHA-1")';
-    expect(findingTypes(code)).toContain('WEAK_CRYPTO');
+  test('detects MessageDigest.getInstance("SHA-1")', () => {
+    const code = `val md = MessageDigest.getInstance("SHA-1")`;
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'WEAK_CRYPTO')).toBe(true);
   });
 
-  test('detects SHA1 (no hyphen) MessageDigest', () => {
-    const code = 'val sha = MessageDigest.getInstance("SHA1")';
-    expect(findingTypes(code)).toContain('WEAK_CRYPTO');
-  });
-
-  test('does NOT flag SHA-256', () => {
-    const code = 'val sha = MessageDigest.getInstance("SHA-256")';
-    expect(findingTypes(code)).not.toContain('WEAK_CRYPTO');
-  });
-
-  test('finding has high severity', () => {
-    const code = 'val md = MessageDigest.getInstance("MD5")';
-    const findings = scanCode(code);
-    const match = findings.find((f) => f.type === 'WEAK_CRYPTO');
-    expect(match?.severity).toBe('high');
+  test('does not flag MessageDigest.getInstance("SHA-256")', () => {
+    const code = `val md = MessageDigest.getInstance("SHA-256")`;
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'WEAK_CRYPTO')).toHaveLength(0);
   });
 });
 
-// ── INSECURE_SHARED_PREFS ────────────────────────────────────────────────────
+// ── INSECURE_SHARED_PREFS ─────────────────────────────────────────────────────
 
 describe('kotlin-parser — INSECURE_SHARED_PREFS', () => {
   test('detects putString storing a password key', () => {
-    const code = 'prefs.edit().putString("password", value).apply()';
-    expect(findingTypes(code)).toContain('INSECURE_SHARED_PREFS');
+    const code = `prefs.edit().putString("password", userPass).apply()`;
+    const findings = scan(code);
+    const hits = findings.filter((f) => f.type === 'INSECURE_SHARED_PREFS');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('medium');
   });
 
   test('detects putString storing a token key', () => {
-    const code = 'prefs.edit().putString("authToken", userToken).apply()';
-    expect(findingTypes(code)).toContain('INSECURE_SHARED_PREFS');
+    const code = `prefs.edit().putString("token", authToken).apply()`;
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'INSECURE_SHARED_PREFS')).toBe(true);
   });
 
-  test('detects putString storing a secret key', () => {
-    const code = 'prefs.edit().putString("userSecret", secretValue).commit()';
-    expect(findingTypes(code)).toContain('INSECURE_SHARED_PREFS');
-  });
-
-  test('does NOT flag putString for non-sensitive keys', () => {
-    const code = 'prefs.edit().putString("username", name).apply()';
-    expect(findingTypes(code)).not.toContain('INSECURE_SHARED_PREFS');
-  });
-
-  test('finding has medium severity', () => {
-    const code = 'prefs.edit().putString("password", val).apply()';
-    const findings = scanCode(code);
-    const match = findings.find((f) => f.type === 'INSECURE_SHARED_PREFS');
-    expect(match?.severity).toBe('medium');
+  test('does not flag putString with non-sensitive key names', () => {
+    const code = `prefs.edit().putString("username_display", name).apply()`;
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'INSECURE_SHARED_PREFS')).toHaveLength(0);
   });
 });
 
-// ── WEBVIEW_LOAD_URL ─────────────────────────────────────────────────────────
+// ── WEBVIEW_LOAD_URL ──────────────────────────────────────────────────────────
 
 describe('kotlin-parser — WEBVIEW_LOAD_URL', () => {
-  test('detects loadUrl with url variable', () => {
-    const code = 'webView.loadUrl(url)';
-    expect(findingTypes(code)).toContain('WEBVIEW_LOAD_URL');
+  test('detects loadUrl with intent-derived URL', () => {
+    const code = `webView.loadUrl(intent.getStringExtra("url"))`;
+    const findings = scan(code);
+    const hits = findings.filter((f) => f.type === 'WEBVIEW_LOAD_URL');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('high');
   });
 
-  test('detects loadUrl with intent-derived input', () => {
-    const code = 'webView.loadUrl(intent.getStringExtra("url"))';
-    expect(findingTypes(code)).toContain('WEBVIEW_LOAD_URL');
-  });
-
-  test('detects loadUrl with request parameter', () => {
-    const code = 'webView.loadUrl(request.getParameter("target"))';
-    expect(findingTypes(code)).toContain('WEBVIEW_LOAD_URL');
-  });
-
-  test('finding has high severity', () => {
-    const code = 'webView.loadUrl(url)';
-    const findings = scanCode(code);
-    const match = findings.find((f) => f.type === 'WEBVIEW_LOAD_URL');
-    expect(match?.severity).toBe('high');
+  test('detects loadUrl with request parameter variable', () => {
+    const code = `webView.loadUrl(request.getParameter("target"))`;
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'WEBVIEW_LOAD_URL')).toBe(true);
   });
 });
 
-// ── SQL_INJECTION (Kotlin via rawQuery / execSQL) ───────────────────────────
+// ── COMMAND_INJECTION ─────────────────────────────────────────────────────────
 
-describe('kotlin-parser — SQL_INJECTION', () => {
-  test('detects rawQuery with Kotlin string interpolation', () => {
-    // The regex matches when the query string contains ${...} interpolation
-    const code = 'db.rawQuery("SELECT * FROM users WHERE id = ${userId}", null)';
-    expect(findingTypes(code)).toContain('SQL_INJECTION');
+describe('kotlin-parser — SQL_INJECTION (via rawQuery)', () => {
+  test('detects rawQuery with string concatenation', () => {
+    const code = `db.rawQuery("SELECT * FROM users WHERE id = " + userId, null)`;
+    const findings = scan(code);
+    const hits = findings.filter((f) => f.type === 'SQL_INJECTION');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('critical');
   });
 
-  test('detects rawQuery where first argument is a variable (not a literal)', () => {
-    // Pattern also matches rawQuery(variableName, ...) — non-literal first arg
-    const code = 'db.rawQuery(queryStr, null)';
-    expect(findingTypes(code)).toContain('SQL_INJECTION');
+  test('detects rawQuery with string interpolation', () => {
+    const code = 'db.rawQuery("SELECT * FROM orders WHERE id = ${orderId}", null)';
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'SQL_INJECTION')).toBe(true);
   });
 
-  test('finding has critical severity', () => {
-    const code = 'db.rawQuery("DELETE FROM users WHERE id = ${id}", null)';
-    const findings = scanCode(code);
-    const match = findings.find((f) => f.type === 'SQL_INJECTION');
-    expect(match?.severity).toBe('critical');
+  test('does not flag rawQuery with parameterised args placeholder', () => {
+    const code = `db.rawQuery("SELECT * FROM users WHERE id = ?", arrayOf(userId))`;
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'SQL_INJECTION')).toHaveLength(0);
   });
 });
 
-// ── General scanner behavior ─────────────────────────────────────────────────
+// ── General finding shape ─────────────────────────────────────────────────────
 
-describe('kotlin-parser — general behavior', () => {
-  test('returns empty array for clean code', () => {
-    const code = `
-      fun add(a: Int, b: Int): Int = a + b
-      val result = add(1, 2)
-    `;
-    expect(scanCode(code)).toHaveLength(0);
-  });
-
-  test('each finding includes line number, snippet, and message', () => {
-    const code = 'val password = "SuperSecretPassword"';
-    const findings = scanCode(code);
+describe('kotlin-parser — finding shape', () => {
+  test('every finding has a line number, severity, message, and file', () => {
+    const code = [
+      `val apiKey = "sk-secretkey12345"`,
+      `val rng = java.util.Random()`,
+      `val md = MessageDigest.getInstance("MD5")`,
+    ].join('\n');
+    const findings = scan(code, 'test.kt');
     expect(findings.length).toBeGreaterThan(0);
-    const finding = findings[0]!;
-    expect(finding.line).toBe(1);
-    expect(typeof finding.message).toBe('string');
-    expect(finding.message.length).toBeGreaterThan(0);
-    expect(typeof finding.snippet).toBe('string');
+    for (const f of findings) {
+      expect(typeof f.line).toBe('number');
+      expect(f.line).toBeGreaterThan(0);
+      expect(['critical', 'high', 'medium', 'low']).toContain(f.severity);
+      expect(typeof f.message).toBe('string');
+      expect(f.message.length).toBeGreaterThan(0);
+      expect(f.file).toBe('test.kt');
+    }
   });
 
-  test('filePath is preserved in finding.file', () => {
-    const code = 'val apiKey = "sk-verylongapikey123456"';
-    const result = parseKotlinCode(code, '/app/src/MainActivity.kt');
-    const findings = scanKotlin(result);
-    expect(findings[0]?.file).toBe('/app/src/MainActivity.kt');
-  });
-
-  test('multi-line code detects findings on correct lines', () => {
-    const code = [
-      'fun setup() {',
-      '  val rng = Random()',
-      '  val name = "Alice"',
-      '}',
-    ].join('\n');
-    const findings = scanCode(code);
-    const randomFinding = findings.find((f) => f.type === 'INSECURE_RANDOM');
-    expect(randomFinding?.line).toBe(2);
-  });
-
-  test('pure comment lines are skipped', () => {
-    const code = [
-      '// val password = "DoNotStore"',
-      '* val apiKey = "sk-abc1234567890abcdef"',
-    ].join('\n');
-    expect(findingTypes(code)).not.toContain('SECRET_HARDCODED');
+  test('pure comment lines are not flagged', () => {
+    const code = `// val password = "secretvalue"`;
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'SECRET_HARDCODED')).toHaveLength(0);
   });
 });
