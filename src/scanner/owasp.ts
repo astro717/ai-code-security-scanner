@@ -124,16 +124,11 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   // A10 — SSRF
   SSRF:                   'A10:2021',
 
-  // A01 — Broken Access Control (C# and Android variants)
-  PATH_TRAVERSAL_CS:      'A01:2021',
-
-  // A03 — Injection (C# and Android variants)
-  SQL_INJECTION_CS:       'A03:2021',
+  // Kotlin / Android finding types
+  // A02 — INSECURE_SHARED_PREFS: sensitive data stored unencrypted (Cryptographic Failures)
+  INSECURE_SHARED_PREFS:  'A02:2021',
+  // A03 — WEBVIEW_LOAD_URL: user-controlled URL loaded in WebView (Injection / XSS)
   WEBVIEW_LOAD_URL:       'A03:2021',
-
-  // A04 — Insecure Design (Android / performance)
-  INSECURE_SHARED_PREFS:  'A04:2021',
-  PERFORMANCE_N_PLUS_ONE: 'A04:2021',
 };
 
 /**
