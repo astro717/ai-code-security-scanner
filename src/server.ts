@@ -35,6 +35,8 @@ import { parseCSharpCode, scanCSharp } from './scanner/csharp-parser';
 import { parseCCode, scanC } from './scanner/c-parser';
 import { parseRubyCode, scanRuby } from './scanner/ruby-parser';
 import { parseKotlinCode, scanKotlin } from './scanner/kotlin-parser';
+import { parseSwiftCode, scanSwift } from './scanner/swift-parser';
+import { parseRustCode, scanRust } from './scanner/rust-parser';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
@@ -756,6 +758,14 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     // Kotlin/Android files use the dedicated regex-based Kotlin scanner
     const ktResult = parseKotlinCode(code, effectiveFilename);
     findings = scanKotlin(ktResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+  } else if (ext === '.swift') {
+    // Swift files use the dedicated regex-based Swift scanner
+    const swiftResult = parseSwiftCode(code, effectiveFilename);
+    findings = scanSwift(swiftResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+  } else if (ext === '.rs') {
+    // Rust files use the dedicated regex-based Rust scanner
+    const rustResult = parseRustCode(code, effectiveFilename);
+    findings = scanRust(rustResult).map((f) => ({ ...f, file: filename ?? 'input' }));
   } else {
     // JS/TS files use the AST-based parser and detector suite
     let parsed;
@@ -1042,6 +1052,12 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
           } else if (ext === '.kt' || ext === '.kts') {
             const parsed = parseKotlinCode(code, item.path);
             findings = scanKotlin(parsed);
+          } else if (ext === '.swift') {
+            const parsed = parseSwiftCode(code, item.path);
+            findings = scanSwift(parsed);
+          } else if (ext === '.rs') {
+            const parsed = parseRustCode(code, item.path);
+            findings = scanRust(parsed);
           } else {
             // JS/TS — use AST-based detectors
             const parsed = parseCode(code, item.path);
@@ -1149,7 +1165,7 @@ app.get('/watch', (req, res) => {
   res.write(`event: connected\ndata: ${JSON.stringify({ path: resolvedPath, ts: new Date().toISOString() })}\n\n`);
 
   const JS_TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-  const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb', '.kt', '.kts']);
+  const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb', '.kt', '.kts', '.swift', '.rs']);
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingFiles = new Set<string>();
@@ -1180,6 +1196,12 @@ app.get('/watch', (req, res) => {
       } else if (ext === '.kt' || ext === '.kts') {
         const parsed = parseKotlinCode(code, filePath);
         return scanKotlin(parsed);
+      } else if (ext === '.swift') {
+        const parsed = parseSwiftCode(code, filePath);
+        return scanSwift(parsed);
+      } else if (ext === '.rs') {
+        const parsed = parseRustCode(code, filePath);
+        return scanRust(parsed);
       } else if (JS_TS_EXTENSIONS.has(ext)) {
         const parsed = parseCode(code, filePath);
         return [

@@ -113,6 +113,7 @@ export const FINDING_TO_OWASP: Record<string, string> = {
 
   // A05 — Security Misconfiguration
   JWT_NONE_ALGORITHM:     'A05:2021',
+  UNSAFE_WEBVIEW:         'A05:2021',
 
   // A06 — Vulnerable and Outdated Components
   UNSAFE_DEPENDENCY:      'A06:2021',

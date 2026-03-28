@@ -81,16 +81,16 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
 
   // WKWebView with allowsArbitraryLoads / NSAllowsArbitraryLoads
   {
-    type: 'SSRF',
+    type: 'UNSAFE_WEBVIEW',
     severity: 'medium',
-    pattern: /NSAllowsArbitraryLoads\s*[=:]\s*true/i,
+    pattern: /"?NSAllowsArbitraryLoads"?\s*[=:]\s*true/i,
     message:
       'NSAllowsArbitraryLoads is enabled in App Transport Security settings. This disables TLS ' +
       'enforcement and allows cleartext HTTP connections, exposing the app to man-in-the-middle attacks. ' +
       'Remove this key and ensure all endpoints support HTTPS.',
   },
   {
-    type: 'SSRF',
+    type: 'UNSAFE_WEBVIEW',
     severity: 'medium',
     pattern: /allowsArbitraryLoads\s*=\s*true/,
     message:
@@ -166,6 +166,10 @@ export function scanSwift(parsed: SwiftParseResult): Finding[] {
   for (let i = 0; i < parsed.lines.length; i++) {
     const line = parsed.lines[i]!;
     const lineNum = i + 1;
+    const trimmed = line.trim();
+
+    // Skip pure comment lines
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
 
     for (const pat of SWIFT_PATTERNS) {
       if (pat.pattern.test(line)) {
