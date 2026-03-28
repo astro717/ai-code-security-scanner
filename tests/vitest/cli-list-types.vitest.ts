@@ -4,7 +4,7 @@
  * These tests spawn the CLI as a child process and assert on stdout output.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { execSync } from 'child_process';
 import * as path from 'path';
 
@@ -14,7 +14,7 @@ const TSX = path.resolve(__dirname, '../../node_modules/.bin/tsx');
 function runListTypes(): string {
   try {
     // Use tsx to run cli.ts directly — avoids needing a full build step.
-    return execSync(`${TSX} ${CLI} . --list-types`, {
+    return execSync(`"${TSX}" "${CLI}" . --list-types`, {
       cwd: path.resolve(__dirname, '../..'),
       timeout: 30_000,
       encoding: 'utf-8',
@@ -32,9 +32,9 @@ describe('--list-types flag', () => {
   let output: string;
 
   // Run once; reuse across tests.
-  before: {
+  beforeAll(() => {
     output = runListTypes();
-  }
+  });
 
   it('exits cleanly and produces output', () => {
     expect(output.length).toBeGreaterThan(0);
