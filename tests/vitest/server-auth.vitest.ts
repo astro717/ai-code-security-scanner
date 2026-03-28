@@ -210,3 +210,58 @@ describe('server auth — SERVER_API_KEY is set', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+// ── Test suite: short SERVER_API_KEY warning ──────────────────────────────────
+
+describe('server auth — short SERVER_API_KEY warning', () => {
+  test('emits console.warn when SERVER_API_KEY is shorter than 32 characters', async () => {
+    const shortKey = 'short-key-123';
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    const origLog = console.log;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    };
+    console.log = () => {};
+
+    const port = await getFreePort();
+    process.env.SERVER_API_KEY = shortKey;
+    process.env.PORT = String(port);
+
+    // Clear cached server module
+    Object.keys(require.cache ?? {}).forEach((k) => {
+      if (k.includes('/src/server')) delete require.cache[k];
+    });
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('ts-node/register');
+    } catch { /* already registered */ }
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('../../src/server');
+    const handle = (mod?.default ?? mod?.server ?? null) as http.Server | null;
+
+    await new Promise((r) => setTimeout(r, 300));
+
+    console.warn = origWarn;
+    console.log = origLog;
+
+    // Assert warning about short key was emitted
+    const shortKeyWarning = warnings.find((w) =>
+      w.includes('SERVER_API_KEY') && w.includes('shorter than 32'),
+    );
+    expect(shortKeyWarning, 'Expected a warning about SERVER_API_KEY being shorter than 32 chars').toBeDefined();
+
+    // Cleanup
+    delete process.env.SERVER_API_KEY;
+    delete process.env.PORT;
+    await new Promise<void>((resolve) => {
+      if (handle && typeof handle.close === 'function') {
+        handle.close(() => resolve());
+      } else {
+        resolve();
+      }
+    });
+  }, 10_000);
+});
