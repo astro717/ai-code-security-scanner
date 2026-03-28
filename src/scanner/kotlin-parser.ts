@@ -10,9 +10,10 @@
  *   INSECURE_RANDOM        — java.util.Random for security-sensitive values
  *   WEAK_CRYPTO            — MD5 / SHA-1 MessageDigest calls
  *   INSECURE_SHARED_PREFS  — SharedPreferences storing sensitive data unencrypted
- *   WEBVIEW_LOAD_URL     — WebView.loadUrl with user-controlled input
+ *   WEBVIEW_LOAD_URL       — WebView.loadUrl with user-controlled input
  *   SQL_INJECTION          — rawQuery / execSQL with string concatenation
  *   PATH_TRAVERSAL         — File() constructor with user-controlled path
+ *   PERFORMANCE_N_PLUS_ONE — Room/Exposed ORM query inside a for/forEach loop
  */
 
 import * as fs from 'fs';
@@ -122,6 +123,38 @@ const KOTLIN_PATTERNS: KotlinPattern[] = [
     message:
       'ExportedPreferenceActivity suppression detected. Exported activities without ' +
       'android:permission are accessible to any app on the device.',
+  },
+
+  // N+1 query patterns — Room/Exposed ORM query call inside a for loop or forEach block
+  // Pattern 1: for-loop with a DAO/db call on each iteration
+  {
+    type: 'PERFORMANCE_N_PLUS_ONE',
+    severity: 'low',
+    pattern: /\bfor\s*\([^)]+\)\s*\{[^}]*(?:dao|Dao|\.find|\.query|\.select|\.load|runBlocking\s*\{)[^}]*\}/,
+    message:
+      'Potential N+1 query: a database call appears inside a for loop. Each iteration triggers ' +
+      'a separate query. Batch-load related data before the loop using a single query with IN ' +
+      'or use Room relationships with @Relation to load associations in one shot.',
+  },
+  // Pattern 2: forEach / map / filter lambda with a DAO/Room/Exposed call
+  {
+    type: 'PERFORMANCE_N_PLUS_ONE',
+    severity: 'low',
+    pattern: /\.(?:forEach|map|filter|flatMap)\s*\{[^}]*(?:dao|Dao|\.find|\.query|\.select|\.load|runBlocking\s*\{)/,
+    message:
+      'Potential N+1 query: a database call appears inside a collection iteration (forEach/map). ' +
+      'Fetch related records in bulk before iterating, or use Room @Relation / Exposed JOIN queries ' +
+      'to avoid one database round-trip per item.',
+  },
+  // Pattern 3: coroutine launch/async inside a loop containing a suspend DB call
+  {
+    type: 'PERFORMANCE_N_PLUS_ONE',
+    severity: 'low',
+    pattern: /(?:launch|async)\s*\{[^}]*(?:dao|Dao|\.find|\.query|\.select|suspend)/,
+    message:
+      'Potential N+1 query: a coroutine with a database call is launched inside what may be a ' +
+      'loop context. Consolidate coroutine launches and use a single bulk DB call to avoid ' +
+      'excessive round-trips.',
   },
 ];
 

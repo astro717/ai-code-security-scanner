@@ -286,3 +286,74 @@ describe('/scan with Kotlin files (.kt)', () => {
     expect(types.has('INSECURE_SHARED_PREFS')).toBe(true);
   });
 });
+
+// ── PERFORMANCE_N_PLUS_ONE unit tests ─────────────────────────────────────────
+
+import { parseKotlinCode, scanKotlin } from '../../src/scanner/kotlin-parser';
+
+describe('Kotlin scanner — PERFORMANCE_N_PLUS_ONE detection', () => {
+  test('detects N+1 query in a for loop calling DAO.find', () => {
+    const code = `
+fun loadAll(ids: List<Int>, userDao: UserDao) {
+    for (id in ids) {
+        val user = userDao.findById(id)
+        println(user.name)
+    }
+}`;
+    const result = parseKotlinCode(code, 'repo.kt');
+    const findings = scanKotlin(result);
+    const types = findings.map((f) => f.type);
+    expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  test('detects N+1 query in a forEach block calling dao.query', () => {
+    const code = `
+fun processAll(items: List<String>) {
+    items.forEach {
+        val row = dao.query("SELECT * FROM t WHERE name = ?", it)
+        handle(row)
+    }
+}`;
+    const result = parseKotlinCode(code, 'service.kt');
+    const findings = scanKotlin(result);
+    const types = findings.map((f) => f.type);
+    expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  test('detects N+1 query in a map call containing a DAO load', () => {
+    const code = `
+val details = userIds.map { id ->
+    val profile = userDao.load(id)
+    profile.toDto()
+}`;
+    const result = parseKotlinCode(code, 'mapper.kt');
+    const findings = scanKotlin(result);
+    const types = findings.map((f) => f.type);
+    expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  test('does NOT flag a single DAO call outside any loop', () => {
+    const code = `
+fun getUser(id: Int): User {
+    return userDao.findById(id)
+}`;
+    const result = parseKotlinCode(code, 'clean.kt');
+    const findings = scanKotlin(result);
+    const n1 = findings.filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE');
+    expect(n1).toHaveLength(0);
+  });
+
+  test('PERFORMANCE_N_PLUS_ONE findings have severity low', () => {
+    const code = `
+for (item in items) {
+    val r = dao.select(item.id)
+    process(r)
+}`;
+    const result = parseKotlinCode(code, 'loop.kt');
+    const findings = scanKotlin(result).filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE');
+    expect(findings.length).toBeGreaterThan(0);
+    for (const f of findings) {
+      expect(f.severity).toBe('low');
+    }
+  });
+});
