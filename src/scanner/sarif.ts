@@ -71,21 +71,29 @@ export function buildSARIF(findings: Finding[], toolName = 'ai-code-security-sca
     return rule;
   });
 
-  const results = findings.map((f) => ({
-    ruleId: f.type,
-    level:
-      f.severity === 'critical' || f.severity === 'high' ? 'error' :
-      f.severity === 'medium' ? 'warning' : 'note',
-    message: { text: f.message },
-    locations: [
-      {
-        physicalLocation: {
-          artifactLocation: { uri: f.file ?? 'unknown' },
-          region: { startLine: f.line, startColumn: f.column },
+  const results = findings.map((f) => {
+    const result: Record<string, unknown> = {
+      ruleId: f.type,
+      level:
+        f.severity === 'critical' || f.severity === 'high' ? 'error' :
+        f.severity === 'medium' ? 'warning' : 'note',
+      message: { text: f.message },
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri: f.file ?? 'unknown' },
+            region: { startLine: f.line, startColumn: f.column },
+          },
         },
-      },
-    ],
-  }));
+      ],
+    };
+    // Include confidence score as a SARIF properties bag entry when available.
+    // The SARIF spec (§3.27.11) allows arbitrary properties on result objects.
+    if (f.confidence !== undefined) {
+      result['properties'] = { confidence: f.confidence };
+    }
+    return result;
+  });
 
   return {
     version: '2.1.0',

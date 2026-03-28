@@ -45,6 +45,8 @@ interface JavaPattern {
   severity: Finding['severity'];
   pattern: RegExp;
   message: string;
+  /** Detection confidence [0.0–1.0]. High-specificity patterns use 0.9+, heuristics use lower values. */
+  confidence?: number;
 }
 
 const JAVA_PATTERNS: JavaPattern[] = [
@@ -227,7 +229,7 @@ export function scanJava(result: JavaParseResult): Finding[] {
     // Skip pure comments
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return;
 
-    for (const { type, severity, pattern, message } of JAVA_PATTERNS) {
+    for (const { type, severity, pattern, message, confidence } of JAVA_PATTERNS) {
       if (pattern.test(line)) {
         findings.push({
           type,
@@ -236,6 +238,7 @@ export function scanJava(result: JavaParseResult): Finding[] {
           column: line.search(/\S/),
           snippet: trimmed.slice(0, 100),
           message,
+          ...(confidence !== undefined ? { confidence } : {}),
           file: result.filePath,
         });
       }

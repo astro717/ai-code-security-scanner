@@ -43,6 +43,8 @@ interface GoPattern {
   severity: Finding['severity'];
   pattern: RegExp;
   message: string;
+  /** Detection confidence [0.0–1.0]. High-specificity patterns use 0.9+, heuristics use lower values. */
+  confidence?: number;
 }
 
 const GO_PATTERNS: GoPattern[] = [
@@ -188,7 +190,7 @@ export function scanGo(result: GoParseResult): Finding[] {
     // Skip pure comments
     if (trimmed.startsWith('//')) return;
 
-    for (const { type, severity, pattern, message } of GO_PATTERNS) {
+    for (const { type, severity, pattern, message, confidence } of GO_PATTERNS) {
       if (pattern.test(line)) {
         findings.push({
           type,
@@ -197,6 +199,7 @@ export function scanGo(result: GoParseResult): Finding[] {
           column: line.search(/\S/),
           snippet: trimmed.slice(0, 100),
           message,
+          ...(confidence !== undefined ? { confidence } : {}),
           file: result.filePath,
         });
       }
