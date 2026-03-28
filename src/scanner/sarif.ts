@@ -39,11 +39,8 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   MASS_ASSIGNMENT:       'Mass assignment via permit(:all) or unrestricted parameter binding.',
   FORMAT_STRING:         'Non-literal format string passed to printf/fprintf family — memory read/write risk.',
   SSTI:                  'Template string rendered from user-controlled input — arbitrary server-side code execution via SSTI.',
-
-  // Kotlin / Android finding types
-  INSECURE_SHARED_PREFS:  'SharedPreferences used to store sensitive data without EncryptedSharedPreferences — data is unencrypted at rest.',
-  WEBVIEW_LOAD_URL:       'WebView.loadUrl called with a user-controlled URL — may enable open redirect or cross-site scripting attacks.',
-  PERFORMANCE_N_PLUS_ONE: 'N+1 query pattern detected — association accessed in a loop without eager loading, causing one DB query per iteration.',
+  INSECURE_SHARED_PREFS: 'SharedPreferences used to store sensitive data (password, token, secret, or key) without EncryptedSharedPreferences — data readable by any app with root or backup access.',
+  WEBVIEW_LOAD_URL:      'WebView.loadUrl called with a non-literal, potentially user-controlled URL — enables open redirect and cross-site scripting attacks inside the WebView.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
@@ -72,29 +69,21 @@ export function buildSARIF(findings: Finding[], toolName = 'ai-code-security-sca
     return rule;
   });
 
-  const results = findings.map((f) => {
-    const result: Record<string, unknown> = {
-      ruleId: f.type,
-      level:
-        f.severity === 'critical' || f.severity === 'high' ? 'error' :
-        f.severity === 'medium' ? 'warning' : 'note',
-      message: { text: f.message },
-      locations: [
-        {
-          physicalLocation: {
-            artifactLocation: { uri: f.file ?? 'unknown' },
-            region: { startLine: f.line, startColumn: f.column },
-          },
+  const results = findings.map((f) => ({
+    ruleId: f.type,
+    level:
+      f.severity === 'critical' || f.severity === 'high' ? 'error' :
+      f.severity === 'medium' ? 'warning' : 'note',
+    message: { text: f.message },
+    locations: [
+      {
+        physicalLocation: {
+          artifactLocation: { uri: f.file ?? 'unknown' },
+          region: { startLine: f.line, startColumn: f.column },
         },
-      ],
-    };
-    // Include confidence score as a SARIF properties bag entry when available.
-    // The SARIF spec (§3.27.11) allows arbitrary properties on result objects.
-    if (f.confidence !== undefined) {
-      result['properties'] = { confidence: f.confidence };
-    }
-    return result;
-  });
+      },
+    ],
+  }));
 
   return {
     version: '2.1.0',

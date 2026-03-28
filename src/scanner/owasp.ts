@@ -124,14 +124,10 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   // A10 — SSRF
   SSRF:                   'A10:2021',
 
-  // Kotlin / Android finding types
-  // A02 — INSECURE_SHARED_PREFS: sensitive data stored unencrypted (Cryptographic Failures)
+  // Additional types — Kotlin / Android
+  SQL_INJECTION_CS:       'A03:2021',
   INSECURE_SHARED_PREFS:  'A02:2021',
-  // A03 — WEBVIEW_LOAD_URL: user-controlled URL loaded in WebView (Injection / XSS)
   WEBVIEW_LOAD_URL:       'A03:2021',
-  // A04 — PERFORMANCE_N_PLUS_ONE: inefficient data access exposing sensitive data to over-fetching
-  // Mapped to A04 (Insecure Design) as N+1 patterns indicate a design-level data access flaw.
-  PERFORMANCE_N_PLUS_ONE: 'A04:2021',
 };
 
 /**
