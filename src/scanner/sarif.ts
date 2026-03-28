@@ -39,8 +39,11 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   MASS_ASSIGNMENT:       'Mass assignment via permit(:all) or unrestricted parameter binding.',
   FORMAT_STRING:         'Non-literal format string passed to printf/fprintf family — memory read/write risk.',
   SSTI:                  'Template string rendered from user-controlled input — arbitrary server-side code execution via SSTI.',
-  INSECURE_SHARED_PREFS: 'SharedPreferences used to store sensitive data (password, token, secret, or key) without EncryptedSharedPreferences — data readable by any app with root or backup access.',
-  WEBVIEW_LOAD_URL:      'WebView.loadUrl called with a non-literal, potentially user-controlled URL — enables open redirect and cross-site scripting attacks inside the WebView.',
+  INSECURE_SHARED_PREFS: 'Sensitive data written to Android SharedPreferences without encryption.',
+  WEBVIEW_LOAD_URL:      'WebView loads a URL derived from user-controlled input — potential XSS or content injection.',
+  SQL_INJECTION_CS:      'User-controlled input concatenated into a SQL query in a C# context without parameterisation.',
+  PATH_TRAVERSAL_CS:     'User-controlled path used in a C# filesystem call without sanitisation or bounds checking.',
+  PERFORMANCE_N_PLUS_ONE: 'ORM or database query executed inside a loop — N+1 query pattern degrades performance under load.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
