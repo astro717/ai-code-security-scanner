@@ -651,16 +651,81 @@ program
     'Print all known finding types sorted alphabetically, then exit.',
   )
   .option(
+    '--list-types',
+    'Print all known finding types with their default severity and supported languages, then exit.',
+  )
+  .option(
     '--summary-only',
     'Print only the severity count line (critical/high/medium/low total) without the full finding list.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean; summaryOnly: boolean }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; fix: boolean; dryRun: boolean; typeList: boolean; listTypes: boolean; summaryOnly: boolean }) => {
     // --type-list: print all known finding types and exit immediately.
     if (options.typeList) {
       const types = [...KNOWN_TYPES].sort();
       for (const t of types) {
         console.log(t);
       }
+      process.exit(0);
+    }
+
+    // --list-types: print all known finding types with severity and language info.
+    if (options.listTypes) {
+      // Default severities for each finding type (used when no scan data is present).
+      const TYPE_SEVERITIES: Record<string, string> = {
+        COMMAND_INJECTION: 'critical', COMMAND_INJECTION_C: 'critical', COMMAND_INJECTION_CS: 'critical',
+        CORS_MISCONFIGURATION: 'medium', EVAL_INJECTION: 'high', INSECURE_RANDOM: 'medium',
+        JWT_DECODE_NO_VERIFY: 'high', JWT_HARDCODED_SECRET: 'critical', JWT_NONE_ALGORITHM: 'high',
+        JWT_WEAK_SECRET: 'medium', OPEN_REDIRECT: 'medium', PATH_TRAVERSAL: 'high',
+        PATH_TRAVERSAL_CS: 'high', PROTOTYPE_POLLUTION: 'high', REDOS: 'medium',
+        SECRET_HARDCODED: 'high', SHELL_INJECTION: 'critical', SQL_INJECTION: 'critical',
+        SQL_INJECTION_CS: 'critical', SSRF: 'high', UNSAFE_DEPENDENCY: 'low',
+        VULNERABLE_DEPENDENCY: 'high', WEAK_CRYPTO: 'medium', XSS: 'high',
+        UNSAFE_DESERIALIZATION: 'critical', INSECURE_ASSERT: 'medium', INSECURE_BINDING: 'medium',
+        XML_INJECTION: 'high', LDAP_INJECTION: 'high', BUFFER_OVERFLOW: 'high',
+        MASS_ASSIGNMENT: 'high', FORMAT_STRING: 'high', SSTI: 'critical',
+        INSECURE_SHARED_PREFS: 'medium', WEBVIEW_LOAD_URL: 'high', PERFORMANCE_N_PLUS_ONE: 'low',
+      };
+      // Language coverage per finding type.
+      const TYPE_LANGUAGES: Record<string, string> = {
+        COMMAND_INJECTION: 'JS/TS, Python, Go, Java, Ruby, Kotlin, C#, C/C++',
+        COMMAND_INJECTION_C: 'C/C++', COMMAND_INJECTION_CS: 'C#',
+        CORS_MISCONFIGURATION: 'JS/TS', EVAL_INJECTION: 'JS/TS, Python, Go',
+        INSECURE_RANDOM: 'JS/TS, Python, Go, Java, C#',
+        JWT_DECODE_NO_VERIFY: 'JS/TS', JWT_HARDCODED_SECRET: 'JS/TS',
+        JWT_NONE_ALGORITHM: 'JS/TS', JWT_WEAK_SECRET: 'JS/TS',
+        OPEN_REDIRECT: 'JS/TS', PATH_TRAVERSAL: 'JS/TS, Python, Go, Java, Ruby, C#',
+        PATH_TRAVERSAL_CS: 'C#', PROTOTYPE_POLLUTION: 'JS/TS',
+        REDOS: 'JS/TS', SECRET_HARDCODED: 'JS/TS, Python, Go, Java, Ruby, Kotlin, C#, C/C++',
+        SHELL_INJECTION: 'JS/TS, Python', SQL_INJECTION: 'JS/TS, Python, Go, Java, Ruby, C#',
+        SQL_INJECTION_CS: 'C#', SSRF: 'JS/TS, Python, Go, Java',
+        UNSAFE_DEPENDENCY: 'JS/TS (package.json)', VULNERABLE_DEPENDENCY: 'JS/TS (package.json)',
+        WEAK_CRYPTO: 'JS/TS, Python, Go, Java, Ruby', XSS: 'JS/TS',
+        UNSAFE_DESERIALIZATION: 'Python, Java', INSECURE_ASSERT: 'Python, JS/TS',
+        INSECURE_BINDING: 'Python', XML_INJECTION: 'Python, Java, C#',
+        LDAP_INJECTION: 'Python, Java', BUFFER_OVERFLOW: 'C/C++, Java',
+        MASS_ASSIGNMENT: 'Ruby', FORMAT_STRING: 'C/C++, Python',
+        SSTI: 'Python, Ruby, Java', INSECURE_SHARED_PREFS: 'Kotlin/Android',
+        WEBVIEW_LOAD_URL: 'Kotlin/Android', PERFORMANCE_N_PLUS_ONE: 'Kotlin/Android, Ruby',
+      };
+
+      const SEV_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+      const types = [...KNOWN_TYPES].sort((a, b) => {
+        const sa = SEV_ORDER[TYPE_SEVERITIES[a] ?? 'low'] ?? 3;
+        const sb = SEV_ORDER[TYPE_SEVERITIES[b] ?? 'low'] ?? 3;
+        if (sa !== sb) return sa - sb;
+        return a.localeCompare(b);
+      });
+
+      const colW = Math.max(...types.map((t) => t.length)) + 2;
+      const sevW = 10;
+      console.log(`\n${'TYPE'.padEnd(colW)}${'SEVERITY'.padEnd(sevW)}LANGUAGES`);
+      console.log('─'.repeat(colW + sevW + 40));
+      for (const t of types) {
+        const sev = TYPE_SEVERITIES[t] ?? 'unknown';
+        const langs = TYPE_LANGUAGES[t] ?? '—';
+        console.log(`${t.padEnd(colW)}${sev.padEnd(sevW)}${langs}`);
+      }
+      console.log(`\n${types.length} finding types supported.\n`);
       process.exit(0);
     }
     // --html <path>: shorthand for --format html --output <path>.
