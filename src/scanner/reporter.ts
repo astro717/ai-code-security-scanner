@@ -55,6 +55,13 @@ export interface Finding {
   snippet?: string;
   message: string;
   file?: string;
+  /**
+   * Detection confidence score in the range [0.0, 1.0].
+   * High-specificity patterns (exact API matches, literal checks) use 0.9+.
+   * Broad heuristic patterns (generic regexes, keyword proximity) use lower values.
+   * Absent means the detector did not emit a confidence estimate.
+   */
+  confidence?: number;
 }
 
 export interface ScanSummary {

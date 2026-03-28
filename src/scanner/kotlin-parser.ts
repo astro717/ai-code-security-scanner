@@ -41,6 +41,8 @@ interface KotlinPattern {
   severity: Finding['severity'];
   pattern: RegExp;
   message: string;
+  /** Detection confidence [0.0–1.0]. High-specificity patterns use 0.9+, heuristics use lower values. */
+  confidence?: number;
 }
 
 const KOTLIN_PATTERNS: KotlinPattern[] = [
@@ -139,7 +141,7 @@ export function scanKotlin(result: KotlinParseResult): Finding[] {
     // Skip pure comment lines
     if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
 
-    for (const { type, severity, pattern, message } of KOTLIN_PATTERNS) {
+    for (const { type, severity, pattern, message, confidence } of KOTLIN_PATTERNS) {
       if (pattern.test(line)) {
         findings.push({
           type,
@@ -148,6 +150,7 @@ export function scanKotlin(result: KotlinParseResult): Finding[] {
           column: line.search(/\S/),
           snippet: trimmed.slice(0, 100),
           message,
+          ...(confidence !== undefined ? { confidence } : {}),
           file: result.filePath,
         });
       }

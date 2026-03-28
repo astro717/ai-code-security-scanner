@@ -46,6 +46,13 @@ interface RubyPattern {
   severity: Finding['severity'];
   pattern: RegExp;
   message: string;
+  /**
+   * Detection confidence [0.0–1.0].
+   * 0.9+ = highly specific pattern (exact API + dangerous argument shape).
+   * 0.7–0.89 = specific but could have false positives.
+   * 0.5–0.69 = heuristic / broad match.
+   */
+  confidence?: number;
 }
 
 const RUBY_PATTERNS: RubyPattern[] = [
@@ -57,6 +64,7 @@ const RUBY_PATTERNS: RubyPattern[] = [
     message:
       'ActiveRecord .where() called with string interpolation. User input in SQL strings leads ' +
       'to SQL injection. Use parameterised form: .where("column = ?", value) or a hash condition.',
+    confidence: 0.95,
   },
   {
     type: 'SQL_INJECTION',
@@ -65,6 +73,7 @@ const RUBY_PATTERNS: RubyPattern[] = [
     message:
       'Raw SQL query built with Ruby string interpolation. Use ActiveRecord parameterised ' +
       'queries or ActiveRecord::Base.sanitize_sql to prevent SQL injection.',
+    confidence: 0.90,
   },
   {
     type: 'SQL_INJECTION',
@@ -325,7 +334,7 @@ export function scanRuby(result: RubyParseResult): Finding[] {
     // Skip pure comments
     if (trimmed.startsWith('#')) return;
 
-    for (const { type, severity, pattern, message } of RUBY_PATTERNS) {
+    for (const { type, severity, pattern, message, confidence } of RUBY_PATTERNS) {
       if (pattern.test(line)) {
         findings.push({
           type,
@@ -335,6 +344,7 @@ export function scanRuby(result: RubyParseResult): Finding[] {
           snippet: trimmed.slice(0, 100),
           message,
           file: result.filePath,
+          ...(confidence !== undefined ? { confidence } : {}),
         });
       }
     }

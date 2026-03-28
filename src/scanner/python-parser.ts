@@ -41,6 +41,8 @@ interface PythonPattern {
   severity: Finding['severity'];
   pattern: RegExp;
   message: string;
+  /** Detection confidence [0.0–1.0]. High-specificity patterns use 0.9+, heuristics use lower values. */
+  confidence?: number;
 }
 
 const PYTHON_PATTERNS: PythonPattern[] = [
@@ -288,7 +290,7 @@ export function scanPython(result: PythonParseResult): Finding[] {
     // Skip pure comments
     if (trimmed.startsWith('#')) return;
 
-    for (const { type, severity, pattern, message } of PYTHON_PATTERNS) {
+    for (const { type, severity, pattern, message, confidence } of PYTHON_PATTERNS) {
       if (pattern.test(line)) {
         findings.push({
           type,
@@ -297,6 +299,7 @@ export function scanPython(result: PythonParseResult): Finding[] {
           column: line.search(/\S/),
           snippet: trimmed.slice(0, 100),
           message,
+          ...(confidence !== undefined ? { confidence } : {}),
           file: result.filePath,
         });
       }
