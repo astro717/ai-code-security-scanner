@@ -135,7 +135,7 @@ function renderFinding(f: Finding, anchorId?: string): string {
 
   const anchor = anchorId ? ` id="${anchorId}"` : '';
   return `
-    <div class="finding"${anchor} style="border-left: 4px solid ${color}; background: ${bg}; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;">
+    <div class="finding finding-row"${anchor} data-severity="${escapeHtml(f.severity)}" style="border-left: 4px solid ${color}; background: ${bg}; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${color};background:${color}22;padding:2px 8px;border-radius:3px;">${escapeHtml(f.severity)}</span>
         <code style="font-size:12px;color:#374151;background:#f3f4f6;padding:1px 6px;border-radius:3px;">${escapeHtml(f.type)}</code>
@@ -145,6 +145,31 @@ function renderFinding(f: Finding, anchorId?: string): string {
       <p style="margin:0;font-size:14px;color:#1f2937;">${escapeHtml(f.message)}</p>
       ${remediationBlock}
     </div>`;
+}
+
+/** Renders the interactive severity filter bar. */
+function renderSeverityFilterBar(findings: Finding[]): string {
+  const counts: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const f of findings) {
+    if (f.severity in counts) counts[f.severity]++;
+  }
+  const btnLabels: Record<string, string> = {
+    critical: `Critical (${counts['critical']})`,
+    high:     `High (${counts['high']})`,
+    medium:   `Medium (${counts['medium']})`,
+    low:      `Low (${counts['low']})`,
+  };
+  const buttons = (['critical', 'high', 'medium', 'low'] as const)
+    .filter((sev) => counts[sev] > 0)
+    .map((sev) => `<button class="sev-btn" data-sev="${sev}" title="Toggle ${sev} findings">${btnLabels[sev]}</button>`)
+    .join('');
+  return `
+  <div class="sev-filter-bar" role="toolbar" aria-label="Severity filter">
+    <span class="filter-label">Filter:</span>
+    <button class="sev-btn active" data-sev="all" title="Show all severities">All</button>
+    ${buttons}
+    <span id="filter-count" class="filter-count">${findings.length} findings shown</span>
+  </div>`;
 }
 
 /** Renders a file card with all its findings. */
@@ -321,7 +346,63 @@ export function buildHTMLReport(
     .meta { font-size: 13px; color: #6b7280; margin-bottom: 28px; }
     code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; }
     .section-title { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #374151; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #e5e7eb; }
+    /* ── Severity filter bar ───────────────────────────────────────────────── */
+    .sev-filter-bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:20px; padding:12px 16px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; }
+    .sev-filter-bar .filter-label { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:#6b7280; margin-right:4px; }
+    .sev-btn { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; padding:4px 12px; border-radius:4px; border:1.5px solid transparent; cursor:pointer; transition:all 0.12s; background:#f3f4f6; color:#374151; border-color:#d1d5db; }
+    .sev-btn:hover { opacity:0.8; }
+    .sev-btn.active { box-shadow:0 0 0 2px currentColor; }
+    .sev-btn[data-sev="critical"] { color:#dc2626; background:#fee2e2; border-color:#fca5a5; }
+    .sev-btn[data-sev="high"] { color:#ea580c; background:#ffedd5; border-color:#fdba74; }
+    .sev-btn[data-sev="medium"] { color:#ca8a04; background:#fef9c3; border-color:#fde047; }
+    .sev-btn[data-sev="low"] { color:#16a34a; background:#dcfce7; border-color:#86efac; }
+    .sev-btn[data-sev="all"] { color:#4f46e5; background:#eef2ff; border-color:#a5b4fc; }
+    .file-card[data-hidden] { display:none; }
+    .finding-row[data-hidden] { display:none; }
+    .filter-count { font-size:12px; color:#6b7280; margin-left:8px; }
   </style>
+  <script>
+    // Severity filter logic — runs after DOM is ready (inline, at end of body)
+    function initSevFilter() {
+      var btns = document.querySelectorAll('.sev-btn');
+      var active = new Set(['critical','high','medium','low']);
+      function applyFilter() {
+        var countEl = document.getElementById('filter-count');
+        var visible = 0;
+        document.querySelectorAll('.finding-row').forEach(function(row) {
+          var sev = row.getAttribute('data-severity');
+          if (active.has(sev)) { row.removeAttribute('data-hidden'); visible++; }
+          else row.setAttribute('data-hidden','1');
+        });
+        document.querySelectorAll('.file-card').forEach(function(card) {
+          var anyVisible = card.querySelectorAll('.finding-row:not([data-hidden])').length > 0;
+          if (anyVisible) card.removeAttribute('data-hidden');
+          else card.setAttribute('data-hidden','1');
+        });
+        if (countEl) countEl.textContent = visible + ' finding' + (visible !== 1 ? 's' : '') + ' shown';
+      }
+      btns.forEach(function(btn) {
+        var sev = btn.getAttribute('data-sev');
+        if (sev === 'all') {
+          btn.addEventListener('click', function() {
+            active = new Set(['critical','high','medium','low']);
+            btns.forEach(function(b) {
+              if (b.getAttribute('data-sev') !== 'all') b.classList.add('active');
+            });
+            applyFilter();
+          });
+        } else {
+          btn.classList.add('active');
+          btn.addEventListener('click', function() {
+            if (active.has(sev)) { active.delete(sev); btn.classList.remove('active'); }
+            else { active.add(sev); btn.classList.add('active'); }
+            applyFilter();
+          });
+        }
+      });
+    }
+    document.addEventListener('DOMContentLoaded', initSevFilter);
+  </script>
 </head>
 <body>
   <h1>Security Scan Report</h1>
@@ -332,6 +413,8 @@ export function buildHTMLReport(
   </div>
 
   ${renderSummaryBar(findings)}
+
+  ${findings.length > 0 ? renderSeverityFilterBar(findings) : ''}
 
   ${renderOwaspBreakdown(findings)}
 
