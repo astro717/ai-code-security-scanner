@@ -88,7 +88,7 @@ function validateRequestBody(
 
 const SCAN_BODY_SCHEMA: Record<string, FieldSchema> = {
   code:          { type: 'string', required: true },
-  filename:      { type: 'string' },
+  filename:      { type: 'string', required: true },
   packageJson:   { type: 'string' },
   aiExplain:     { type: 'boolean' },
   ignoreTypes:   { type: 'array', items: 'string' },
@@ -472,7 +472,7 @@ function deliverWebhook(
   })();
 }
 
-const app = express();
+export const app = express();
 const PORT = process.env.PORT ?? 3001;
 
 app.use(cors());
@@ -484,6 +484,16 @@ const PAYLOAD_LIMIT = '500kb';
 const PAYLOAD_LIMIT_BYTES = 500 * 1024;
 
 app.use(express.json({ limit: PAYLOAD_LIMIT }));
+
+// Convert express.json() 413 PayloadTooLargeError into our standard JSON error shape
+// so callers always get { error: '...' } instead of Express's default HTML/text response.
+app.use((err: { type?: string; status?: number }, req: express.Request, res: express.Response, next: express.NextFunction): void => {
+  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+    res.status(413).json({ error: `Payload too large. Maximum allowed size is ${PAYLOAD_LIMIT}.` });
+    return;
+  }
+  next(err);
+});
 
 // ── API key auth ──────────────────────────────────────────────────────────────
 // Protect all non-health endpoints with a Bearer token check.
@@ -527,7 +537,7 @@ app.use((req, res, next) => {
 // The value must be at least 32 characters to prevent accidental weak tokens.
 // If the env var is not set the bypass is disabled entirely.
 
-const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
+export const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
 
 if (INTERNAL_API_TOKEN && INTERNAL_API_TOKEN.length < 32) {
   console.warn(
@@ -1246,9 +1256,13 @@ app.get('/watch', (req, res) => {
   });
 });
 
-export const server = app.listen(PORT, () => {
-  console.log(`AI Security Scanner server running on http://localhost:${PORT}`);
-});
+// In test mode (NODE_ENV=test), do not start the HTTP server automatically.
+// Tests use supertest(app) directly to avoid port conflicts.
+export const server = process.env.NODE_ENV === 'test'
+  ? null
+  : app.listen(PORT, () => {
+      console.log(`AI Security Scanner server running on http://localhost:${PORT}`);
+    });
 
 // Graceful shutdown: drain connections before process exit so tests close
 // cleanly and production process managers can do zero-downtime restarts.

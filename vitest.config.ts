@@ -38,6 +38,12 @@ export default defineConfig({
     },
     // TypeScript support is built-in via Vite's esbuild transform.
     environment: 'node',
+    // Set NODE_ENV=test to prevent the server from auto-starting on import
+    // and expose a stable INTERNAL_API_TOKEN for rate-limit bypass in tests.
+    env: {
+      NODE_ENV: 'test',
+      INTERNAL_API_TOKEN: 'test-internal-token-for-ci',
+    },
     // forks pool: each test file runs in a child process. When the custom
     // test runner calls process.exit(1) at the end, only the child dies —
     // vitest captures the exit code and maps it to a test failure, which is
