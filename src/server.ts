@@ -1299,10 +1299,15 @@ export const server = process.env.NODE_ENV === 'test'
 // cleanly and production process managers can do zero-downtime restarts.
 function gracefulShutdown(signal: string): void {
   console.log(`[server] ${signal} received — closing HTTP server...`);
-  server.close(() => {
-    console.log('[server] HTTP server closed. Exiting.');
+  if (server) {
+    server.close(() => {
+      console.log('[server] HTTP server closed. Exiting.');
+      process.exit(0);
+    });
+  } else {
+    console.log('[server] No active HTTP server (test mode). Exiting.');
     process.exit(0);
-  });
+  }
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

@@ -14,9 +14,9 @@
  * Run with: npm run test:vitest
  */
 
-import { describe, test, expect, beforeAll, afterAll } from 'vitest';
-import http from 'http';
-import net from 'net';
+import { describe, test, expect } from 'vitest';
+import request from 'supertest';
+import { app } from '../../src/server';
 
 // ── Vulnerable JS fixture with multiple finding types ─────────────────────────
 
@@ -39,111 +39,16 @@ function generateToken() {
 }
 `;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const addr = srv.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-      srv.close((err) => (err ? reject(err) : resolve(port)));
-    });
-  });
-}
-
-interface ScanResponse {
-  statusCode: number;
-  body: unknown;
-}
-
-function post(port: number, urlPath: string, payload: unknown): Promise<ScanResponse> {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(payload);
-    const opts: http.RequestOptions = {
-      hostname: '127.0.0.1',
-      port,
-      path: urlPath,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(data),
-      },
-    };
-
-    const req = http.request(opts, (res) => {
-      let raw = '';
-      res.on('data', (chunk) => (raw += chunk));
-      res.on('end', () => {
-        try {
-          resolve({ statusCode: res.statusCode ?? 0, body: JSON.parse(raw) });
-        } catch {
-          resolve({ statusCode: res.statusCode ?? 0, body: raw });
-        }
-      });
-    });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
-  });
-}
-
-// ── Server lifecycle ──────────────────────────────────────────────────────────
-
-let serverPort: number;
-let serverHandle: http.Server | null = null;
-
-beforeAll(async () => {
-  serverPort = await getFreePort();
-
-  delete process.env.SERVER_API_KEY;
-  process.env.PORT = String(serverPort);
-
-  const origWarn = console.warn;
-  const origLog = console.log;
-  console.warn = () => {};
-  console.log = () => {};
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('ts-node/register');
-  } catch { /* already registered */ }
-
-  Object.keys(require.cache ?? {}).forEach((k) => {
-    if (k.includes('/src/server')) delete require.cache[k];
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require('../../src/server');
-  serverHandle = (mod?.default ?? mod?.server ?? null) as http.Server | null;
-
-  await new Promise((r) => setTimeout(r, 400));
-
-  console.warn = origWarn;
-  console.log = origLog;
-}, 10_000);
-
-afterAll(() => {
-  delete process.env.PORT;
-  return new Promise<void>((resolve) => {
-    if (serverHandle && typeof serverHandle.close === 'function') {
-      serverHandle.close(() => resolve());
-    } else {
-      resolve();
-    }
-  });
-});
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('/scan endpoint — SonarQube output validation', () => {
   test('scan returns findings that can be mapped to SonarQube issue structure', async () => {
-    const res = await post(serverPort, '/scan', {
+    const res = await request(app).post('/scan').send({
       code: VULNERABLE_JS,
       filename: 'app.js',
     });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.status).toBe(200);
     const body = res.body as { findings: Array<{ type: string; severity: string; message: string; line: number; column: number; file?: string }> };
     expect(Array.isArray(body.findings)).toBe(true);
     expect(body.findings.length).toBeGreaterThan(0);
@@ -182,12 +87,12 @@ describe('/scan endpoint — SonarQube output validation', () => {
   });
 
   test('SonarQube severity mapping: critical/high → MAJOR, medium → MINOR, low → INFO', async () => {
-    const res = await post(serverPort, '/scan', {
+    const res = await request(app).post('/scan').send({
       code: VULNERABLE_JS,
       filename: 'app.js',
     });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.status).toBe(200);
     const body = res.body as { findings: Array<{ severity: string }> };
     expect(body.findings.length).toBeGreaterThan(0);
 
@@ -200,12 +105,12 @@ describe('/scan endpoint — SonarQube output validation', () => {
   });
 
   test('findings include SQL_INJECTION, WEAK_CRYPTO, INSECURE_RANDOM for the fixture', async () => {
-    const res = await post(serverPort, '/scan', {
+    const res = await request(app).post('/scan').send({
       code: VULNERABLE_JS,
       filename: 'app.js',
     });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.status).toBe(200);
     const body = res.body as { findings: Array<{ type: string }> };
     const types = new Set(body.findings.map((f) => f.type));
 
@@ -215,12 +120,12 @@ describe('/scan endpoint — SonarQube output validation', () => {
   });
 
   test('SonarQube issue primaryLocation.filePath matches the submitted filename', async () => {
-    const res = await post(serverPort, '/scan', {
+    const res = await request(app).post('/scan').send({
       code: VULNERABLE_JS,
       filename: 'service.js',
     });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.status).toBe(200);
     const body = res.body as { findings: Array<{ type: string; severity: string; message: string; line: number; column: number; file?: string }> };
     expect(body.findings.length).toBeGreaterThan(0);
 
@@ -239,12 +144,12 @@ describe('/scan endpoint — SonarQube output validation', () => {
   });
 
   test('produces valid SonarQube JSON structure (issues wrapper)', async () => {
-    const res = await post(serverPort, '/scan', {
+    const res = await request(app).post('/scan').send({
       code: VULNERABLE_JS,
       filename: 'main.js',
     });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.status).toBe(200);
     const body = res.body as { findings: Array<{ type: string; severity: string; message: string; line: number; column: number; file?: string }> };
 
     // Build the full SonarQube payload as buildSonarQube() would

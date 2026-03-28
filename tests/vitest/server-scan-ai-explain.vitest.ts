@@ -9,24 +9,11 @@
  *   3. When aiExplain=false, no Anthropic call is made regardless of key.
  */
 
-import { describe, test, expect, beforeAll, afterAll, vi } from 'vitest';
-import http from 'http';
+import { describe, test, expect, vi } from 'vitest';
+import request from 'supertest';
+import { app } from '../../src/server';
 import https from 'https';
-import net from 'net';
 import { EventEmitter } from 'events';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const addr = srv.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-      srv.close((err) => (err ? reject(err) : resolve(port)));
-    });
-  });
-}
 
 function post(
   port: number,
@@ -51,9 +38,9 @@ function post(
         res.on('data', (chunk: Buffer) => (raw += chunk.toString()));
         res.on('end', () => {
           try {
-            resolve({ statusCode: res.statusCode ?? 0, body: JSON.parse(raw) });
+            resolve({ statusCode: res.status ?? 0, body: JSON.parse(raw) });
           } catch {
-            resolve({ statusCode: res.statusCode ?? 0, body: raw });
+            resolve({ statusCode: res.status ?? 0, body: raw });
           }
         });
       },
@@ -94,50 +81,6 @@ const token = Math.random();
 const secret = "hardcoded-api-key-12345678";
 `;
 
-// ── Server lifecycle ──────────────────────────────────────────────────────────
-
-let serverPort: number;
-let serverHandle: http.Server | null = null;
-
-beforeAll(async () => {
-  serverPort = await getFreePort();
-  delete process.env.SERVER_API_KEY;
-  process.env.PORT = String(serverPort);
-  process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key-for-vitest-stub-only';
-
-  try { require('ts-node/register'); } catch { /* already registered */ }
-  Object.keys(require.cache ?? {}).forEach((k) => {
-    if (k.includes('/src/server')) delete require.cache[k];
-  });
-
-  const origLog = console.log;
-  const origWarn = console.warn;
-  const origError = console.error;
-  console.log = () => {};
-  console.warn = () => {};
-  console.error = () => {};
-
-  const mod = require('../../src/server');
-  serverHandle = (mod?.default ?? mod?.server ?? null) as http.Server | null;
-  await new Promise((r) => setTimeout(r, 300));
-
-  console.log = origLog;
-  console.warn = origWarn;
-  console.error = origError;
-}, 15_000);
-
-afterAll(() => {
-  delete process.env.ANTHROPIC_API_KEY;
-  delete process.env.PORT;
-  return new Promise<void>((resolve) => {
-    if (serverHandle && typeof serverHandle.close === 'function') {
-      serverHandle.close(() => resolve());
-    } else {
-      resolve();
-    }
-  });
-});
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('POST /scan — aiExplain=true with stubbed Anthropic', () => {
@@ -156,7 +99,7 @@ describe('POST /scan — aiExplain=true with stubbed Anthropic', () => {
     const stub = makeAnthropicStub(anthropicResponse);
 
     try {
-      const { statusCode, body } = await post(serverPort, '/scan', {
+      const { statusCode, body } = await request(app).post('/scan').send({
         code: VULNERABLE_CODE,
         filename: 'test.ts',
         aiExplain: true,
@@ -184,7 +127,7 @@ describe('POST /scan — aiExplain=true with stubbed Anthropic', () => {
     const stub = makeAnthropicStub(anthropicResponse);
 
     try {
-      await post(serverPort, '/scan', {
+      await request(app).post('/scan').send({
         code: VULNERABLE_CODE,
         filename: 'test.ts',
         aiExplain: true,
@@ -199,7 +142,7 @@ describe('POST /scan — aiExplain=true with stubbed Anthropic', () => {
     const stub = vi.spyOn(https, 'request');
 
     try {
-      const { statusCode, body } = await post(serverPort, '/scan', {
+      const { statusCode, body } = await request(app).post('/scan').send({
         code: VULNERABLE_CODE,
         filename: 'test.ts',
         aiExplain: false,
@@ -221,7 +164,7 @@ describe('POST /scan — aiExplain=true without ANTHROPIC_API_KEY', () => {
     delete process.env.ANTHROPIC_API_KEY;
 
     try {
-      const { statusCode, body } = await post(serverPort, '/scan', {
+      const { statusCode, body } = await request(app).post('/scan').send({
         code: VULNERABLE_CODE,
         filename: 'test.ts',
         aiExplain: true,
