@@ -15,6 +15,8 @@
  *   - WEAK_CRYPTO (md5, sha1)
  *   - PATH_TRAVERSAL (filepath.Join with user input)
  *   - INSECURE_RANDOM (math/rand for security)
+ *   - PERFORMANCE_N_PLUS_ONE (DB query inside a loop)
+ *   - SSTI (template.Execute / template.Parse with user input)
  */
 
 import * as fs from 'fs';
@@ -173,6 +175,36 @@ const GO_PATTERNS: GoPattern[] = [
       'http.Redirect with a target derived from user input. Without validation, ' +
       'this allows open redirect attacks. Ensure the redirect target is a relative ' +
       'URL or belongs to a trusted domain.',
+  },
+
+  // N+1 query pattern — DB call inside a for/range loop
+  {
+    type: 'PERFORMANCE_N_PLUS_ONE',
+    severity: 'low',
+    pattern: /for\s+\w.*:=\s*range\s+\w+[^{]*\{[^}]*(?:\.Query|\.Exec|\.QueryRow|\.Find|\.First|Db\.)/,
+    message:
+      'Database query inside a range loop — this is an N+1 query pattern. ' +
+      'Each iteration issues a separate DB round-trip. Use a JOIN or batch query ' +
+      '(e.g. WHERE id IN (...)) to fetch all required data in a single query.',
+  },
+
+  // SSTI via text/template or html/template executed with user-controlled data
+  {
+    type: 'SSTI',
+    severity: 'critical',
+    pattern: /\.Execute(?:Template)?\s*\([^)]*(?:r\.URL|r\.Form|r\.Body|request\.|req\.|input|param|query)/i,
+    message:
+      'Go template executed with what appears to be user-controlled data. ' +
+      'If the template string itself is user-supplied, this enables server-side ' +
+      'template injection. Always use predefined template files from disk.',
+  },
+  {
+    type: 'SSTI',
+    severity: 'critical',
+    pattern: /\bParse\s*\(\s*(?:r\.|request\.|input|body|param|query)/i,
+    message:
+      'Go template parsed from user-controlled input — server-side template injection. ' +
+      'Template source must come from trusted static files, not user input.',
   },
 ];
 
