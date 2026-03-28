@@ -78,6 +78,7 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   // A01 — Broken Access Control
   OPEN_REDIRECT:          'A01:2021',
   PATH_TRAVERSAL:         'A01:2021',
+  PATH_TRAVERSAL_CS:      'A01:2021',
   MASS_ASSIGNMENT:        'A01:2021',
 
   // A02 — Cryptographic Failures
@@ -107,6 +108,8 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   CORS_MISCONFIGURATION:  'A04:2021',
   BUFFER_OVERFLOW:        'A04:2021',
   INSECURE_ASSERT:        'A04:2021',
+  PERFORMANCE_N_PLUS_ONE: 'A04:2021',
+  INSECURE_SHARED_PREFS:  'A04:2021',
 
   // A05 — Security Misconfiguration
   JWT_NONE_ALGORITHM:     'A05:2021',
@@ -126,7 +129,6 @@ export const FINDING_TO_OWASP: Record<string, string> = {
 
   // Additional types — Kotlin / Android
   SQL_INJECTION_CS:       'A03:2021',
-  INSECURE_SHARED_PREFS:  'A02:2021',
   WEBVIEW_LOAD_URL:       'A03:2021',
 };
 
