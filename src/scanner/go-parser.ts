@@ -177,22 +177,15 @@ const GO_PATTERNS: GoPattern[] = [
       'URL or belongs to a trusted domain.',
   },
 
-  // N+1 query pattern — DB call inside a for/range loop
-  {
-    type: 'PERFORMANCE_N_PLUS_ONE',
-    severity: 'low',
-    pattern: /for\s+\w.*:=\s*range\s+\w+[^{]*\{[^}]*(?:\.Query|\.Exec|\.QueryRow|\.Find|\.First|Db\.)/,
-    message:
-      'Database query inside a range loop — this is an N+1 query pattern. ' +
-      'Each iteration issues a separate DB round-trip. Use a JOIN or batch query ' +
-      '(e.g. WHERE id IN (...)) to fetch all required data in a single query.',
-  },
+  // N+1 query pattern — detected statefully in scanGo (see loop-tracking logic below)
+  // This placeholder entry is not used directly; the stateful detector handles it.
+
 
   // SSTI via text/template or html/template executed with user-controlled data
   {
     type: 'SSTI',
     severity: 'critical',
-    pattern: /\.Execute(?:Template)?\s*\([^)]*(?:r\.URL|r\.Form|r\.Body|request\.|req\.|input|param|query)/i,
+    pattern: /\.Execute(?:Template)?\s*\([^)]*(?:r\.URL|r\.Form|r\.Body|request\.|req\.|input|param|query|body)/i,
     message:
       'Go template executed with what appears to be user-controlled data. ' +
       'If the template string itself is user-supplied, this enables server-side ' +
@@ -215,12 +208,51 @@ const GO_PATTERNS: GoPattern[] = [
 export function scanGo(result: GoParseResult): Finding[] {
   const findings: Finding[] = [];
 
+  // Stateful N+1 detection: track whether we are inside a for-range loop.
+  // We use a simple brace-depth counter reset when we enter a range loop.
+  let inRangeLoop = false;
+  let loopBraceDepth = 0;
+
   result.lines.forEach((line, idx) => {
     const lineNum = idx + 1;
     const trimmed = line.trim();
 
     // Skip pure comments
     if (trimmed.startsWith('//')) return;
+
+    // ── Stateful for-range N+1 detection ──────────────────────────────────────
+    const openBraces = (line.match(/\{/g) ?? []).length;
+    const closeBraces = (line.match(/\}/g) ?? []).length;
+
+    // Detect entry into a for-range loop
+    if (/\bfor\b.*:=\s*range\b/.test(line)) {
+      inRangeLoop = true;
+      loopBraceDepth = openBraces - closeBraces;
+    } else if (inRangeLoop) {
+      loopBraceDepth += openBraces - closeBraces;
+      if (loopBraceDepth <= 0) {
+        inRangeLoop = false;
+        loopBraceDepth = 0;
+      } else {
+        // Check for DB query calls inside the loop body
+        const n1Patterns = /\b(?:db|gorm|sqlDB|sqlDb)\s*\.\s*(?:Query|QueryRow|Exec|Find|First|Where|Raw)\s*\(/i;
+        if (n1Patterns.test(line)) {
+          findings.push({
+            type: 'PERFORMANCE_N_PLUS_ONE',
+            severity: 'low',
+            line: lineNum,
+            column: line.search(/\S/),
+            snippet: trimmed.slice(0, 100),
+            message:
+              'Database query inside a range loop — this is an N+1 query pattern. ' +
+              'Each iteration issues a separate DB round-trip. Use a JOIN or batch query ' +
+              '(e.g. WHERE id IN (...)) to fetch all required data in a single query.',
+            file: result.filePath,
+          });
+        }
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     for (const { type, severity, pattern, message, confidence } of GO_PATTERNS) {
       if (pattern.test(line)) {
