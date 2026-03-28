@@ -47,7 +47,7 @@ interface RustPattern {
 }
 
 const RUST_PATTERNS: RustPattern[] = [
-  // unsafe blocks with raw pointer dereferences
+  // unsafe blocks with raw pointer dereferences (single-line form: unsafe { let x = *ptr; })
   {
     type: 'BUFFER_OVERFLOW',
     severity: 'high',
@@ -56,6 +56,16 @@ const RUST_PATTERNS: RustPattern[] = [
       'Raw pointer dereference inside unsafe block. Ensure pointer arithmetic ' +
       'and bounds are validated to prevent out-of-bounds memory access.',
     confidence: 0.85,
+  },
+  // Raw pointer dereference as a statement (catches multi-line unsafe blocks)
+  {
+    type: 'BUFFER_OVERFLOW',
+    severity: 'high',
+    pattern: /(?:let\s+\w+\s*=\s*\*\s*\w+|=\s*\*\s*(?:mut\s+)?\w+\b)/,
+    message:
+      'Raw pointer dereference detected. Inside an unsafe block this can cause ' +
+      'out-of-bounds memory access if the pointer is not properly validated.',
+    confidence: 0.80,
   },
   // ptr::copy / ptr::write — unsafe buffer operations
   {
@@ -140,7 +150,7 @@ const RUST_PATTERNS: RustPattern[] = [
   {
     type: 'SECRET_HARDCODED',
     severity: 'high',
-    pattern: /(?:api_key|api_secret|password|secret|token|private_key)\s*(?::|=)\s*"[A-Za-z0-9+/=_\-]{12,}"/,
+    pattern: /(?:api_key|api_secret|password|secret|token|private_key)\s*(?::[^=\n]{0,30})?=\s*"[A-Za-z0-9+\/=_\-!@#$%^&*]{10,}"/,
     message:
       'Possible hardcoded secret in string literal. Move secrets to environment ' +
       'variables or a secrets manager (e.g. std::env::var, HashiCorp Vault).',

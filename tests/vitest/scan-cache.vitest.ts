@@ -194,3 +194,44 @@ describe('scan-cache — LRU eviction', () => {
     expect(getCachedFindings('/fake/path/b.ts', 'content-b')).not.toBeNull();
   });
 });
+
+// ── Regression: clearCache + re-init with different TTL ──────────────────────
+
+describe('scan-cache — clearCache regression: re-init with different TTL', () => {
+  test('re-initialising with a shorter TTL after clearCache applies the new TTL', () => {
+    // This is a regression test for the bug where _cacheDir was not reset in
+    // clearCache(), causing initCache() to skip re-initialisation (it assumed
+    // the same cacheDir meant the cache was still valid) and the new TTL was
+    // silently ignored.
+
+    // 1. Init with a very long TTL (1 hour)
+    initCache({ cacheDir: tmpDir, cacheTtlMs: 60 * 60 * 1000 });
+    setCachedFindings(FAKE_FILE, FAKE_CONTENT_A, FAKE_FINDINGS);
+
+    // 2. Clear and re-init with 1ms TTL (effectively zero — expires immediately)
+    clearCache();
+    initCache({ cacheDir: tmpDir, cacheTtlMs: 1 });
+
+    // Give the 1ms TTL time to expire
+    const start = Date.now();
+    while (Date.now() - start < 5) { /* busy-wait 5ms */ }
+
+    // 3. The entry should be expired under the new TTL
+    const result = getCachedFindings(FAKE_FILE, FAKE_CONTENT_A);
+    expect(result).toBeNull();
+  });
+
+  test('re-initialising with a longer TTL after clearCache applies the new TTL', () => {
+    // Init with 1ms TTL
+    initCache({ cacheDir: tmpDir, cacheTtlMs: 1 });
+    // Wait for it to "expire conceptually" then clear and upgrade TTL
+    clearCache();
+    // Re-init with long TTL and verify the new entries are cached properly
+    initCache({ cacheDir: tmpDir, cacheTtlMs: 60 * 60 * 1000 });
+
+    setCachedFindings(FAKE_FILE, FAKE_CONTENT_B, FAKE_FINDINGS);
+    const result = getCachedFindings(FAKE_FILE, FAKE_CONTENT_B);
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(1);
+  });
+});
