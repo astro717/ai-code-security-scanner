@@ -349,6 +349,7 @@ ${indent}    raise ValueError(${msg})`;
       const fixed = line.replace(/eval\s*\(([^)]+)\)/, 'ast.literal_eval($1)');
       return fixed !== line ? fixed : null;
     },
+  },
 
   // ── SSTI (Python): render_template_string(var) → note-only fix ────────────
   // Flask's render_template_string() is dangerous when its argument is

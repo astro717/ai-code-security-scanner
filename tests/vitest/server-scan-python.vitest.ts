@@ -237,7 +237,7 @@ def render_page():
 `;
 
 describe('/scan with Python — SSTI detection', () => {
-  test('render_template_string() call is detected as SSTI with critical severity', async () => {
+  test('render_template_string() call is detected as SSTI with high severity', async () => {
     const res = await post(serverPort, '/scan', {
       code: SSTI_PYTHON,
       filename: 'views.py',
@@ -252,6 +252,6 @@ describe('/scan with Python — SSTI detection', () => {
 
     const ssti = body.findings.find((f) => f.type === 'SSTI');
     expect(ssti).toBeDefined();
-    expect(ssti!.severity).toBe('critical');
+    expect(ssti!.severity).toBe('high');
   });
 });

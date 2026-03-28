@@ -644,7 +644,8 @@ describe('applyFixes — EVAL_INJECTION (.py files → ast.literal_eval)', () =>
 
     const updated = fs.readFileSync(filePath, 'utf-8');
     expect(updated).toContain('ast.literal_eval(user_input)');
-    expect(updated).not.toContain('eval(user_input)');
+    // Verify the bare eval( call (without ast.literal_ prefix) is no longer present
+    expect(updated).not.toMatch(/(?<!literal_)eval\(user_input\)/);
   });
 
   test('replacement in .py uses ast.literal_eval, not JSON.parse', () => {
