@@ -81,7 +81,9 @@ const FIX_RULES: FixRule[] = [
     transform(line: string, finding: Finding): string | null {
       // Only handle simple eval(identifier) or eval(variable) patterns.
       // Do not attempt to rewrite new Function() or setTimeout(str) — too risky.
-      const evalMatch = line.match(/\beval\s*\(([^)]+)\)/);
+      // Use a negative lookbehind for '.' and word chars so we don't match
+      // already-replaced text like 'ast.literal_eval(...)'.
+      const evalMatch = line.match(/(?<![.\w])eval\s*\(([^)]+)\)/);
       if (!evalMatch) return null;
 
       const inner = evalMatch[1]?.trim() ?? '';
@@ -91,11 +93,11 @@ const FIX_RULES: FixRule[] = [
 
       // Python files: use ast.literal_eval instead of JSON.parse
       if (path.extname(finding.file ?? '').toLowerCase() === '.py') {
-        const fixed = line.replace(/\beval\s*\(([^)]+)\)/, 'ast.literal_eval($1)');
+        const fixed = line.replace(/(?<![.\w])eval\s*\(([^)]+)\)/, 'ast.literal_eval($1)');
         return fixed !== line ? fixed : null;
       }
 
-      const fixed = line.replace(/\beval\s*\(([^)]+)\)/, `JSON.parse($1)`);
+      const fixed = line.replace(/(?<![.\w])eval\s*\(([^)]+)\)/, `JSON.parse($1)`);
       return fixed !== line ? fixed : null;
     },
   },
@@ -341,12 +343,13 @@ ${indent}    raise ValueError(${msg})`;
     types: ['EVAL_INJECTION_PY'],
     description: 'Replace eval(<expr>) with ast.literal_eval(<expr>) in Python files',
     transform(line: string): string | null {
-      const evalMatch = line.match(/eval\s*\(([^)]+)\)/);
+      // Use a negative lookbehind to avoid re-matching already-replaced text like 'ast.literal_eval(...)'.
+      const evalMatch = line.match(/(?<![.\w])eval\s*\(([^)]+)\)/);
       if (!evalMatch) return null;
       const inner = evalMatch[1]?.trim() ?? '';
       // Skip literal string arguments — they are not dynamic injection
       if (/^['"`]/.test(inner)) return null;
-      const fixed = line.replace(/eval\s*\(([^)]+)\)/, 'ast.literal_eval($1)');
+      const fixed = line.replace(/(?<![.\w])eval\s*\(([^)]+)\)/, 'ast.literal_eval($1)');
       return fixed !== line ? fixed : null;
     },
   },

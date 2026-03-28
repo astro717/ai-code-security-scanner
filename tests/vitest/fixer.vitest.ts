@@ -305,9 +305,9 @@ describe('applyFixes — INSECURE_RANDOM crypto import', () => {
 // ── Python EVAL_INJECTION fixes — ast.literal_eval ──────────────────────────────
 // The fixer applies ast.literal_eval(x) for .py files, NOT JSON.parse(x).
 
-describe('applyFixes — EVAL_INJECTION (.py files)', () => {
-  test('replaces eval(x) with ast.literal_eval(x) in a Python file', () => {
-    const code = 'x = eval(input())\n';
+describe('applyFixes — EVAL_INJECTION (.py files → ast.literal_eval)', () => {
+  test('replaces eval(x) with ast.literal_eval(x) in a .py file', () => {
+    const code = 'result = eval(user_input)\n';
     const filePath = writeTempFile('script.py', code);
     const finding = makeFinding({ type: 'EVAL_INJECTION', line: 1, file: filePath });
 
@@ -316,27 +316,26 @@ describe('applyFixes — EVAL_INJECTION (.py files)', () => {
     expect(results[0]!.applied).toBe(true);
 
     const updated = fs.readFileSync(filePath, 'utf-8');
-    expect(updated).toContain('ast.literal_eval(input())');
-    expect(updated).not.toContain('JSON.parse(');
-    // Bare eval( (without ast.literal_ prefix) should be gone
-    expect(updated).not.toMatch(/(?<!literal_)eval\(/);
+    expect(updated).toContain('ast.literal_eval(user_input)');
+    // Check no standalone eval( call remains (ast.literal_eval is allowed — it uses a dot prefix)
+    expect(updated).not.toMatch(/(?<![.\w])eval\(user_input\)/);
   });
 
-  test('replaces eval(userInput) with ast.literal_eval(userInput) in a Python file', () => {
-    const code = 'result = eval(userInput)\n';
-    const filePath = writeTempFile('process.py', code);
+  test('replacement in .py uses ast.literal_eval, not JSON.parse', () => {
+    const code = 'data = eval(request_body)\n';
+    const filePath = writeTempFile('view.py', code);
     const finding = makeFinding({ type: 'EVAL_INJECTION', line: 1, file: filePath });
 
     const results = applyFixes([finding], false);
     expect(results[0]!.applied).toBe(true);
 
     const updated = fs.readFileSync(filePath, 'utf-8');
-    expect(updated).toContain('ast.literal_eval(userInput)');
-    expect(updated).not.toContain('JSON.parse(');
+    expect(updated).toContain('ast.literal_eval(request_body)');
+    expect(updated).not.toContain('JSON.parse');
   });
 
-  test('dry-run mode does NOT write the Python file', () => {
-    const code = 'x = eval(input())\n';
+  test('dry-run does NOT write the .py file', () => {
+    const code = 'result = eval(user_input)\n';
     const filePath = writeTempFile('dry.py', code);
     const finding = makeFinding({ type: 'EVAL_INJECTION', line: 1, file: filePath });
 
@@ -344,16 +343,18 @@ describe('applyFixes — EVAL_INJECTION (.py files)', () => {
     expect(results[0]!.applied).toBe(true);
 
     const updated = fs.readFileSync(filePath, 'utf-8');
-    expect(updated).toContain('eval(input())');
-    expect(updated).not.toContain('ast.literal_eval(');
+    // dry-run: file should be unchanged — still contains the original eval(
+    expect(updated).toContain('eval(user_input)');
+    expect(updated).not.toContain('ast.literal_eval');
   });
 
-  test('does NOT replace literal-string eval in Python files', () => {
-    const code = "result = eval('1+1')\n";
+  test('does NOT replace eval with a string literal argument in .py file', () => {
+    const code = "result = eval('1 + 1')\n";
     const filePath = writeTempFile('literal.py', code);
     const finding = makeFinding({ type: 'EVAL_INJECTION', line: 1, file: filePath });
 
     const results = applyFixes([finding], false);
+    // String literal evals are not dynamic injection — fixer should skip
     expect(results[0]!.applied).toBe(false);
   });
 
@@ -367,6 +368,42 @@ describe('applyFixes — EVAL_INJECTION (.py files)', () => {
 
     expect(diff).toContain('-value = eval(data)');
     expect(diff).toContain('+value = ast.literal_eval(data)');
+  });
+
+  test('.ts files with EVAL_INJECTION still use JSON.parse, not ast.literal_eval', () => {
+    const code = 'const data = eval(userInput);\n';
+    const filePath = writeTempFile('handler.ts', code);
+    const finding = makeFinding({ type: 'EVAL_INJECTION', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('JSON.parse(userInput)');
+    expect(updated).not.toContain('ast.literal_eval');
+  });
+
+  test('applies fix to the correct line in a multi-line .py file', () => {
+    const code = [
+      'import os',
+      'import ast',
+      '',
+      'def process(user_input):',
+      '    result = eval(user_input)',
+      '    return result',
+    ].join('\n') + '\n';
+    const filePath = writeTempFile('multi.py', code);
+    const finding = makeFinding({ type: 'EVAL_INJECTION', line: 5, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    const lines = updated.split('\n');
+    expect(lines[4]).toContain('ast.literal_eval(user_input)');
+    // Other lines untouched
+    expect(lines[0]).toBe('import os');
+    expect(lines[3]).toBe('def process(user_input):');
   });
 });
 
