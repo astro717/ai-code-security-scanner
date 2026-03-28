@@ -714,6 +714,7 @@ program
         XML_INJECTION: 'high', LDAP_INJECTION: 'high', BUFFER_OVERFLOW: 'high',
         MASS_ASSIGNMENT: 'high', FORMAT_STRING: 'high', SSTI: 'critical',
         INSECURE_SHARED_PREFS: 'medium', WEBVIEW_LOAD_URL: 'high', PERFORMANCE_N_PLUS_ONE: 'low',
+        UNSAFE_WEBVIEW: 'high',
       };
       // Language coverage per finding type.
       const TYPE_LANGUAGES: Record<string, string> = {
@@ -734,10 +735,10 @@ program
         INSECURE_BINDING: 'Python', XML_INJECTION: 'Python, Java, C#',
         LDAP_INJECTION: 'Python, Java', BUFFER_OVERFLOW: 'C/C++, Java',
         MASS_ASSIGNMENT: 'Ruby', FORMAT_STRING: 'C/C++, Python',
-        SSTI: 'Python, Ruby, Java', INSECURE_SHARED_PREFS: 'Kotlin/Android',
-        WEBVIEW_LOAD_URL: 'Kotlin/Android', PERFORMANCE_N_PLUS_ONE: 'Kotlin/Android, Ruby',
+        SSTI: 'Python, Ruby, Java, Go', INSECURE_SHARED_PREFS: 'Kotlin/Android',
+        WEBVIEW_LOAD_URL: 'Kotlin/Android', PERFORMANCE_N_PLUS_ONE: 'Kotlin/Android, Ruby, Go, Java',
+        UNSAFE_WEBVIEW: 'Kotlin/Android',
       };
-
       const SEV_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
       const types = [...KNOWN_TYPES].sort((a, b) => {
         const sa = SEV_ORDER[TYPE_SEVERITIES[a] ?? 'low'] ?? 3;
