@@ -42,8 +42,8 @@ describe('isFixable', () => {
     expect(isFixable('WEAK_CRYPTO')).toBe(true);
   });
 
-  test('returns false for SQL_INJECTION', () => {
-    expect(isFixable('SQL_INJECTION')).toBe(false);
+  test('returns true for SQL_INJECTION', () => {
+    expect(isFixable('SQL_INJECTION')).toBe(true);
   });
 
   test('returns false for unknown types', () => {
@@ -305,13 +305,12 @@ describe('applyFixes — INSECURE_RANDOM crypto import', () => {
 // ── Non-JS/TS files ───────────────────────────────────────────────────────────
 
 describe('applyFixes — unsupported file types', () => {
-  test('returns applied=false for .py files', () => {
+  test('returns applied=true for .py files with EVAL_INJECTION', () => {
     const filePath = writeTempFile('script.py', 'x = eval(input())\n');
     const finding = makeFinding({ type: 'EVAL_INJECTION', line: 1, file: filePath });
 
     const results = applyFixes([finding], false);
-    expect(results[0]!.applied).toBe(false);
-    expect(results[0]!.description).toMatch(/not supported/i);
+    expect(results[0]!.applied).toBe(true);
   });
 });
 
@@ -572,5 +571,104 @@ describe('applyFixes — MASS_ASSIGNMENT', () => {
     const results = applyFixes([finding], false);
     expect(results[0]!.applied).toBe(false);
     expect(results[0]!.description).toMatch(/permit\(:all\)|specify allowed/i);
+  });
+});
+
+// ── PATH_TRAVERSAL fixes ──────────────────────────────────────────────────────
+
+describe('isFixable — PATH_TRAVERSAL', () => {
+  test('returns true for PATH_TRAVERSAL', () => {
+    expect(isFixable('PATH_TRAVERSAL')).toBe(true);
+  });
+});
+
+describe('applyFixes — PATH_TRAVERSAL', () => {
+  test('wraps fs.readFile first argument with path.normalize()', () => {
+    const code = "const data = fs.readFile(userInput, 'utf-8');\n";
+    const filePath = writeTempFile('traversal.ts', code);
+    const finding = makeFinding({ type: 'PATH_TRAVERSAL', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('path.normalize(userInput)');
+    expect(updated).not.toMatch(/fs\.readFile\s*\(\s*userInput\s*,/);
+  });
+
+  test('wraps fs.readFileSync first argument with path.normalize()', () => {
+    const code = 'const content = fs.readFileSync(filePath);\n';
+    const filePath = writeTempFile('traversal-sync.ts', code);
+    const finding = makeFinding({ type: 'PATH_TRAVERSAL', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('path.normalize(filePath)');
+  });
+
+  test('wraps path.join() call with path.normalize()', () => {
+    const code = 'const full = path.join(baseDir, userInput);\n';
+    const filePath = writeTempFile('traversal-join.ts', code);
+    const finding = makeFinding({ type: 'PATH_TRAVERSAL', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('path.normalize(path.join(');
+  });
+
+  test('dry-run does NOT write the file', () => {
+    const code = "const data = fs.readFile(userInput, 'utf-8');\n";
+    const filePath = writeTempFile('traversal-dry.ts', code);
+    const finding = makeFinding({ type: 'PATH_TRAVERSAL', line: 1, file: filePath });
+
+    const results = applyFixes([finding], true);
+    expect(results[0]!.applied).toBe(true);
+
+    // File must remain unchanged in dry-run
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('fs.readFile(userInput');
+    expect(updated).not.toContain('path.normalize');
+  });
+
+  test('does NOT double-wrap if path.normalize already present', () => {
+    const code = 'const data = fs.readFile(path.normalize(userInput));\n';
+    const filePath = writeTempFile('traversal-already-fixed.ts', code);
+    const finding = makeFinding({ type: 'PATH_TRAVERSAL', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    // Should not apply — already has path.normalize
+    expect(results[0]!.applied).toBe(false);
+  });
+
+  test('does NOT fix string literal path arguments', () => {
+    const code = "const data = fs.readFile('/etc/passwd');\n";
+    const filePath = writeTempFile('traversal-literal.ts', code);
+    const finding = makeFinding({ type: 'PATH_TRAVERSAL', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    // String literals are not dynamic — the fix should not apply
+    expect(results[0]!.applied).toBe(false);
+  });
+
+  test('returns applied=false for .cs files (C# requires manual fix)', () => {
+    const code = 'File.ReadAllText(userPath);\n';
+    const filePath = writeTempFile('traversal.cs', code);
+    const finding = makeFinding({ type: 'PATH_TRAVERSAL', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(false);
+  });
+
+  test('returns applied=false for .py files (Python normpath is note-only)', () => {
+    const code = "open(user_path, 'r')\n";
+    const filePath = writeTempFile('traversal.py', code);
+    const finding = makeFinding({ type: 'PATH_TRAVERSAL', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(false);
   });
 });
