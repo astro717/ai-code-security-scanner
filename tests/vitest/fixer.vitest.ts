@@ -314,6 +314,51 @@ describe('applyFixes — unsupported file types', () => {
   });
 });
 
+// ── Kotlin and Ruby extension guard ──────────────────────────────────────────
+
+describe('applyFixes — .kt and .rb extension support', () => {
+  test('processes (does not skip) a finding in a .kt file', () => {
+    // INSECURE_RANDOM — replace Math.random() equivalent; the file is processed
+    // because .kt is now in FIXABLE_EXTENSIONS.
+    const code = 'val token = Math.random()\n';
+    const filePath = writeTempFile('utils.kt', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
+
+    // applyFixes should attempt the fix (not return an empty array due to extension guard)
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+  });
+
+  test('processes (does not skip) a finding in a .kts file', () => {
+    const code = 'val token = Math.random()\n';
+    const filePath = writeTempFile('build.kts', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+  });
+
+  test('processes (does not skip) a finding in a .rb file', () => {
+    const code = "token = rand\n";
+    const filePath = writeTempFile('util.rb', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+  });
+
+  test('returns applied=false for an unsupported extension such as .go', () => {
+    const code = 'token := rand.Float64()\n';
+    const filePath = writeTempFile('util.go', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
+
+    // .go is not in FIXABLE_EXTENSIONS — applyFixes returns a result with applied=false
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.applied).toBe(false);
+  });
+});
+
 // ── Missing files ─────────────────────────────────────────────────────────────
 
 describe('applyFixes — edge cases', () => {
@@ -670,5 +715,51 @@ describe('applyFixes — PATH_TRAVERSAL', () => {
 
     const results = applyFixes([finding], false);
     expect(results[0]!.applied).toBe(false);
+  });
+});
+
+// ── .kt and .rb extension guard ───────────────────────────────────────────────
+
+describe('applyFixes — .kt and .rb files are processed (not skipped)', () => {
+  test('processes INSECURE_RANDOM finding in a .kt file', () => {
+    const code = 'val token = Math.random();\n';
+    const filePath = writeTempFile('insecure.kt', code);
+    const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('crypto.randomBytes(32)');
+    expect(updated).not.toContain('Math.random()');
+  });
+
+  test('processes WEAK_CRYPTO finding in a .rb file', () => {
+    const code = "h = crypto.createHash('md5').digest('hex');\n";
+    const filePath = writeTempFile('weak.rb', code);
+    const finding = makeFinding({ type: 'WEAK_CRYPTO', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain("createHash('sha256')");
+    expect(updated).not.toContain("createHash('md5')");
+  });
+
+  test('processes EVAL_INJECTION finding in a .kts file', () => {
+    const code = 'val data = eval(userInput);\n';
+    const filePath = writeTempFile('script.kts', code);
+    const finding = makeFinding({ type: 'EVAL_INJECTION', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('JSON.parse(userInput)');
+    expect(updated).not.toContain('eval(');
   });
 });

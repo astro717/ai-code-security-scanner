@@ -497,6 +497,11 @@ if (!SERVER_API_KEY) {
     '[auth] WARNING: SERVER_API_KEY is not set. ' +
     'All endpoints are publicly accessible — set this variable in production.',
   );
+} else if (SERVER_API_KEY.length < 32) {
+  console.warn(
+    '[auth] WARNING: SERVER_API_KEY is shorter than 32 characters. ' +
+    'Use a long random value to prevent token guessing.',
+  );
 }
 
 app.use((req, res, next) => {

@@ -210,3 +210,40 @@ describe('server auth — SERVER_API_KEY is set', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+// ── Test suite: SERVER_API_KEY short key warning ──────────────────────────────
+
+describe('server auth — SERVER_API_KEY shorter than 32 characters emits warning', () => {
+  test('console.warn is called when SERVER_API_KEY is set but shorter than 32 chars', async () => {
+    const SHORT_KEY = 'short-key';
+    const warnings: string[] = [];
+
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    };
+
+    process.env.SERVER_API_KEY = SHORT_KEY;
+
+    // Clear module cache so server.ts re-evaluates with the new env value
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('ts-node/register');
+    } catch { /* already registered */ }
+    Object.keys(require.cache ?? {}).forEach((k) => {
+      if (k.includes('/src/server')) delete require.cache[k];
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../src/server');
+
+    // Give the module time to evaluate and emit warnings
+    await new Promise((r) => setTimeout(r, 200));
+
+    console.warn = origWarn;
+    delete process.env.SERVER_API_KEY;
+
+    const shortKeyWarning = warnings.find((w) => w.includes('shorter than 32 characters'));
+    expect(shortKeyWarning).toBeDefined();
+  });
+});
