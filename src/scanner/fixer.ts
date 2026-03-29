@@ -629,6 +629,52 @@ ${indent}    raise ValueError(${msg})`;
       return fixed !== line ? fixed : null;
     },
   },
+
+  // ── BUFFER_OVERFLOW (Rust): raw pointer deref / unsafe arithmetic → note ──
+  {
+    types: ['BUFFER_OVERFLOW'],
+    description: 'Add TODO comment to replace unsafe pointer operation with safe Rust alternative',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+
+      // Match unsafe raw pointer patterns: *ptr, ptr.offset, ptr.add, ptr::read/write
+      if (!/\*\s*\w+|\.offset\s*\(|\.add\s*\(|ptr::\w+|slice::from_raw_parts/.test(line)) return null;
+      if (/TODO.*BUFFER_OVERFLOW|SAFETY:.*bounds/.test(line)) return null;
+
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(BUFFER_OVERFLOW): replace raw pointer operation with safe Rust alternative.\n` +
+        `${indent}// Consider using slices, Vec, or checked indexing (.get()) instead of raw pointers.\n` +
+        line
+      );
+    },
+  },
+
+  // ── SECRET_HARDCODED (Rust): hardcoded credentials → environment variable ──
+  {
+    types: ['SECRET_HARDCODED'],
+    description: 'Replace hardcoded Rust secret with std::env::var() lookup',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+
+      // Match: let api_key = "sk-..."; or const PASSWORD: &str = "...";
+      if (!/(?:let|const|static)\s+\w*(?:key|secret|password|token|api_key)\w*\s*(?::\s*&?str\s*)?=\s*"/.test(line)) return null;
+      if (/std::env::var|env!|dotenv/.test(line)) return null;
+
+      // Extract variable name
+      const varMatch = line.match(/(?:let|const|static)\s+(\w+)/);
+      if (!varMatch) return null;
+      const varName = varMatch[1]!;
+      const envName = varName.toUpperCase();
+
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}let ${varName} = std::env::var("${envName}").expect("${envName} must be set");`
+      );
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────

@@ -37,6 +37,7 @@ import { parseRubyCode, scanRuby } from './scanner/ruby-parser';
 import { parseKotlinCode, scanKotlin } from './scanner/kotlin-parser';
 import { parseSwiftCode, scanSwift } from './scanner/swift-parser';
 import { parseRustCode, scanRust } from './scanner/rust-parser';
+import { initCache, getCachedFindings, setCachedFindings } from './scanner/scan-cache';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
@@ -476,6 +477,9 @@ function deliverWebhook(
 
 export const app = express();
 const PORT = process.env.PORT ?? 3001;
+
+// Initialize scan result cache for /watch SSE endpoint caching
+initCache({ disabled: process.env.SCAN_CACHE_DISABLED === 'true' });
 
 app.use(cors());
 
@@ -1183,38 +1187,44 @@ app.get('/watch', (req, res) => {
   function scanFile(filePath: string): Finding[] {
     try {
       const code = fs.readFileSync(filePath, 'utf-8');
+
+      // Check cache first — return cached findings if file content hasn't changed
+      const cached = getCachedFindings(filePath, code);
+      if (cached !== null) return cached;
+
       const ext = path.extname(filePath).toLowerCase();
+      let findings: Finding[];
 
       if (ext === '.py') {
         const parsed = parsePythonCode(code, filePath);
-        return scanPython(parsed);
+        findings = scanPython(parsed);
       } else if (ext === '.go') {
         const parsed = parseGoCode(code, filePath);
-        return scanGo(parsed);
+        findings = scanGo(parsed);
       } else if (ext === '.java') {
         const parsed = parseJavaCode(code, filePath);
-        return scanJava(parsed);
+        findings = scanJava(parsed);
       } else if (ext === '.cs') {
         const parsed = parseCSharpCode(code, filePath);
-        return scanCSharp(parsed);
+        findings = scanCSharp(parsed);
       } else if (['.c', '.cpp', '.cc', '.h'].includes(ext)) {
         const parsed = parseCCode(code, filePath);
-        return scanC(parsed);
+        findings = scanC(parsed);
       } else if (ext === '.rb') {
         const parsed = parseRubyCode(code, filePath);
-        return scanRuby(parsed);
+        findings = scanRuby(parsed);
       } else if (ext === '.kt' || ext === '.kts') {
         const parsed = parseKotlinCode(code, filePath);
-        return scanKotlin(parsed);
+        findings = scanKotlin(parsed);
       } else if (ext === '.swift') {
         const parsed = parseSwiftCode(code, filePath);
-        return scanSwift(parsed);
+        findings = scanSwift(parsed);
       } else if (ext === '.rs') {
         const parsed = parseRustCode(code, filePath);
-        return scanRust(parsed);
+        findings = scanRust(parsed);
       } else if (JS_TS_EXTENSIONS.has(ext)) {
         const parsed = parseCode(code, filePath);
-        return [
+        findings = [
           ...detectSecrets(parsed),
           ...detectSQLInjection(parsed),
           ...detectShellInjection(parsed),
@@ -1232,8 +1242,13 @@ app.get('/watch', (req, res) => {
           ...detectReDoS(parsed),
           ...detectWeakCrypto(parsed),
         ].map((f) => ({ ...f, file: filePath }));
+      } else {
+        findings = [];
       }
-      return [];
+
+      // Cache the scan results for this file content
+      setCachedFindings(filePath, code, findings);
+      return findings;
     } catch {
       return [];
     }
