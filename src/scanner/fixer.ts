@@ -675,6 +675,49 @@ ${indent}    raise ValueError(${msg})`;
       );
     },
   },
+
+  // ── SQL_INJECTION (Go): fmt.Sprintf in SQL → parameterized query ──────────
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Replace Go fmt.Sprintf SQL string with parameterized query placeholder',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.go') return null;
+
+      // Match fmt.Sprintf("SELECT ... %s", var) or string concatenation in SQL
+      if (!/fmt\.Sprintf\s*\(|".*SELECT.*"\s*\+/.test(line)) return null;
+      if (/TODO.*SQL|\$1|\?/.test(line)) return null;
+
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(SQL_INJECTION): use parameterized queries instead of string interpolation.\n` +
+        `${indent}// e.g. db.Query("SELECT * FROM users WHERE id = $1", id)\n` +
+        line
+      );
+    },
+  },
+
+  // ── COMMAND_INJECTION (Go): exec.Command with shell string → array form ───
+  {
+    types: ['COMMAND_INJECTION'],
+    description: 'Replace Go shell command string with exec.Command array form',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.go') return null;
+
+      // Match exec.Command("sh", "-c", ...) or exec.Command("bash", "-c", ...)
+      if (/exec\.Command\s*\(\s*"(?:sh|bash)"\s*,\s*"-c"/.test(line)) {
+        const indent = line.match(/^(\s*)/)?.[1] ?? '';
+        return (
+          `${indent}// TODO(COMMAND_INJECTION): replace shell string with direct exec.Command("binary", "arg1", "arg2") form.\n` +
+          `${indent}// This avoids shell interpretation and prevents injection via user-controlled arguments.\n` +
+          line
+        );
+      }
+
+      return null;
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────

@@ -182,3 +182,55 @@ describe('POST /scan — aiExplain=true without ANTHROPIC_API_KEY', () => {
     }
   });
 });
+
+// ── Swift finding AI explain test ─────────────────────────────────────────────
+
+const VULNERABLE_SWIFT_CODE = `
+import Foundation
+class Net {
+  func fetch(url: URL) {
+    URLSession.shared.dataTask(with: url) { d, _, _ in print(d as Any) }.resume()
+  }
+  let apiKey: String = "sk-liveabcdef1234567890secretkey"
+}
+`;
+
+describe('POST /scan — Swift finding with aiExplain=true', () => {
+  test('returns AI explanation for Swift SSRF finding', async () => {
+    const anthropicResponse = {
+      content: [
+        {
+          text: JSON.stringify({
+            explanation: 'URLSession with user-controlled URL can be exploited for SSRF attacks against internal services.',
+            fixSuggestion: 'guard let url = URL(string: input), ["https"].contains(url.scheme) else { return }',
+          }),
+        },
+      ],
+    };
+
+    const stub = makeAnthropicStub(anthropicResponse);
+
+    try {
+      const { statusCode, body } = await request(app).post('/scan').send({
+        code: VULNERABLE_SWIFT_CODE,
+        filename: 'Network.swift',
+        aiExplain: true,
+      });
+
+      expect(statusCode).toBe(200);
+      const { findings } = body as { findings: Array<Record<string, unknown>> };
+      expect(Array.isArray(findings)).toBe(true);
+      expect(findings.length).toBeGreaterThan(0);
+
+      // Verify Swift finding types are present
+      const types = findings.map((f) => f.type);
+      expect(types).toContain('SSRF');
+
+      // At least one finding should have AI fields
+      const withAI = findings.filter((f) => f.explanation !== undefined);
+      expect(withAI.length).toBeGreaterThan(0);
+    } finally {
+      stub.mockRestore();
+    }
+  });
+});
