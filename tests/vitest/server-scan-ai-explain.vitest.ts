@@ -234,3 +234,157 @@ describe('POST /scan — Swift finding with aiExplain=true', () => {
     }
   });
 });
+
+// ── Additional Swift finding type AI explain tests ───────────────────────────
+
+const SWIFT_SHARED_PREFS_CODE = `
+import Foundation
+class AuthManager {
+  func saveToken(_ token: String) {
+    UserDefaults.standard.set(token, forKey: "authToken")
+  }
+  func savePassword(_ pwd: String) {
+    UserDefaults.standard["userPassword"] = pwd
+  }
+}
+`;
+
+const SWIFT_WEBVIEW_CODE = `
+import WebKit
+class BrowserVC: UIViewController {
+  var webView = WKWebView()
+  func loadPage(url: URL) {
+    webView.loadRequest(URLRequest(url: url))
+    webView.loadHTMLString("<b>hello</b>", baseURL: nil)
+  }
+}
+`;
+
+const SWIFT_N_PLUS_ONE_CODE = `
+import CoreData
+class PostRepository {
+  func allPosts(context: NSManagedObjectContext) {
+    let posts = try? context.fetch(NSFetchRequest<NSManagedObject>(entityName: "Post"))
+    posts?.forEach { post in
+      let req = NSFetchRequest<NSManagedObject>(entityName: "Comment")
+      req.predicate = NSPredicate(format: "postId == %@", post.value(forKey: "id") as! CVarArg)
+      _ = try? context.fetch(req)
+    }
+  }
+}
+`;
+
+describe('POST /scan — Swift INSECURE_SHARED_PREFS finding with aiExplain=true', () => {
+  test('returns AI explanation for Swift INSECURE_SHARED_PREFS finding', async () => {
+    const anthropicResponse = {
+      content: [
+        {
+          text: JSON.stringify({
+            explanation: 'UserDefaults stores data in plaintext plist files. Sensitive values like tokens and passwords must be stored in the iOS Keychain instead.',
+            fixSuggestion: 'Use KeychainSwift: keychain.set(token, forKey: "authToken") after importing KeychainSwift',
+          }),
+        },
+      ],
+    };
+
+    const stub = makeAnthropicStub(anthropicResponse);
+
+    try {
+      const { statusCode, body } = await request(app).post('/scan').send({
+        code: SWIFT_SHARED_PREFS_CODE,
+        filename: 'AuthManager.swift',
+        aiExplain: true,
+      });
+
+      expect(statusCode).toBe(200);
+      const { findings } = body as { findings: Array<Record<string, unknown>> };
+      expect(Array.isArray(findings)).toBe(true);
+      expect(findings.length).toBeGreaterThan(0);
+
+      const types = findings.map((f) => f.type);
+      expect(types).toContain('INSECURE_SHARED_PREFS');
+
+      // At least the INSECURE_SHARED_PREFS finding should have AI fields
+      const withAI = findings.filter((f) => f.explanation !== undefined);
+      expect(withAI.length).toBeGreaterThan(0);
+    } finally {
+      stub.mockRestore();
+    }
+  });
+});
+
+describe('POST /scan — Swift UNSAFE_WEBVIEW finding with aiExplain=true', () => {
+  test('returns AI explanation for Swift UNSAFE_WEBVIEW finding', async () => {
+    const anthropicResponse = {
+      content: [
+        {
+          text: JSON.stringify({
+            explanation: 'Loading arbitrary URLs in WKWebView without validation allows XSS attacks and data exfiltration from your app context.',
+            fixSuggestion: 'Implement WKNavigationDelegate.webView(_:decidePolicyFor:decisionHandler:) and allow only specific trusted origins.',
+          }),
+        },
+      ],
+    };
+
+    const stub = makeAnthropicStub(anthropicResponse);
+
+    try {
+      const { statusCode, body } = await request(app).post('/scan').send({
+        code: SWIFT_WEBVIEW_CODE,
+        filename: 'BrowserVC.swift',
+        aiExplain: true,
+      });
+
+      expect(statusCode).toBe(200);
+      const { findings } = body as { findings: Array<Record<string, unknown>> };
+      expect(Array.isArray(findings)).toBe(true);
+      expect(findings.length).toBeGreaterThan(0);
+
+      const types = findings.map((f) => f.type);
+      expect(types).toContain('UNSAFE_WEBVIEW');
+
+      const withAI = findings.filter((f) => f.explanation !== undefined);
+      expect(withAI.length).toBeGreaterThan(0);
+    } finally {
+      stub.mockRestore();
+    }
+  });
+});
+
+describe('POST /scan — Swift PERFORMANCE_N_PLUS_ONE finding with aiExplain=true', () => {
+  test('returns AI explanation for Swift PERFORMANCE_N_PLUS_ONE finding', async () => {
+    const anthropicResponse = {
+      content: [
+        {
+          text: JSON.stringify({
+            explanation: 'Issuing a CoreData fetch inside a loop causes N+1 queries: one for the outer list and N for each element. This scales poorly and degrades performance.',
+            fixSuggestion: 'Use a single NSFetchRequest with an NSPredicate covering all IDs, or use a relationship fetch with a batch size set on the NSFetchedResultsController.',
+          }),
+        },
+      ],
+    };
+
+    const stub = makeAnthropicStub(anthropicResponse);
+
+    try {
+      const { statusCode, body } = await request(app).post('/scan').send({
+        code: SWIFT_N_PLUS_ONE_CODE,
+        filename: 'PostRepository.swift',
+        aiExplain: true,
+      });
+
+      expect(statusCode).toBe(200);
+      const { findings } = body as { findings: Array<Record<string, unknown>> };
+      expect(Array.isArray(findings)).toBe(true);
+      expect(findings.length).toBeGreaterThan(0);
+
+      const types = findings.map((f) => f.type);
+      expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+
+      const withAI = findings.filter((f) => f.explanation !== undefined);
+      expect(withAI.length).toBeGreaterThan(0);
+    } finally {
+      stub.mockRestore();
+    }
+  });
+});
