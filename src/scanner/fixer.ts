@@ -818,7 +818,7 @@ export function applyFixes(findings: Finding[], dryRun = false): FixResult[] {
           file: filePath,
           finding,
           applied: false,
-          description: `${matchingRules[0]!.description} — pattern not matched on this line; manual fix required.`,
+          description: `${matchingRules.map(r => r.description).join(' / ')} — pattern not matched on this line; manual fix required.`,
           originalLine,
         });
         continue;
