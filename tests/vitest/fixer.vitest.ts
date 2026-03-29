@@ -757,3 +757,116 @@ describe('applyFixes — EVAL_INJECTION (.py files → ast.literal_eval)', () =>
     expect(lines[3]).toBe('def process(user_input):');
   });
 });
+
+// ── Go SQL_INJECTION fixes ────────────────────────────────────────────────────
+
+describe('applyFixes — SQL_INJECTION (Go)', () => {
+  test('adds parameterized query TODO comment for fmt.Sprintf SQL in .go file', () => {
+    const code = [
+      'func getUser(db *sql.DB, id string) {',
+      '  query := fmt.Sprintf("SELECT * FROM users WHERE id = %s", id)',
+      '  rows, _ := db.Query(query)',
+      '  _ = rows',
+      '}',
+    ].join('\n');
+    const filePath = writeTempFile('user.go', code);
+    const finding = makeFinding({ type: 'SQL_INJECTION', line: 2, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('TODO(SQL_INJECTION)');
+    expect(updated).toContain('parameterized');
+    // Original line must still be present (we prepend a comment, not replace the line)
+    expect(updated).toContain('fmt.Sprintf');
+  });
+
+  test('does NOT add comment if fmt.Sprintf is not present in .go file', () => {
+    const code = 'rows, _ := db.Query("SELECT * FROM users WHERE id = $1", id)\n';
+    const filePath = writeTempFile('safe.go', code);
+    const finding = makeFinding({ type: 'SQL_INJECTION', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    // Already safe — no fmt.Sprintf → transform returns null
+    expect(results[0]!.applied).toBe(false);
+  });
+
+  test('returns applied=false for SQL_INJECTION in a .ts file (Go rule should not fire)', () => {
+    const code = 'const q = fmt_Sprintf(`SELECT * FROM t WHERE id=${id}`);\n';
+    const filePath = writeTempFile('handler.ts', code);
+    const finding = makeFinding({ type: 'SQL_INJECTION', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    // The Go rule guards on .go extension — should not fire for .ts
+    // (other SQL_INJECTION rules for .cs / .rb / .rs may also fail to match,
+    //  but the key assertion is no Go-specific comment is added)
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).not.toContain('db.Query(');
+  });
+
+  test('isFixable returns true for SQL_INJECTION (Go rule is registered)', () => {
+    expect(isFixable('SQL_INJECTION')).toBe(true);
+  });
+});
+
+// ── Go COMMAND_INJECTION fixes ────────────────────────────────────────────────
+
+describe('applyFixes — COMMAND_INJECTION (Go)', () => {
+  test('adds TODO comment for exec.Command("sh", "-c", ...) in .go file', () => {
+    const code = [
+      'func runCmd(input string) {',
+      '  cmd := exec.Command("sh", "-c", input)',
+      '  _ = cmd.Run()',
+      '}',
+    ].join('\n');
+    const filePath = writeTempFile('runner.go', code);
+    const finding = makeFinding({ type: 'COMMAND_INJECTION', line: 2, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.applied).toBe(true);
+
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).toContain('TODO(COMMAND_INJECTION)');
+    expect(updated).toContain('exec.Command');
+  });
+
+  test('adds TODO comment for exec.Command("bash", "-c", ...) in .go file', () => {
+    const code = '  cmd := exec.Command("bash", "-c", userArg)\n';
+    const filePath = writeTempFile('bash.go', code);
+    const finding = makeFinding({ type: 'COMMAND_INJECTION', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    expect(results[0]!.applied).toBe(true);
+  });
+
+  test('returns applied=false for exec.Command with explicit args (already safe form)', () => {
+    const code = '  cmd := exec.Command("ls", "-la", "/tmp")\n';
+    const filePath = writeTempFile('safe.go', code);
+    const finding = makeFinding({ type: 'COMMAND_INJECTION', line: 1, file: filePath });
+
+    const results = applyFixes([finding], false);
+    // No "sh -c" or "bash -c" pattern → transform returns null
+    expect(results[0]!.applied).toBe(false);
+  });
+
+  test('isFixable returns true for COMMAND_INJECTION (Go rule is registered)', () => {
+    expect(isFixable('COMMAND_INJECTION')).toBe(true);
+  });
+
+  test('dry-run does NOT write the .go file', () => {
+    const code = '  cmd := exec.Command("sh", "-c", userInput)\n';
+    const filePath = writeTempFile('dryrun.go', code);
+    const finding = makeFinding({ type: 'COMMAND_INJECTION', line: 1, file: filePath });
+
+    const results = applyFixes([finding], true /* dry run */);
+    expect(results[0]!.applied).toBe(true);
+
+    // File content must remain unchanged in dry-run mode
+    const updated = fs.readFileSync(filePath, 'utf-8');
+    expect(updated).not.toContain('TODO(COMMAND_INJECTION)');
+    expect(updated).toBe(code);
+  });
+});

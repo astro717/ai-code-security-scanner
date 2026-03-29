@@ -790,26 +790,41 @@ export function applyFixes(findings: Finding[], dryRun = false): FixResult[] {
         continue;
       }
 
-      const rule = FIX_RULES.find((r) => r.types.includes(finding.type));
-      if (!rule) {
+      // Try ALL rules for this finding type in order — the first one whose
+      // transform() returns a non-null value wins.  Multiple rules for the
+      // same type (e.g. SQL_INJECTION for Go, Ruby, Rust, C#) are each
+      // language-guarded internally; using find() would stop at the first
+      // language's rule even when it returns null for a different language.
+      const matchingRules = FIX_RULES.filter((r) => r.types.includes(finding.type));
+      if (matchingRules.length === 0) {
         results.push({ file: filePath, finding, applied: false, description: `No auto-fix rule for finding type "${finding.type}" — manual fix required.` });
         continue;
       }
 
       const originalLine = lines[lineIdx]!;
-      const fixedLine = rule.transform(originalLine, finding);
+      let appliedRule: FixRule | null = null;
+      let fixedLine: string | null = null;
+      for (const candidate of matchingRules) {
+        const result = candidate.transform(originalLine, finding);
+        if (result !== null) {
+          appliedRule = candidate;
+          fixedLine = result;
+          break;
+        }
+      }
 
-      if (fixedLine === null) {
+      if (fixedLine === null || appliedRule === null) {
         results.push({
           file: filePath,
           finding,
           applied: false,
-          description: `${rule.description} — pattern not matched on this line; manual fix required.`,
+          description: `${matchingRules[0]!.description} — pattern not matched on this line; manual fix required.`,
           originalLine,
         });
         continue;
       }
 
+      const rule = appliedRule;
       lines[lineIdx] = fixedLine;
       modified.add(lineIdx);
       results.push({
