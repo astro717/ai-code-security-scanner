@@ -16,6 +16,8 @@
  *   - XSS (Response.Write with unencoded user input in ASP.NET)
  *   - SSRF (HttpClient/WebClient/WebRequest with user input)
  *   - OPEN_REDIRECT (Response.Redirect with user input)
+ *   - UNSAFE_BLOCK (unsafe{} blocks with pointer manipulation)
+ *   - MISSING_AUTH (ASP.NET controller endpoints missing [Authorize])
  */
 
 import * as fs from 'fs';
@@ -267,6 +269,80 @@ export function scanCSharp(result: CSharpParseResult): Finding[] {
           message,
           file: result.filePath,
         });
+      }
+    }
+  });
+
+  // ── Stateful MISSING_AUTH detection ─────────────────────────────────────────
+  // Two-pass: first detect whether we're inside a Controller class, then flag
+  // public action methods that lack [Authorize] or [AllowAnonymous] attributes.
+  // A class-level [Authorize] exempts all its methods.
+  let inController = false;
+  let classHasAuthorize = false;
+  let classBraceDepth = 0;
+  let recentAttributes: string[] = [];  // accumulates attributes before a method
+
+  const CONTROLLER_CLASS = /\bclass\s+\w+\s*(?:<[^>]*>)?\s*:\s*(?:.*?)(?:Controller|ControllerBase)\b/;
+  const ACTION_METHOD = /\bpublic\s+(?:async\s+)?(?:Task<|IActionResult|ActionResult|JsonResult|ViewResult|ContentResult|FileResult|ObjectResult|StatusCodeResult)/;
+  const ATTR_LINE = /^\s*\[([^\]]+)\]/;
+
+  result.lines.forEach((line, idx) => {
+    const lineNum = idx + 1;
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) return;
+
+    const openBraces = (line.match(/\{/g) ?? []).length;
+    const closeBraces = (line.match(/\}/g) ?? []).length;
+
+    if (!inController) {
+      // Check for [Authorize] on lines immediately before the class
+      const attrMatch = ATTR_LINE.exec(line);
+      if (attrMatch) {
+        recentAttributes.push(attrMatch[1]!);
+      } else if (CONTROLLER_CLASS.test(line)) {
+        inController = true;
+        classHasAuthorize = recentAttributes.some(a => /\bAuthorize\b/.test(a));
+        classBraceDepth = openBraces - closeBraces;
+        recentAttributes = [];
+      } else if (!/^\s*$/.test(line)) {
+        // Non-empty, non-attribute, non-class line — reset accumulated attributes
+        recentAttributes = [];
+      }
+    } else {
+      classBraceDepth += openBraces - closeBraces;
+
+      if (classBraceDepth <= 0) {
+        inController = false;
+        classHasAuthorize = false;
+        classBraceDepth = 0;
+        recentAttributes = [];
+        return;
+      }
+
+      const attrMatch = ATTR_LINE.exec(line);
+      if (attrMatch) {
+        recentAttributes.push(attrMatch[1]!);
+      } else if (ACTION_METHOD.test(line) && !classHasAuthorize) {
+        const hasAuth = recentAttributes.some(a => /\bAuthorize\b|\bAllowAnonymous\b/.test(a));
+        if (!hasAuth) {
+          findings.push({
+            type: 'MISSING_AUTH',
+            severity: 'high',
+            line: lineNum,
+            column: line.search(/\S/),
+            snippet: trimmed.slice(0, 100),
+            message:
+              'ASP.NET controller action missing [Authorize] attribute — this endpoint is accessible ' +
+              'without authentication. Add [Authorize] to enforce auth, or [AllowAnonymous] to mark it ' +
+              'as intentionally public.',
+            file: result.filePath,
+            confidence: 0.85,
+          });
+        }
+        recentAttributes = [];
+      } else if (!/^\s*$/.test(line)) {
+        recentAttributes = [];
       }
     }
   });
