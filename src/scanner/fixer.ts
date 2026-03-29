@@ -489,6 +489,116 @@ ${indent}    raise ValueError(${msg})`;
     },
   },
 
+  // ── SQL_INJECTION (Ruby): string interpolation in SQL → parameterized query note ──
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Add TODO comment to replace Ruby SQL string interpolation with parameterized query',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rb') return null;
+      // Match common Ruby SQL patterns with string interpolation: #{var}
+      if (!/#\{/.test(line)) return null;
+      if (/TODO.*SQL|parameterized|\?\s*,/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}# TODO(SQL_INJECTION): replace string interpolation with parameterized query,\n` +
+        `${indent}# e.g. db.execute("SELECT * FROM users WHERE id = ?", [id])\n` +
+        line
+      );
+    },
+  },
+
+  // ── INSECURE_SHARED_PREFS (Swift): UserDefaults for sensitive data ────────
+  {
+    types: ['INSECURE_SHARED_PREFS'],
+    description: 'Replace UserDefaults sensitive storage with Keychain access comment',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+      if (!/UserDefaults\.standard\.set|UserDefaults\.standard\[/.test(line)) return null;
+      if (/TODO.*Keychain|KeychainSwift|KeychainWrapper/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(INSECURE_SHARED_PREFS): store sensitive data in Keychain instead of UserDefaults.\n` +
+        `${indent}// Use KeychainSwift: keychain.set(value, forKey: key)\n` +
+        line
+      );
+    },
+  },
+
+  // ── UNSAFE_WEBVIEW (Swift): WKWebView loadHTMLString with user input ──────
+  {
+    types: ['UNSAFE_WEBVIEW'],
+    description: 'Add TODO to sanitize WKWebView loadHTMLString input',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+      if (!/loadHTMLString\s*\(|loadRequest\s*\(|load\s*\(URLRequest/.test(line)) return null;
+      if (/TODO.*sanitize|allowList|isAllowed/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(UNSAFE_WEBVIEW): validate/sanitize the URL and HTML content before loading.\n` +
+        `${indent}// Consider a WKNavigationDelegate allowlist to restrict navigable origins.\n` +
+        line
+      );
+    },
+  },
+
+  // ── MISSING_AUTH (C#): endpoints without [Authorize] attribute ────────────
+  {
+    types: ['MISSING_AUTH'],
+    description: 'Add TODO comment to add [Authorize] attribute to C# controller action',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.cs') return null;
+      // Match controller action method declarations
+      if (!/public\s+(?:async\s+)?(?:Task<|IActionResult|ActionResult|string|int|bool)/.test(line)) return null;
+      if (/\[Authorize\]|\[AllowAnonymous\]/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(MISSING_AUTH): add [Authorize] attribute (or [Authorize(Roles = "...")] for role-based access)\n` +
+        line
+      );
+    },
+  },
+
+  // ── UNSAFE_BLOCK (Rust): unsafe { ... } → scope-narrowing note ───────────
+  {
+    types: ['UNSAFE_BLOCK'],
+    description: 'Add TODO comment to narrow the unsafe block scope in Rust',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+      if (!/\bunsafe\s*\{/.test(line)) return null;
+      if (/TODO.*unsafe|SAFETY:/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// SAFETY: TODO — document why this unsafe block is sound and narrow its scope\n` +
+        `${indent}// to the minimum set of operations that require unsafe.\n` +
+        line
+      );
+    },
+  },
+
+  // ── SQL_INJECTION (Rust): format! in SQL → parameterized query note ───────
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Add TODO comment to replace Rust format! SQL string with parameterized query',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+      // Match format! macro or string concatenation in SQL context
+      if (!/format!\s*\(|\.to_string\(\)/.test(line)) return null;
+      if (/TODO.*SQL|bind\(|sqlx::query!/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(SQL_INJECTION): use parameterized queries instead of format! string building.\n` +
+        `${indent}// With sqlx: sqlx::query!("SELECT ... WHERE id = ?", id).fetch_one(&pool).await\n` +
+        line
+      );
+    },
+  },
+
   // ── WEAK_CRYPTO (Swift): CC_MD5/CC_SHA1 → CC_SHA256, Insecure.MD5 → SHA256 ─
   {
     types: ['WEAK_CRYPTO'],
@@ -523,7 +633,7 @@ ${indent}    raise ValueError(${msg})`;
 
 // ── File extension guard ───────────────────────────────────────────────────────
 
-const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb', '.swift']);
+const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb', '.swift', '.rs', '.go']);
 
 function isFixableFile(filePath: string): boolean {
   return FIXABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
