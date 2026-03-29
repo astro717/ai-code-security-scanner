@@ -199,6 +199,18 @@ const GO_PATTERNS: GoPattern[] = [
       'Go template parsed from user-controlled input — server-side template injection. ' +
       'Template source must come from trusted static files, not user input.',
   },
+
+  // Go unsafe.Pointer usage — bypasses type safety
+  {
+    type: 'UNSAFE_BLOCK',
+    severity: 'medium',
+    pattern: /\bunsafe\.Pointer\b/,
+    message:
+      'unsafe.Pointer usage detected — Go type safety and garbage collector assumptions are bypassed. ' +
+      'Incorrect pointer arithmetic can cause memory corruption or data races. ' +
+      'Prefer type-safe alternatives; if unsafe is required, document the invariants.',
+    confidence: 0.9,
+  },
 ];
 
 /**
