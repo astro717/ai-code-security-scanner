@@ -171,6 +171,18 @@ describe('vulnerable.swift fixture', () => {
     expect(types).toContain('WEAK_CRYPTO');
   });
 
+  it('detects PERFORMANCE_N_PLUS_ONE findings', () => {
+    const result = scanSwift(parseSwiftFile(vulnerableFile));
+    const types = result.map((f) => f.type);
+    expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  it('detects at least 2 PERFORMANCE_N_PLUS_ONE findings (forEach + for-in)', () => {
+    const result = scanSwift(parseSwiftFile(vulnerableFile));
+    const n1Findings = result.filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE');
+    expect(n1Findings.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('each finding has correct file path', () => {
     const result = scanSwift(parseSwiftFile(vulnerableFile));
     for (const f of result) {
