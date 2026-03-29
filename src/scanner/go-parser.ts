@@ -58,6 +58,7 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'SQL query built with fmt.Sprintf. User input interpolated into SQL strings ' +
       'leads to SQL injection. Use parameterised queries (db.Query(query, args...)) instead.',
+    confidence: 0.95,
   },
   {
     type: 'SQL_INJECTION',
@@ -66,6 +67,7 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'SQL query built with string concatenation. Use parameterised queries ' +
       '(db.Query(query, args...)) to prevent SQL injection.',
+    confidence: 0.85,
   },
 
   // Command injection via exec.Command with user input
@@ -76,6 +78,7 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'exec.Command() called with what appears to be user-controlled input. ' +
       'Validate and sanitise all arguments before passing them to external commands.',
+    confidence: 0.80,
   },
   {
     type: 'COMMAND_INJECTION_GO',
@@ -85,6 +88,7 @@ const GO_PATTERNS: GoPattern[] = [
       'exec.Command invokes a shell with -c flag. If any part of the command string is ' +
       'user-controlled, this allows arbitrary command injection. Pass arguments as separate ' +
       'list elements without a shell intermediary.',
+    confidence: 0.95,
   },
 
   // SSRF via http.Get / http.Post with non-literal URL
@@ -96,6 +100,7 @@ const GO_PATTERNS: GoPattern[] = [
       'HTTP request made with a URL that appears to include user-controlled input. ' +
       'Without URL validation, attackers can force the server to make requests to ' +
       'internal services (SSRF).',
+    confidence: 0.80,
   },
   {
     type: 'SSRF',
@@ -104,6 +109,7 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'http.NewRequest with a URL derived from user input. Validate and restrict ' +
       'the target URL to prevent Server-Side Request Forgery.',
+    confidence: 0.80,
   },
 
   // Hardcoded secrets
@@ -114,6 +120,7 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'Potential hardcoded credential in Go source. Secrets must be loaded from ' +
       'environment variables or a secrets manager, never stored in source code.',
+    confidence: 0.85,
   },
 
   // Weak crypto — md5, sha1
@@ -125,6 +132,7 @@ const GO_PATTERNS: GoPattern[] = [
       'MD5 or SHA-1 used for hashing. These are cryptographically weak. ' +
       'Use SHA-256 (crypto/sha256) or SHA-3 for security-sensitive hashing. ' +
       'For passwords, use bcrypt or Argon2.',
+    confidence: 0.95,
   },
 
   // Path traversal via filepath.Join with user input
@@ -136,6 +144,7 @@ const GO_PATTERNS: GoPattern[] = [
       'filepath.Join called with user-controlled input. Without path sanitisation, ' +
       'attackers can traverse the filesystem with ../ sequences. Use filepath.Clean ' +
       'and validate the result stays within the intended directory.',
+    confidence: 0.80,
   },
 
   // Insecure random — math/rand instead of crypto/rand
@@ -146,6 +155,7 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'math/rand imported — this is not cryptographically secure. For tokens, ' +
       'passwords, or session IDs, use crypto/rand instead.',
+    confidence: 0.90,
   },
   {
     type: 'INSECURE_RANDOM',
@@ -154,6 +164,7 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'rand function call detected. If this is math/rand, it is not suitable for ' +
       'security-sensitive values. Use crypto/rand.Read() instead.',
+    confidence: 0.75,
   },
 
   // Unsafe template execution with user input
@@ -164,6 +175,7 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'Go template parsed from user-controlled input. This can lead to server-side ' +
       'template injection. Use predefined template files, not user-supplied strings.',
+    confidence: 0.85,
   },
 
   // Unvalidated redirect
@@ -175,6 +187,7 @@ const GO_PATTERNS: GoPattern[] = [
       'http.Redirect with a target derived from user input. Without validation, ' +
       'this allows open redirect attacks. Ensure the redirect target is a relative ' +
       'URL or belongs to a trusted domain.',
+    confidence: 0.78,
   },
 
   // N+1 query pattern — detected statefully in scanGo (see loop-tracking logic below)
@@ -190,6 +203,7 @@ const GO_PATTERNS: GoPattern[] = [
       'Go template executed with what appears to be user-controlled data. ' +
       'If the template string itself is user-supplied, this enables server-side ' +
       'template injection. Always use predefined template files from disk.',
+    confidence: 0.82,
   },
   {
     type: 'SSTI',
@@ -198,6 +212,7 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'Go template parsed from user-controlled input — server-side template injection. ' +
       'Template source must come from trusted static files, not user input.',
+    confidence: 0.78,
   },
 
   // Go unsafe.Pointer usage — bypasses type safety
