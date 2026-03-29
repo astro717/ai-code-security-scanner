@@ -3,6 +3,7 @@ import { program } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import * as readline from 'readline';
 import { minimatch } from 'minimatch';
 import { parseFile } from './scanner/parser';
 import { detectSecrets } from './scanner/detectors/secrets';
@@ -542,6 +543,36 @@ function startWatchMode(
   setInterval(() => { /* heartbeat */ }, 10_000).unref();
 }
 
+// ── User confirmation prompt for --fix ──────────────────────────────────────
+
+/**
+ * Prompts the user on stderr with a yes/no question and resolves with the
+ * answer.  Returns `true` if the user types "y" or "yes" (case-insensitive),
+ * `false` for any other input.
+ *
+ * When the process is not attached to a TTY (e.g. in CI piped mode) we skip
+ * the prompt and return `false` — callers that need non-interactive approval
+ * should use `--dry-run` or redirect stdin.  Pass `--yes` to bypass the
+ * prompt programmatically.
+ */
+async function confirmFix(count: number): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    process.stderr.write(
+      '[fix] stdin is not a TTY — skipping interactive confirmation. ' +
+      'Pipe stdin from a terminal or use --yes to apply fixes non-interactively.\n',
+    );
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    rl.question(`\n[fix] Apply ${count} fix(es) to source files? [y/N] `, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase() === 'y' || answer.trim().toLowerCase() === 'yes');
+    });
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 program
@@ -646,13 +677,19 @@ program
   .option(
     '--fix',
     'Auto-apply safe remediations for findings with a known mechanical fix. ' +
-    'Currently supports: INSECURE_RANDOM (Math.random -> crypto.randomBytes), ' +
-    'EVAL_INJECTION (eval(x) -> JSON.parse(x)). ' +
-    'Fixes are applied in-place; unsupported finding types are reported as requiring manual action.',
+    'Shows a preview of all changes and asks for confirmation before writing files. ' +
+    'Combine with --yes to skip confirmation (e.g. in CI). ' +
+    'Use --dry-run to preview changes without being prompted. ' +
+    'Supported types include INSECURE_RANDOM, EVAL_INJECTION, WEAK_CRYPTO, XSS, PATH_TRAVERSAL, and more.',
   )
   .option(
     '--dry-run',
     'Used with --fix: compute and display all remediations that would be applied without writing any files.',
+  )
+  .option(
+    '--yes',
+    'Used with --fix: skip the interactive confirmation prompt and apply fixes immediately. ' +
+    'Intended for non-interactive CI environments where stdin is not a TTY.',
   )
   .option(
     '--severity-threshold <level>',
@@ -698,7 +735,7 @@ program
       return n;
     },
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; diff: boolean; fix: boolean; dryRun: boolean; typeList: boolean; listTypes: boolean; summaryOnly: boolean; aiProvider?: string; openaiKey?: string; explain?: boolean; minConfidence?: number }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; diff: boolean; fix: boolean; dryRun: boolean; yes: boolean; typeList: boolean; listTypes: boolean; summaryOnly: boolean; aiProvider?: string; openaiKey?: string; explain?: boolean; minConfidence?: number }) => {
     // --type-list: print all known finding types and exit immediately.
     if (options.typeList) {
       const types = [...KNOWN_TYPES].sort();
@@ -1073,28 +1110,58 @@ program
     if (options.fix || options.dryRun) {
       if (options.dryRun && !options.fix) {
         console.error('[fix] --dry-run requires --fix. Ignoring --dry-run.');
+      } else if (options.dryRun) {
+        // --fix --dry-run: show preview, no prompt, no writes
+        const dryResults = applyFixes(filtered, /* dryRun= */ true);
+        _fixResults = dryResults;
+        printFixSummary(dryResults, /* dryRun= */ true);
+        const diff = buildUnifiedDiff(dryResults);
+        if (diff.trim()) {
+          process.stderr.write('\n[fix --dry-run] Unified diff:\n');
+          process.stderr.write(diff + '\n');
+        }
       } else {
-        const fixResults = applyFixes(filtered, options.dryRun ?? false);
-        _fixResults = fixResults;
-        printFixSummary(fixResults, options.dryRun ?? false);
-        if (options.dryRun) {
-          const diff = buildUnifiedDiff(fixResults);
+        // --fix without --dry-run: preview first, then ask for confirmation
+        // unless --yes was passed.
+        const dryResults = applyFixes(filtered, /* dryRun= */ true);
+        const fixableCount = dryResults.filter((r) => r.applied).length;
+
+        if (fixableCount === 0) {
+          process.stderr.write('[fix] No auto-fixable findings found.\n');
+          // Still show the manual-action items from the dry run
+          printFixSummary(dryResults, /* dryRun= */ false);
+          _fixResults = dryResults;
+        } else {
+          // Show what would be changed
+          printFixSummary(dryResults, /* dryRun= */ true);
+          const diff = buildUnifiedDiff(dryResults);
           if (diff.trim()) {
-            process.stderr.write('\n[fix --dry-run] Unified diff:\n');
+            process.stderr.write('\n[fix] Proposed changes (unified diff):\n');
             process.stderr.write(diff + '\n');
           }
-        }
-        // Re-filter: remove findings that were successfully fixed from the reported output
-        // so the scan output reflects the remaining (unfixed) state.
-        if (!options.dryRun) {
-          const fixedKeys = new Set(
-            fixResults
-              .filter((r) => r.applied)
-              .map((r) => `${r.finding.type}|${r.file ?? ''}|${r.finding.line}|${r.finding.column}`),
-          );
-          filtered = filtered.filter(
-            (f) => !fixedKeys.has(`${f.type}|${f.file ?? ''}|${f.line}|${f.column}`),
-          );
+
+          const shouldApply = options.yes || await confirmFix(fixableCount);
+
+          if (!shouldApply) {
+            process.stderr.write('[fix] Aborted — no files were modified.\n');
+            _fixResults = dryResults;
+          } else {
+            // Apply fixes for real
+            const fixResults = applyFixes(filtered, /* dryRun= */ false);
+            _fixResults = fixResults;
+            printFixSummary(fixResults, /* dryRun= */ false);
+
+            // Re-filter: remove findings that were successfully fixed from the
+            // reported output so the scan output reflects the remaining state.
+            const fixedKeys = new Set(
+              fixResults
+                .filter((r) => r.applied)
+                .map((r) => `${r.finding.type}|${r.file ?? ''}|${r.finding.line}|${r.finding.column}`),
+            );
+            filtered = filtered.filter(
+              (f) => !fixedKeys.has(`${f.type}|${f.file ?? ''}|${f.line}|${f.column}`),
+            );
+          }
         }
       }
     }
