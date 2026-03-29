@@ -12,8 +12,9 @@
  *   EVAL_INJECTION   — eval(<expr>)   -> JSON.parse(<expr>)  (best-effort)
  *   WEAK_CRYPTO      — md5 / sha1 hash creation  -> sha256 equivalent note
  *
- * The fixer never modifies Python / Go / Java / C / Ruby / C# files; those
- * require manual review.
+ * The fixer also supports Ruby (INSECURE_RANDOM → SecureRandom, SSTI, PATH_TRAVERSAL,
+ * COMMAND_INJECTION) and Swift (WEAK_CRYPTO → CC_SHA256). Go, Java, and C files
+ * still require manual review.
  */
 
 import * as fs from 'fs';
@@ -460,11 +461,69 @@ ${indent}    raise ValueError(${msg})`;
       return null;
     },
   },
+
+  // ── INSECURE_RANDOM (Ruby): rand/Random.new → SecureRandom.hex ────────────
+  {
+    types: ['INSECURE_RANDOM'],
+    description: 'Replace Ruby rand()/Random.new with SecureRandom.hex (requires "require \'securerandom\'")',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rb') return null;
+
+      // Pattern: rand() or rand(N) → SecureRandom.random_number(N)
+      if (/\brand\s*\(/.test(line)) {
+        const fixed = line.replace(
+          /\brand\s*\(([^)]*)\)/g,
+          (_, args) => args.trim() ? `SecureRandom.random_number(${args.trim()})` : 'SecureRandom.hex(16)',
+        );
+        return fixed !== line ? fixed : null;
+      }
+
+      // Pattern: Random.new.rand → SecureRandom.random_number
+      if (/Random\.new\.rand/.test(line)) {
+        const fixed = line.replace(/Random\.new\.rand/g, 'SecureRandom.random_number');
+        return fixed !== line ? fixed : null;
+      }
+
+      return null;
+    },
+  },
+
+  // ── WEAK_CRYPTO (Swift): CC_MD5/CC_SHA1 → CC_SHA256, Insecure.MD5 → SHA256 ─
+  {
+    types: ['WEAK_CRYPTO'],
+    description: 'Replace Swift weak hash (CC_MD5/CC_SHA1/Insecure.MD5) with SHA-256 equivalent',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+
+      let fixed = line;
+
+      // CommonCrypto: CC_MD5 → CC_SHA256
+      fixed = fixed.replace(/\bCC_MD5\b/g, 'CC_SHA256');
+      fixed = fixed.replace(/\bCC_MD5_DIGEST_LENGTH\b/g, 'CC_SHA256_DIGEST_LENGTH');
+
+      // CommonCrypto: CC_SHA1 → CC_SHA256
+      fixed = fixed.replace(/\bCC_SHA1\b/g, 'CC_SHA256');
+      fixed = fixed.replace(/\bCC_SHA1_DIGEST_LENGTH\b/g, 'CC_SHA256_DIGEST_LENGTH');
+
+      // CommonCrypto: kCCAlgorithmDES → kCCAlgorithmAES
+      fixed = fixed.replace(/\bkCCAlgorithmDES\b/g, 'kCCAlgorithmAES');
+      fixed = fixed.replace(/\bkCCKeySizeDES\b/g, 'kCCKeySizeAES256');
+      fixed = fixed.replace(/\bkCCBlockSizeDES\b/g, 'kCCBlockSizeAES128');
+
+      // CryptoKit: Insecure.MD5 → SHA256, Insecure.SHA1 → SHA256
+      fixed = fixed.replace(/\bInsecure\.MD5\b/g, 'SHA256');
+      fixed = fixed.replace(/\bInsecure\.SHA1\b/g, 'SHA256');
+
+      return fixed !== line ? fixed : null;
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────
 
-const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb']);
+const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb', '.swift']);
 
 function isFixableFile(filePath: string): boolean {
   return FIXABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
