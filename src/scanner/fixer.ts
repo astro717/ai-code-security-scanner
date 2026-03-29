@@ -766,7 +766,7 @@ ${indent}    raise ValueError(${msg})`;
 
   // ── COMMAND_INJECTION (Go): exec.Command with shell string → array form ───
   {
-    types: ['COMMAND_INJECTION'],
+    types: ['COMMAND_INJECTION', 'COMMAND_INJECTION_GO'],
     description: 'Replace Go shell command string with exec.Command array form',
     transform(line: string, finding: Finding): string | null {
       const ext = path.extname(finding.file ?? '').toLowerCase();

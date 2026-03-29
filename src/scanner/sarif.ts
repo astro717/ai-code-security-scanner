@@ -21,6 +21,7 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   COMMAND_INJECTION:     'User-controlled value used as the command in a child_process call.',
   COMMAND_INJECTION_C:   'User-controlled value used as the command in a system/popen call (C/C++).',
   COMMAND_INJECTION_CS:  'User-controlled value used in Process.Start() or ProcessStartInfo (C#), enabling arbitrary command execution.',
+  COMMAND_INJECTION_GO:  'User-controlled value passed to exec.Command() in Go, enabling arbitrary command execution.',
   CORS_MISCONFIGURATION: 'CORS policy allows wildcard or reflected origin with credentials.',
   JWT_HARDCODED_SECRET:  'JWT signed with a hardcoded secret literal.',
   JWT_WEAK_SECRET:       'JWT signed with a secret shorter than 32 characters.',

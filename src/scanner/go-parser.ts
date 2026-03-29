@@ -9,7 +9,7 @@
  * Covered vulnerability classes:
  *   - SSRF (net/http with user input)
  *   - SQL_INJECTION (fmt.Sprintf in queries)
- *   - COMMAND_INJECTION (exec.Command with user input)
+ *   - COMMAND_INJECTION_GO (exec.Command with user input)
  *   - SECRET_HARDCODED (hardcoded credentials)
  *   - EVAL_INJECTION (unsafe reflect / template execution)
  *   - WEAK_CRYPTO (md5, sha1)
@@ -70,7 +70,7 @@ const GO_PATTERNS: GoPattern[] = [
 
   // Command injection via exec.Command with user input
   {
-    type: 'COMMAND_INJECTION',
+    type: 'COMMAND_INJECTION_GO',
     severity: 'critical',
     pattern: /exec\.Command\s*\(\s*(?!")[^)]*(?:request|req\.|r\.|input|param|query|args|os\.Args)/i,
     message:
@@ -78,7 +78,7 @@ const GO_PATTERNS: GoPattern[] = [
       'Validate and sanitise all arguments before passing them to external commands.',
   },
   {
-    type: 'COMMAND_INJECTION',
+    type: 'COMMAND_INJECTION_GO',
     severity: 'critical',
     pattern: /exec\.Command\s*\(\s*"(?:sh|bash|cmd)"\s*,\s*"-c"\s*,/,
     message:
