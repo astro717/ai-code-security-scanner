@@ -44,6 +44,10 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   SQL_INJECTION_CS:      'User-controlled input concatenated into a SQL query in a C# context without parameterisation.',
   PATH_TRAVERSAL_CS:     'User-controlled path used in a C# filesystem call without sanitisation or bounds checking.',
   PERFORMANCE_N_PLUS_ONE: 'ORM, database query, or network request (URLSession/CoreData) executed inside a loop — N+1 query pattern degrades performance under load.',
+  FORCE_TRY:             'Swift try! used — program crashes at runtime if the expression throws.',
+  FORCE_UNWRAP:          'Swift force-unwrap (!) on an optional — program crashes at runtime if the value is nil.',
+  UNSAFE_BLOCK:          'Rust unsafe block detected — memory-safety guarantees are suspended within this scope.',
+  MISSING_AUTH:          'Public controller endpoint missing an authorization attribute — unauthenticated access possible.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
