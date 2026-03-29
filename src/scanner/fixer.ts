@@ -580,6 +580,73 @@ ${indent}    raise ValueError(${msg})`;
     },
   },
 
+  // ── PERFORMANCE_N_PLUS_ONE: note-only guidance for N+1 query patterns ─────
+  {
+    types: ['PERFORMANCE_N_PLUS_ONE'],
+    description: 'Add TODO comment with N+1 query remediation guidance',
+    transform(line: string, finding: Finding): string | null {
+      // Already annotated
+      if (/TODO.*N\+1|prefetch|eager.?load|joinedload|includes?\(/i.test(line)) return null;
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      // Language-specific advice
+      if (ext === '.py') {
+        return (
+          `${indent}# TODO(N+1): batch this query before the loop — use select_related() / prefetch_related() (Django)\n` +
+          `${indent}# or joinedload() / subqueryload() (SQLAlchemy) to eliminate per-iteration round-trips.\n` +
+          line
+        );
+      }
+      if (ext === '.rb') {
+        return (
+          `${indent}# TODO(N+1): use .includes(:association) or .preload(:association) to eager-load\n` +
+          `${indent}# and avoid a separate query per iteration.\n` +
+          line
+        );
+      }
+      if (ext === '.go') {
+        return (
+          `${indent}// TODO(N+1): batch this query outside the loop — use a single WHERE … IN (?) query\n` +
+          `${indent}// or a JOIN to fetch all required rows in one round-trip.\n` +
+          line
+        );
+      }
+      if (ext === '.java') {
+        return (
+          `${indent}// TODO(N+1): use @EntityGraph, JOIN FETCH, or batch the query before the loop\n` +
+          `${indent}// to avoid a separate DB round-trip per iteration.\n` +
+          line
+        );
+      }
+      if (['.cs'].includes(ext)) {
+        return (
+          `${indent}// TODO(N+1): use .Include() / .ThenInclude() (EF Core) to eager-load\n` +
+          `${indent}// and avoid a separate query per loop iteration.\n` +
+          line
+        );
+      }
+      if (['.kt', '.kts'].includes(ext)) {
+        return (
+          `${indent}// TODO(N+1): batch this query outside the loop — use a single DAO query\n` +
+          `${indent}// with an IN clause or @Transaction to avoid per-iteration round-trips.\n` +
+          line
+        );
+      }
+      if (ext === '.swift') {
+        return (
+          `${indent}// TODO(N+1): batch this fetch/request outside the loop to avoid per-iteration overhead.\n` +
+          `${indent}// Use a single NSFetchRequest with a predicate or batch URLSession calls.\n` +
+          line
+        );
+      }
+      // Generic fallback
+      return (
+        `${indent}// TODO(N+1): move this query outside the loop and batch-load the data to avoid N+1.\n` +
+        line
+      );
+    },
+  },
+
   // ── SQL_INJECTION (Rust): format! in SQL → parameterized query note ───────
   {
     types: ['SQL_INJECTION'],
