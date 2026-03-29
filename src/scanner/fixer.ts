@@ -7,13 +7,34 @@
  * deliberately conservative: if the line cannot be transformed safely with a
  * simple regex, the finding is left as a "manual" fix for the developer.
  *
- * Supported auto-fix types (all JS/TS only):
- *   INSECURE_RANDOM  — Math.random()  -> crypto.randomBytes(32).toString('hex')
- *   EVAL_INJECTION   — eval(<expr>)   -> JSON.parse(<expr>)  (best-effort)
- *   WEAK_CRYPTO      — md5 / sha1 hash creation  -> sha256 equivalent note
+ * Supported auto-fix types by language:
  *
- * The fixer never modifies Python / Go / Java / C / Ruby / C# files; those
- * require manual review.
+ * JavaScript / TypeScript (.ts, .tsx, .js, .jsx, .mjs, .cjs):
+ *   INSECURE_RANDOM    — Math.random()  → crypto.randomBytes(32).toString('hex')
+ *   EVAL_INJECTION     — eval(<expr>)   → JSON.parse(<expr>)  (best-effort)
+ *   WEAK_CRYPTO        — md5 / sha1 hash creation → sha256 note
+ *   SQL_INJECTION      — string-concatenated queries → parameterised query note
+ *   PATH_TRAVERSAL     — path.join with user input → path.resolve note
+ *   COMMAND_INJECTION  — exec with user input → note-only
+ *
+ * Python (.py):
+ *   EVAL_INJECTION     — eval(x) → ast.literal_eval(x)
+ *   PATH_TRAVERSAL     — note-only (os.path.normpath doesn't fully prevent traversal)
+ *   SSTI               — render_template_string(var) → note-only
+ *
+ * Ruby (.rb):
+ *   SSTI               — ERB.new(user_input).result → note-only
+ *   PATH_TRAVERSAL     — File.read/open → File.expand_path + base-dir guard
+ *   COMMAND_INJECTION  — system/exec string → array form
+ *
+ * C# (.cs):
+ *   SQL_INJECTION      — SqlCommand with concatenation → SqlParameter note
+ *
+ * Kotlin (.kt, .kts):
+ *   Supported extension — individual rule coverage is added incrementally.
+ *
+ * Languages with no auto-fix rules yet (manual review required):
+ *   Go, Java, C/C++, Swift, Rust
  */
 
 import * as fs from 'fs';
