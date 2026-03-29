@@ -157,6 +157,64 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
 // These require multi-line context (loop + fetch inside) so are handled separately.
 
 /**
+ * Regex that matches a Swift loop-open line (forEach, for-in, or map block opener).
+ * We detect: `.forEach {`, `.forEach({`, `for x in`, `.map {`, `.map({`
+ */
+const SWIFT_LOOP_OPEN = /(?:\.\s*(?:forEach|map)\s*(?:\{|\(\s*\{)|^\s*for\s+\S+\s+in\s+)/;
+
+/**
+ * Regex that matches a CoreData or URLSession fetch call that would indicate an N+1.
+ * Covers: fetchRequest.execute, context.fetch, dataTask(with:, data(from:
+ */
+const SWIFT_N1_FETCH = /(?:fetchRequest\.execute|context\.fetch\s*\(|\.dataTask\s*\(\s*with\s*:|\.data\s*\(\s*from\s*:)/;
+
+/**
+ * Post-loop sliding-window pass for N+1 detection.
+ * When a loop-open line is found, looks ahead up to 5 lines for a fetch call.
+ */
+function detectSwiftN1(parsed: SwiftParseResult): Finding[] {
+  const findings: Finding[] = [];
+  const lines = parsed.lines;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+
+    // Skip comment lines
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+
+    if (!SWIFT_LOOP_OPEN.test(line)) continue;
+
+    // Look ahead up to 5 lines for a fetch call
+    const windowEnd = Math.min(i + 5, lines.length - 1);
+    for (let j = i + 1; j <= windowEnd; j++) {
+      const innerLine = lines[j]!;
+      const innerTrimmed = innerLine.trim();
+      if (innerTrimmed.startsWith('//') || innerTrimmed.startsWith('*') || innerTrimmed.startsWith('/*')) continue;
+
+      if (SWIFT_N1_FETCH.test(innerLine)) {
+        findings.push({
+          type: 'N1_QUERY',
+          severity: 'high',
+          line: j + 1,
+          column: 0,
+          snippet: innerLine.trim().slice(0, 120),
+          message:
+            'URLSession or CoreData fetch call inside a loop — likely N+1 query pattern. ' +
+            'Each iteration makes a separate network or database request. Batch fetch all data ' +
+            'before the loop (e.g. batch URLSession requests or use an NSBatchFetchRequest) ' +
+            'to avoid O(n) round-trips.',
+          file: parsed.filePath,
+        });
+        break; // One finding per loop opening
+      }
+    }
+  }
+
+  return findings;
+}
+
+/**
  * Scans a Swift parse result for security vulnerabilities using pattern matching.
  * Returns an array of findings (may be empty if the file is clean).
  */
@@ -186,6 +244,9 @@ export function scanSwift(parsed: SwiftParseResult): Finding[] {
       }
     }
   }
+
+  // Post-loop sliding-window pass for N+1 detection
+  findings.push(...detectSwiftN1(parsed));
 
   return findings;
 }
