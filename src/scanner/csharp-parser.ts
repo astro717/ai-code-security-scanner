@@ -46,6 +46,8 @@ interface CSharpPattern {
   severity: Finding['severity'];
   pattern: RegExp;
   message: string;
+  /** Detection confidence [0.0–1.0]. High-specificity patterns use 0.9+, heuristics use lower values. */
+  confidence?: number;
 }
 
 const CSHARP_PATTERNS: CSharpPattern[] = [
@@ -57,6 +59,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
     message:
       'SqlCommand constructed with string interpolation or concatenation. User input in SQL ' +
       'strings leads to SQL injection. Use SqlParameter or parameterised queries instead.',
+    confidence: 0.92,
   },
   {
     type: 'SQL_INJECTION_CS',
@@ -65,6 +68,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
     message:
       'CommandText set with string interpolation or concatenation. Use parameterised queries ' +
       'to prevent SQL injection.',
+    confidence: 0.90,
   },
   {
     type: 'SQL_INJECTION_CS',
@@ -73,6 +77,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
     message:
       'Entity Framework raw SQL called with string interpolation or concatenation. ' +
       'Use FromSqlInterpolated / ExecuteSqlInterpolated or parameterised overloads instead.',
+    confidence: 0.93,
   },
 
   // Command injection via Process.Start
@@ -83,6 +88,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
     message:
       'Process.Start() called with user-controlled input. This allows arbitrary command ' +
       'injection. Validate and whitelist all arguments before spawning external processes.',
+    confidence: 0.88,
   },
   {
     type: 'COMMAND_INJECTION_CS',
@@ -91,6 +97,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
     message:
       'ProcessStartInfo constructed with user-controlled input. Validate all arguments ' +
       'before passing them to external processes.',
+    confidence: 0.85,
   },
 
   // Hardcoded secrets
@@ -101,6 +108,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
     message:
       'Potential hardcoded credential in C# source. Secrets must be loaded from environment ' +
       'variables, appsettings.json (with Azure Key Vault or Secret Manager), or a secrets manager.',
+    confidence: 0.80,
   },
 
   // Weak crypto
@@ -111,6 +119,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
     message:
       'Weak or broken cryptographic algorithm used (.Create()). ' +
       'MD5, SHA1, DES, and RC2 are deprecated for security use. Use SHA-256/SHA-3 or AES-256-GCM.',
+    confidence: 0.95,
   },
   {
     type: 'WEAK_CRYPTO',
@@ -119,6 +128,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
     message:
       'Deprecated cryptographic service provider instantiated. These algorithms are cryptographically ' +
       'broken. Use AesGcm, HMACSHA256, or Aes.Create() with a 256-bit key.',
+    confidence: 0.97,
   },
 
   // Path traversal
@@ -130,6 +140,7 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
       'File or directory operation with user-controlled input. Without path canonicalisation, ' +
       'attackers can traverse the filesystem using ../ sequences. Use Path.GetFullPath() and ' +
       'verify the result starts with the allowed base directory.',
+    confidence: 0.82,
   },
 
   // Insecure random
