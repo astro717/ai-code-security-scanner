@@ -245,7 +245,7 @@ describe('N1_QUERY — sliding-window detector', () => {
       '    task.resume()',
       '}',
     ].join('\n');
-    expect(scan(code)).toContain('N1_QUERY');
+    expect(scan(code)).toContain('PERFORMANCE_N_PLUS_ONE');
   });
 
   it('fires when context.fetch() appears inside a for-in loop', () => {
@@ -254,7 +254,7 @@ describe('N1_QUERY — sliding-window detector', () => {
       '    let results = try context.fetch(fetchRequest)',
       '}',
     ].join('\n');
-    expect(scan(code)).toContain('N1_QUERY');
+    expect(scan(code)).toContain('PERFORMANCE_N_PLUS_ONE');
   });
 
   it('fires when data(from:) appears inside a map block', () => {
@@ -264,7 +264,7 @@ describe('N1_QUERY — sliding-window detector', () => {
       '    return data',
       '}',
     ].join('\n');
-    expect(scan(code)).toContain('N1_QUERY');
+    expect(scan(code)).toContain('PERFORMANCE_N_PLUS_ONE');
   });
 
   it('fires when fetchRequest.execute() appears within 5 lines of a forEach', () => {
@@ -276,7 +276,7 @@ describe('N1_QUERY — sliding-window detector', () => {
       '    let found = try fetchRequest.execute()',
       '}',
     ].join('\n');
-    expect(scan(code)).toContain('N1_QUERY');
+    expect(scan(code)).toContain('PERFORMANCE_N_PLUS_ONE');
   });
 
   it('does NOT fire when fetch call is outside any loop', () => {
@@ -286,7 +286,7 @@ describe('N1_QUERY — sliding-window detector', () => {
       '    return data',
       '}',
     ].join('\n');
-    expect(scan(code)).not.toContain('N1_QUERY');
+    expect(scan(code)).not.toContain('PERFORMANCE_N_PLUS_ONE');
   });
 
   it('does NOT fire when fetch call is more than 5 lines after loop open', () => {
@@ -300,7 +300,7 @@ describe('N1_QUERY — sliding-window detector', () => {
       '    let task = URLSession.shared.dataTask(with: url)',
       '}',
     ].join('\n');
-    expect(scan(code)).not.toContain('N1_QUERY');
+    expect(scan(code)).not.toContain('PERFORMANCE_N_PLUS_ONE');
   });
 
   it('does NOT fire when commented-out fetch is inside a loop', () => {
@@ -309,6 +309,6 @@ describe('N1_QUERY — sliding-window detector', () => {
       '    // let task = URLSession.shared.dataTask(with: url)',
       '}',
     ].join('\n');
-    expect(scan(code)).not.toContain('N1_QUERY');
+    expect(scan(code)).not.toContain('PERFORMANCE_N_PLUS_ONE');
   });
 });

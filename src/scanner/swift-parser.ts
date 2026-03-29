@@ -194,7 +194,7 @@ function detectSwiftN1(parsed: SwiftParseResult): Finding[] {
 
       if (SWIFT_N1_FETCH.test(innerLine)) {
         findings.push({
-          type: 'N1_QUERY',
+          type: 'PERFORMANCE_N_PLUS_ONE',
           severity: 'high',
           line: j + 1,
           column: 0,
