@@ -219,6 +219,93 @@ const JAVA_PATTERNS: JavaPattern[] = [
   // These placeholder entries are not used directly; the stateful detector handles them.
 ];
 
+// ── Stateful MISSING_AUTH detector for Spring endpoints ───────────────────────
+//
+// Scans for @RestController / @Controller classes and flags @RequestMapping /
+// @GetMapping / @PostMapping / @PutMapping / @DeleteMapping / @PatchMapping
+// methods that lack @PreAuthorize or @Secured on either the method or the class.
+
+function detectSpringMissingAuth(lines: string[], filePath: string): Finding[] {
+  const findings: Finding[] = [];
+
+  // Class-level auth annotation state
+  let inController = false;
+  let classHasAuth = false;
+  let classAuthChecked = false;
+
+  // Method state
+  let pendingMappingLine = -1;
+  let pendingMappingName = '';
+  let methodHasAuth = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+
+    // Detect @RestController or @Controller — marks start of a controller class
+    if (/@(?:RestController|Controller)\b/.test(line)) {
+      inController = true;
+      classHasAuth = false;
+      classAuthChecked = false;
+    }
+
+    if (inController && !classAuthChecked) {
+      if (/@(?:PreAuthorize|Secured)\b/.test(line)) {
+        classHasAuth = true;
+      }
+      // Once we see the class declaration line, stop looking for class-level auth
+      if (/\bclass\s+\w/.test(line)) {
+        classAuthChecked = true;
+      }
+    }
+
+    // Track endpoint mapping annotations
+    if (/@(?:RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping)\b/.test(line)) {
+      pendingMappingLine = i + 1; // 1-indexed
+      // Extract method name hint from annotation
+      pendingMappingName = line.trim();
+      methodHasAuth = false;
+    }
+
+    // Auth annotation on the method (line before or on same annotation block)
+    if (/@(?:PreAuthorize|Secured)\b/.test(line)) {
+      methodHasAuth = true;
+      // Also covers class-level
+      if (!classAuthChecked) classHasAuth = true;
+    }
+
+    // When we see the method signature after a mapping annotation, evaluate
+    if (
+      pendingMappingLine > 0 &&
+      /\b(?:public|protected|private)\s+\w[\w<>\[\]]*\s+\w+\s*\(/.test(line)
+    ) {
+      if (!classHasAuth && !methodHasAuth) {
+        const methodMatch = line.match(/\b(\w+)\s*\(/);
+        const methodName = methodMatch?.[1] ?? 'unknown';
+        findings.push({
+          type: 'MISSING_AUTH',
+          severity: 'high',
+          line: pendingMappingLine,
+          column: 0,
+          snippet: pendingMappingName.slice(0, 100),
+          message:
+            `Spring endpoint method '${methodName}' lacks @PreAuthorize or @Secured annotation. ` +
+            'Add @PreAuthorize("isAuthenticated()") or @Secured("ROLE_USER") to restrict access. ' +
+            'Alternatively, configure Spring Security HttpSecurity to require authentication for this path.',
+          confidence: 0.8,
+          file: filePath,
+        });
+      }
+      pendingMappingLine = -1;
+      pendingMappingName = '';
+      methodHasAuth = false;
+    }
+  }
+
+  return findings;
+}
+
 /**
  * Scans a parsed Java source for security vulnerabilities using pattern matching.
  * Returns findings in the same Finding format as JS/TS, Python, and Go detectors.
@@ -306,6 +393,9 @@ export function scanJava(result: JavaParseResult): Finding[] {
       }
     }
   });
+
+  // Stateful Spring MISSING_AUTH detection
+  findings.push(...detectSpringMissingAuth(result.lines, result.filePath));
 
   return findings;
 }
