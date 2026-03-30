@@ -460,6 +460,48 @@ ${indent}    raise ValueError(${msg})`;
       return null;
     },
   },
+
+  // ── INSECURE_SHARED_PREFS (Kotlin/Android): getSharedPreferences → EncryptedSharedPreferences ──
+  {
+    types: ['INSECURE_SHARED_PREFS'],
+    description: 'Note: replace getSharedPreferences with EncryptedSharedPreferences for sensitive data',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.kt' && ext !== '.kts') return null;
+      if (/EncryptedSharedPreferences/.test(line)) return null;
+      if (!/getSharedPreferences\s*\(/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(INSECURE_SHARED_PREFS): Replace getSharedPreferences with EncryptedSharedPreferences\n` +
+        `${indent}// val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()\n` +
+        `${indent}// val prefs = EncryptedSharedPreferences.create(context, "secure_prefs", masterKey,\n` +
+        `${indent}//     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,\n` +
+        `${indent}//     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)\n` +
+        line
+      );
+    },
+  },
+
+  // ── WEBVIEW_LOAD_URL (Kotlin/Android): loadUrl with user input → validate before loading ──
+  {
+    types: ['WEBVIEW_LOAD_URL'],
+    description: 'Note: validate URL before passing to WebView.loadUrl() to prevent JavaScript injection',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.kt' && ext !== '.kts') return null;
+      if (!/\.loadUrl\s*\(/.test(line)) return null;
+      // If already has URL validation patterns, skip
+      if (/startsWith\s*\(["']https|Uri\.parse|allowedUrls|whitelist/i.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(WEBVIEW_LOAD_URL): Validate URL before loading. Example:\n` +
+        `${indent}// val allowedHosts = setOf("example.com", "api.example.com")\n` +
+        `${indent}// val uri = Uri.parse(url)\n` +
+        `${indent}// if (uri.scheme != "https" || !allowedHosts.contains(uri.host)) return\n` +
+        line
+      );
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────
