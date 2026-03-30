@@ -63,6 +63,39 @@ describe('.ai-sec-scan.json — fix and severity schema', () => {
   });
 });
 
+// ── yes flag schema ──────────────────────────────────────────────────────────
+
+describe('.ai-sec-scan.json — yes flag', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-yes-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('config file with yes:true is valid and round-trips', () => {
+    const configPath = writeTempConfig(tmpDir, { yes: true });
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    expect(parsed.yes).toBe(true);
+  });
+
+  test('config file with yes:false is valid and round-trips', () => {
+    const configPath = writeTempConfig(tmpDir, { yes: false });
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    expect(parsed.yes).toBe(false);
+  });
+
+  test('config file with yes:true combined with fix:true is valid', () => {
+    const configPath = writeTempConfig(tmpDir, { fix: true, yes: true });
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    expect(parsed.fix).toBe(true);
+    expect(parsed.yes).toBe(true);
+  });
+});
+
 // ── Per-rule severity overrides (rules key) ──────────────────────────────────
 
 describe('.ai-sec-scan.json — per-rule severity overrides', () => {
