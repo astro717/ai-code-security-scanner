@@ -450,6 +450,7 @@ function startWatchMode(
   ignorePatterns: string[],
   severity: string,
   outputPath?: string,
+  minConfidence?: number,
 ): void {
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
   const minSeverity = severityOrder[severity as keyof typeof severityOrder] ?? 3;
@@ -473,7 +474,11 @@ function startWatchMode(
 
   function scanAndUpdate(filePath: string): void {
     const raw = scanFile(filePath);
-    const filtered = raw.filter((f) => severityOrder[f.severity] <= minSeverity);
+    let filtered = raw.filter((f) => severityOrder[f.severity] <= minSeverity);
+    // Apply confidence threshold if specified
+    if (minConfidence != null && !isNaN(minConfidence)) {
+      filtered = filtered.filter((f) => f.confidence == null || f.confidence >= minConfidence);
+    }
     const prev = cache.get(filePath) ?? [];
     cache.set(filePath, filtered);
     const { added, resolved } = diffFindings(prev, filtered);
@@ -492,7 +497,11 @@ function startWatchMode(
   console.error('[watch] Press Ctrl+C to stop.\n');
   for (const f of initialFiles) {
     const raw = scanFile(f);
-    cache.set(f, raw.filter((fi) => severityOrder[fi.severity] <= minSeverity));
+    let seeded = raw.filter((fi) => severityOrder[fi.severity] <= minSeverity);
+    if (minConfidence != null && !isNaN(minConfidence)) {
+      seeded = seeded.filter((fi) => fi.confidence == null || fi.confidence >= minConfidence);
+    }
+    cache.set(f, seeded);
   }
 
   const watchers: fs.FSWatcher[] = [];
@@ -562,6 +571,13 @@ program
     '--min-severity <level>',
     'Minimum severity level that triggers a non-zero exit code (critical|high|medium|low). ' +
     'Defaults to high when omitted (only critical/high cause failure).',
+  )
+  .option(
+    '--min-confidence <threshold>',
+    'Only report findings with a confidence score at or above this threshold (0.0–1.0). ' +
+    'For example, --min-confidence 0.8 suppresses low-confidence heuristic findings. ' +
+    'Applies to both one-shot scan and --watch mode.',
+    parseFloat,
   )
   .option('--ignore <glob>', 'Glob pattern to exclude (repeatable, e.g. --ignore \'**/node_modules/**\')', (val, acc: string[]) => { acc.push(val); return acc; }, [] as string[])
   .option(
@@ -688,7 +704,7 @@ program
     '(Anthropic or OpenAI) for plain-language explanations and fix suggestions. ' +
     'Requires a running ai-sec-scan server or direct API key via --openai-key / ANTHROPIC_API_KEY.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; diff: boolean; fix: boolean; dryRun: boolean; typeList: boolean; listTypes: boolean; summaryOnly: boolean; aiProvider?: string; openaiKey?: string; explain?: boolean }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; diff: boolean; fix: boolean; dryRun: boolean; typeList: boolean; listTypes: boolean; summaryOnly: boolean; aiProvider?: string; openaiKey?: string; explain?: boolean; minConfidence?: number }) => {
     // --type-list: print all known finding types and exit immediately.
     if (options.typeList) {
       const types = [...KNOWN_TYPES].sort();
@@ -829,7 +845,7 @@ program
         fs.writeFileSync(watchOutputPath, `# ai-sec-scan watch session started ${new Date().toISOString()}\n`, 'utf8');
         console.error(`[output] Watch mode: appending diff entries to ${watchOutputPath}`);
       }
-      startWatchMode(scanRoot, effectiveIgnore, effectiveSeverity, watchOutputPath);
+      startWatchMode(scanRoot, effectiveIgnore, effectiveSeverity, watchOutputPath, options.minConfidence);
       return;
     }
 
@@ -972,6 +988,20 @@ program
     // --severity controls which findings are reported
     const minReport = severityOrder[effectiveSeverity] ?? 3;
     let filtered = deduped.filter((f) => (severityOrder[f.severity] ?? 3) <= minReport);
+
+    // ── --min-confidence filter ───────────────────────────────────────────────
+    if (options.minConfidence != null && !isNaN(options.minConfidence)) {
+      const before = filtered.length;
+      filtered = filtered.filter(
+        (f) => f.confidence == null || f.confidence >= options.minConfidence!,
+      );
+      const suppressed = before - filtered.length;
+      if (suppressed > 0) {
+        console.error(
+          `[min-confidence] ${suppressed} low-confidence finding(s) suppressed (threshold: ${options.minConfidence}).`,
+        );
+      }
+    }
 
     // ── --ignore-type suppression ────────────────────────────────────────────
     // Remove findings whose type matches any --ignore-type value before
