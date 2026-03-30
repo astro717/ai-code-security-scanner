@@ -37,6 +37,7 @@ import { parseRubyCode, scanRuby } from './scanner/ruby-parser';
 import { parseKotlinCode, scanKotlin } from './scanner/kotlin-parser';
 import { parseSwiftCode, scanSwift } from './scanner/swift-parser';
 import { parseRustCode, scanRust } from './scanner/rust-parser';
+import { applyFixes, FixResult } from './scanner/fixer';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
@@ -1150,6 +1151,123 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[scan-repo] error: ${msg}`);
     res.status(500).json({ error: `Failed to scan repository: ${msg}` });
+  }
+});
+
+// ── POST /fix — dry-run fix preview ──────────────────────────────────────────
+//
+// Accepts: { code: string, filename: string, findings?: Finding[] }
+// If findings are not provided, runs a scan first.
+// Returns: { fixes: FixResult[], diff: string, applied: number }
+
+app.post('/fix', scanLimiter, async (req, res): Promise<void> => {
+  const body = req.body as Record<string, unknown>;
+
+  const code = body['code'];
+  const filename = body['filename'];
+
+  if (typeof code !== 'string' || !code.trim()) {
+    res.status(400).json({ error: '"code" must be a non-empty string' });
+    return;
+  }
+  if (typeof filename !== 'string' || !filename.trim()) {
+    res.status(400).json({ error: '"filename" must be a non-empty string' });
+    return;
+  }
+
+  try {
+    // Write code to a temp file so applyFixes can read it
+    const os = await import('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-fix-'));
+    const tmpFile = path.join(tmpDir, path.basename(filename));
+    fs.writeFileSync(tmpFile, code, 'utf-8');
+
+    // Get findings — either from body or by scanning
+    let findings: Finding[];
+    if (Array.isArray(body['findings']) && (body['findings'] as unknown[]).length > 0) {
+      // Use provided findings but remap file paths to tmpFile
+      findings = (body['findings'] as Finding[]).map((f) => ({ ...f, file: tmpFile }));
+    } else {
+      // Run a fresh scan on the temp file
+      const scanBody = { code, filename };
+      // Inline scan logic (same as /scan but synchronous-ish)
+      const tempReq = { body: scanBody } as typeof req;
+      // Simplified: just run the same scan function used in /scan
+      const scanFindings = await (async (): Promise<Finding[]> => {
+        const ext = path.extname(filename).toLowerCase();
+        if (ext === '.py') {
+          const { parsePythonCode: p, scanPython: s } = await import('./scanner/python-parser');
+          return s(p(code, tmpFile));
+        } else if (ext === '.java') {
+          const { parseJavaCode: p, scanJava: s } = await import('./scanner/java-parser');
+          return s(p(code, tmpFile));
+        } else if (ext === '.cs') {
+          const { parseCSharpCode: p, scanCSharp: s } = await import('./scanner/csharp-parser');
+          return s(p(code, tmpFile));
+        } else if (ext === '.go') {
+          const { parseGoCode: p, scanGo: s } = await import('./scanner/go-parser');
+          return s(p(code, tmpFile));
+        } else if (ext === '.rb') {
+          const { parseRubyCode: p, scanRuby: s } = await import('./scanner/ruby-parser');
+          return s(p(code, tmpFile));
+        } else if (ext === '.kt' || ext === '.kts') {
+          const { parseKotlinCode: p, scanKotlin: s } = await import('./scanner/kotlin-parser');
+          return s(p(code, tmpFile));
+        } else if (ext === '.swift') {
+          const { parseSwiftCode: p, scanSwift: s } = await import('./scanner/swift-parser');
+          return s(p(code, tmpFile));
+        } else if (ext === '.rs') {
+          const { parseRustCode: p, scanRust: s } = await import('./scanner/rust-parser');
+          return s(p(code, tmpFile));
+        }
+        return [];
+      })();
+      findings = scanFindings;
+    }
+
+    // Apply fixes in dry-run mode
+    const fixResults: FixResult[] = applyFixes(findings, /* dryRun */ true);
+    const applied = fixResults.filter((r) => r.applied).length;
+
+    // Build diff
+    const diffLines: string[] = [];
+    const codeLines = code.split('\n');
+    for (const r of fixResults) {
+      if (!r.applied || r.originalLine === undefined || r.fixedLine === undefined) continue;
+      const lineIdx = r.finding.line - 1;
+      const ctxStart = Math.max(0, lineIdx - 2);
+      const ctxEnd = Math.min(codeLines.length - 1, lineIdx + 2);
+      diffLines.push(`@@ -${ctxStart + 1},${ctxEnd - ctxStart + 1} +${ctxStart + 1},${ctxEnd - ctxStart + 1} @@ [${r.finding.type}]`);
+      for (let i = ctxStart; i <= ctxEnd; i++) {
+        if (i === lineIdx) {
+          diffLines.push(`-${r.originalLine}`);
+          diffLines.push(`+${r.fixedLine}`);
+        } else {
+          diffLines.push(` ${codeLines[i] ?? ''}`);
+        }
+      }
+    }
+
+    // Clean up temp file
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+
+    res.json({
+      fixes: fixResults.map((r) => ({
+        type: r.finding.type,
+        severity: r.finding.severity,
+        line: r.finding.line,
+        applied: r.applied,
+        description: r.description,
+        originalLine: r.originalLine,
+        fixedLine: r.fixedLine,
+      })),
+      diff: diffLines.join('\n'),
+      applied,
+      total: fixResults.length,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Fix preview failed: ${msg}` });
   }
 });
 
