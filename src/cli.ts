@@ -21,6 +21,7 @@ import { detectJWTSecrets } from './scanner/detectors/jwt';
 import { detectReDoS } from './scanner/detectors/redos';
 import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
+import { detectCSRF } from './scanner/detectors/csrf';
 import { Finding, printFindings, formatFindingsText, formatJSON, summarize, deduplicateFindings, KNOWN_TYPES } from './scanner/reporter';
 import { detectUnsafeDeps } from './scanner/detectors/deps';
 import { buildSARIF } from './scanner/sarif';
@@ -268,6 +269,7 @@ function scanFileUncached(filePath: string): Finding[] {
       ...detectCORSMisconfiguration(parsed),
       ...detectReDoS(parsed),
       ...detectWeakCrypto(parsed),
+      ...detectCSRF(parsed),
     ].map((f) => ({ ...f, file: filePath }));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

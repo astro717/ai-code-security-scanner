@@ -274,6 +274,41 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'shell commands allow arbitrary code execution. Use subprocess with a list of arguments ' +
       'and shell=False.',
   },
+
+  // ── CSRF — Django: @csrf_exempt disables built-in CSRF protection ─────────
+  {
+    type: 'CSRF',
+    severity: 'high',
+    pattern: /@csrf_exempt\b/,
+    message:
+      "@csrf_exempt disables Django's CSRF protection for this view. " +
+      'This makes POST/PUT/DELETE endpoints vulnerable to cross-site request forgery. ' +
+      "Remove @csrf_exempt and ensure the client sends the CSRF token via the 'X-CSRFToken' header.",
+    confidence: 0.95,
+  },
+
+  // ── CSRF — Flask: WTF_CSRF_ENABLED = False disables Flask-WTF CSRF globally ─
+  {
+    type: 'CSRF',
+    severity: 'high',
+    pattern: /WTF_CSRF_ENABLED\s*=\s*False\b/,
+    message:
+      "WTF_CSRF_ENABLED = False disables Flask-WTF's global CSRF protection. " +
+      "Remove this line or set it to True. Use CSRFProtect(app) to enforce CSRF tokens on all POST endpoints.",
+    confidence: 0.95,
+  },
+
+  // ── CSRF — Flask: methods=['POST','DELETE','PUT'] without @login_required or any_token check ─
+  {
+    type: 'CSRF',
+    severity: 'medium',
+    pattern: /methods\s*=\s*\[['"][^'"]*(?:POST|DELETE|PUT|PATCH)['"]/,
+    message:
+      "Flask route handles mutating HTTP methods (POST/PUT/DELETE/PATCH). " +
+      "Ensure Flask-WTF CSRFProtect is active or validate csrf_token() manually in the handler. " +
+      "Without CSRF protection, state-changing endpoints are vulnerable to cross-site request forgery.",
+    confidence: 0.65,
+  },
 ];
 
 /**
