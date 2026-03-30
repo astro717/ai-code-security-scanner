@@ -44,6 +44,8 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   SQL_INJECTION_CS:      'User-controlled input concatenated into a SQL query in a C# context without parameterisation.',
   PATH_TRAVERSAL_CS:     'User-controlled path used in a C# filesystem call without sanitisation or bounds checking.',
   PERFORMANCE_N_PLUS_ONE: 'ORM or database query executed inside a loop — N+1 query pattern degrades performance under load.',
+  MISSING_AUTH:           'Sensitive endpoint or action reached without an authentication or authorisation check.',
+  CSRF:                   'State-mutating route is accessible without CSRF protection middleware.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
