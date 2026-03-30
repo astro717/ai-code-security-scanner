@@ -425,6 +425,96 @@ ${indent}    raise ValueError(${msg})`;
     },
   },
 
+  // ── SQL_INJECTION (PHP): string concatenation → PDO parameterized query note ─
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Add TODO note to use PDO parameterized queries instead of string concatenation',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.php') return null;
+      if (/prepare\s*\(|bindParam|bindValue|execute\s*\(\[/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO: Use PDO parameterized queries: $stmt = $pdo->prepare("... WHERE id = ?"); $stmt->execute([$id]);\n` +
+        line
+      );
+    },
+  },
+
+  // ── XSS (PHP): echo $_GET → wrap with htmlspecialchars ────────────────────
+  {
+    types: ['XSS'],
+    description: 'Wrap PHP output with htmlspecialchars() to prevent XSS',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.php') return null;
+      if (/htmlspecialchars|htmlentities/.test(line)) return null;
+      // Pattern: echo $_GET['x'] or echo $_POST['x'] etc.
+      const m = line.match(/^(\s*)(echo|print)\s+(\$_(GET|POST|REQUEST|COOKIE)\[['"]?\w+['"]?\])\s*;/);
+      if (m) {
+        return `${m[1]}${m[2]} htmlspecialchars(${m[3]}, ENT_QUOTES, 'UTF-8');`;
+      }
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO: Wrap output with htmlspecialchars($var, ENT_QUOTES, 'UTF-8') to prevent XSS\n` +
+        line
+      );
+    },
+  },
+
+  // ── COMMAND_INJECTION (PHP): shell_exec with user input → escapeshellarg ───
+  {
+    types: ['COMMAND_INJECTION'],
+    description: 'Wrap PHP shell argument with escapeshellarg() to prevent command injection',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.php') return null;
+      if (/escapeshellarg|escapeshellcmd/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO: Wrap user input with escapeshellarg() before passing to shell functions\n` +
+        line
+      );
+    },
+  },
+
+  // ── INSECURE_RANDOM (PHP): rand()/mt_rand() → random_int()/random_bytes() ──
+  {
+    types: ['INSECURE_RANDOM'],
+    description: 'Replace PHP rand()/mt_rand() with cryptographically secure random_int()',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.php') return null;
+      // Replace rand( with random_int(
+      if (/\brand\s*\(/.test(line)) {
+        return line.replace(/\brand\s*\(/, 'random_int(');
+      }
+      // Replace mt_rand( with random_int(
+      if (/\bmt_rand\s*\(/.test(line)) {
+        return line.replace(/\bmt_rand\s*\(/, 'random_int(');
+      }
+      return null;
+    },
+  },
+
+  // ── WEAK_CRYPTO (PHP): md5()/sha1() → password_hash() note ───────────────
+  {
+    types: ['WEAK_CRYPTO'],
+    description: 'Replace PHP md5()/sha1() with password_hash() for passwords or hash() for data integrity',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.php') return null;
+      if (/password_hash|hash\s*\(\s*'sha256'/.test(line)) return null;
+      if (/\bmd5\s*\(/.test(line)) {
+        return line.replace(/\bmd5\s*\(/, 'hash(\'sha256\', ');
+      }
+      if (/\bsha1\s*\(/.test(line)) {
+        return line.replace(/\bsha1\s*\(/, 'hash(\'sha256\', ');
+      }
+      return null;
+    },
+  },
+
   // ── COMMAND_INJECTION (Ruby): system/exec with string interpolation ────────
   // Converts system("cmd #{var}") to system("cmd", var) (array form, no shell).
   // Backtick interpolation gets a TODO comment prepended.
@@ -464,7 +554,7 @@ ${indent}    raise ValueError(${msg})`;
 
 // ── File extension guard ───────────────────────────────────────────────────────
 
-const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb']);
+const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb', '.php']);
 
 function isFixableFile(filePath: string): boolean {
   return FIXABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
