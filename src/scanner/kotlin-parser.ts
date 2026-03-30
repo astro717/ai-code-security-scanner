@@ -126,19 +126,71 @@ const KOTLIN_PATTERNS: KotlinPattern[] = [
       'android:permission are accessible to any app on the device.',
   },
 
-  // N+1 query pattern — database query call indented inside a loop body
-  // Because the scanner is line-by-line, matches query lines deeply indented (8+ spaces)
-  // inside a forEach/for block where the surrounding context suggests a loop.
-  {
-    type: 'PERFORMANCE_N_PLUS_ONE',
-    severity: 'medium',
-    pattern: /^\s{8,}(?:db|repository|dao|userRepository|orderRepository|itemRepository)\s*\.\s*(?:rawQuery|execSQL|findBy\w+|query|get\w+|fetch\w+)\s*\(/,
-    message:
-      'Database query appears to be called from inside a loop body (deeply indented). ' +
-      'This is a classic N+1 query pattern: one query per iteration causes O(n) database ' +
-      'roundtrips. Batch the query outside the loop or use a JOIN/IN clause instead.',
-  },
 ];
+
+// ── Stateful N+1 query detector ───────────────────────────────────────────────
+//
+// Tracks entry into for/forEach/while loops and flags JPA, Hibernate, Room, or
+// repository calls found inside the loop body.
+
+// Kotlin loop patterns: for (...) {, list.forEach {, items.map {
+const KOTLIN_LOOP_START = /\b(?:for\s*\(|\.forEach\s*\{|\.forEachIndexed\s*\{|\.map\s*\{|\.flatMap\s*\{|\.filter\s*\{|while\s*\()/;
+
+// ORM/DB call patterns for Kotlin: JPA, Hibernate, Room, Spring Data
+const KOTLIN_ORM_CALL =
+  /\b(?:repository|dao|userRepository|orderRepository|itemRepository|productRepository)\s*\.\s*(?:findBy\w+|findAll|save|getById|findById|query|count|existsBy\w+)\s*\(|\.load\s*\(|\.get\s*\(|entityManager\s*\.\s*find\s*\(|entityManager\s*\.\s*createQuery\s*\(|\.executeQuery\s*\(|db\s*\.\s*(?:query|insert|update|delete)\s*\(/;
+
+export function detectKotlinN1(lines: string[], filePath: string): Finding[] {
+  const findings: Finding[] = [];
+  let inLoop = false;
+  let loopBraceDepth = 0;
+  let loopStartLine = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+
+    if (!inLoop) {
+      if (KOTLIN_LOOP_START.test(line)) {
+        inLoop = true;
+        loopStartLine = i + 1;
+        loopBraceDepth = 0;
+      }
+    }
+
+    if (inLoop) {
+      for (const char of line) {
+        if (char === '{') loopBraceDepth++;
+        if (char === '}') loopBraceDepth--;
+      }
+
+      if (KOTLIN_ORM_CALL.test(line)) {
+        findings.push({
+          type: 'PERFORMANCE_N_PLUS_ONE',
+          severity: 'medium',
+          line: i + 1,
+          column: line.search(/\S/),
+          snippet: trimmed.slice(0, 100),
+          message:
+            'JPA/Hibernate/Room query inside a loop — N+1 query pattern detected. ' +
+            'Each iteration issues a separate database round-trip. ' +
+            'Use Spring Data batch loading, JPA JOIN FETCH, @BatchSize, or collect IDs first and use findAllById().',
+          confidence: 0.82,
+          file: filePath,
+        });
+      }
+
+      if (loopBraceDepth <= 0 && loopStartLine > 0) {
+        inLoop = false;
+        loopStartLine = 0;
+      }
+    }
+  }
+
+  return findings;
+}
 
 /**
  * Scans a parsed Kotlin source for security vulnerabilities using pattern matching.
@@ -169,6 +221,9 @@ export function scanKotlin(result: KotlinParseResult): Finding[] {
       }
     }
   });
+
+  // Stateful N+1 detection
+  findings.push(...detectKotlinN1(result.lines, result.filePath));
 
   return findings;
 }
