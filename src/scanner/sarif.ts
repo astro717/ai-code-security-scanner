@@ -1,5 +1,6 @@
 import { Finding } from './reporter';
 import { getOwaspCategory } from './owasp';
+import type { FixResult } from './fixer';
 
 // ── SARIF rule metadata ────────────────────────────────────────────────────────
 
@@ -48,7 +49,21 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';
 
-export function buildSARIF(findings: Finding[], toolName = 'ai-code-security-scanner'): object {
+export function buildSARIF(
+  findings: Finding[],
+  toolName = 'ai-code-security-scanner',
+  fixResults?: FixResult[],
+): object {
+  // Build a lookup: (file, line, type) → FixResult for fast embedding
+  const fixMap = new Map<string, FixResult>();
+  if (fixResults) {
+    for (const r of fixResults) {
+      if (!r.applied || r.fixedLine === undefined) continue;
+      const key = `${r.file}:${r.finding.line}:${r.finding.type}`;
+      fixMap.set(key, r);
+    }
+  }
+
   const rules = Array.from(new Set(findings.map((f) => f.type))).map((id) => {
     const owasp = getOwaspCategory(id);
     const rule: Record<string, unknown> = {
@@ -72,21 +87,52 @@ export function buildSARIF(findings: Finding[], toolName = 'ai-code-security-sca
     return rule;
   });
 
-  const results = findings.map((f) => ({
-    ruleId: f.type,
-    level:
-      f.severity === 'critical' || f.severity === 'high' ? 'error' :
-      f.severity === 'medium' ? 'warning' : 'note',
-    message: { text: f.message },
-    locations: [
-      {
-        physicalLocation: {
-          artifactLocation: { uri: f.file ?? 'unknown' },
-          region: { startLine: f.line, startColumn: f.column },
+  const results = findings.map((f) => {
+    const result: Record<string, unknown> = {
+      ruleId: f.type,
+      level:
+        f.severity === 'critical' || f.severity === 'high' ? 'error' :
+        f.severity === 'medium' ? 'warning' : 'note',
+      message: { text: f.message },
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri: f.file ?? 'unknown' },
+            region: { startLine: f.line, startColumn: f.column },
+          },
         },
-      },
-    ],
-  }));
+      ],
+    };
+
+    // Embed SARIF 2.1.0 fix object if a dry-run fix is available for this finding
+    const fixKey = `${f.file ?? 'unknown'}:${f.line}:${f.type}`;
+    const fix = fixMap.get(fixKey);
+    if (fix && fix.fixedLine !== undefined && fix.originalLine !== undefined) {
+      result['fixes'] = [
+        {
+          description: { text: fix.description },
+          artifactChanges: [
+            {
+              artifactLocation: { uri: f.file ?? 'unknown' },
+              replacements: [
+                {
+                  deletedRegion: {
+                    startLine: f.line,
+                    startColumn: 1,
+                    endLine: f.line,
+                    endColumn: fix.originalLine.length + 1,
+                  },
+                  insertedContent: { text: fix.fixedLine + '\n' },
+                },
+              ],
+            },
+          ],
+        },
+      ];
+    }
+
+    return result;
+  });
 
   return {
     version: '2.1.0',

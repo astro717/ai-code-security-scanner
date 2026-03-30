@@ -1089,7 +1089,9 @@ program
     // --summary-only: skip full findings output; just print the count line below
     if (!options.summaryOnly) {
     if (effectiveFormat === 'sarif') {
-      emit(JSON.stringify(buildSARIF(filtered), null, 2));
+      // When --fix --dry-run is combined with --sarif, embed proposed fixes as SARIF fix objects
+      const sarifFixResults = (options.fix && options.dryRun) ? _fixResults : undefined;
+      emit(JSON.stringify(buildSARIF(filtered, 'ai-code-security-scanner', sarifFixResults), null, 2));
     } else if (effectiveFormat === 'json') {
       emit(formatJSON(filtered));
     } else if (effectiveFormat === 'junit') {
