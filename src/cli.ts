@@ -37,6 +37,7 @@ import { parseRubyFile, scanRuby } from './scanner/ruby-parser';
 import { parseKotlinCode, parseKotlinFile, scanKotlin } from './scanner/kotlin-parser';
 import { parseSwiftFile, scanSwift } from './scanner/swift-parser';
 import { parseRustFile, scanRust } from './scanner/rust-parser';
+import { parsePHPFile, scanPHP } from './scanner/php-parser';
 import { initCache, persistCache, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/scan-cache';
 import { applyFixes, printFixSummary, buildUnifiedDiff } from './scanner/fixer';
 import * as os from 'os';
@@ -54,6 +55,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   '.kt', '.kts',
   '.swift',
   '.rs',
+  '.php',
 ]);
 
 // ── .aiscanner ignore file ────────────────────────────────────────────────────
@@ -241,6 +243,18 @@ function scanFileUncached(filePath: string): Finding[] {
     try {
       const parsed = parseRustFile(filePath);
       return scanRust(parsed);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  [skip] ${filePath}: ${msg}`);
+      return [];
+    }
+  }
+
+  // PHP files use the dedicated regex-based scanner.
+  if (ext === '.php') {
+    try {
+      const parsed = parsePHPFile(filePath);
+      return scanPHP(parsed);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  [skip] ${filePath}: ${msg}`);
