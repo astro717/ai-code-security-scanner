@@ -37,6 +37,7 @@ import { parseRubyCode, scanRuby } from './scanner/ruby-parser';
 import { parseKotlinCode, scanKotlin } from './scanner/kotlin-parser';
 import { parseSwiftCode, scanSwift } from './scanner/swift-parser';
 import { parseRustCode, scanRust } from './scanner/rust-parser';
+import { parsePHPCode, scanPHP } from './scanner/php-parser';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
@@ -776,6 +777,10 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     // Rust files use the dedicated regex-based Rust scanner
     const rustResult = parseRustCode(code, effectiveFilename);
     findings = scanRust(rustResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+  } else if (ext === '.php') {
+    // PHP files use the dedicated regex-based PHP scanner
+    const phpResult = parsePHPCode(code, effectiveFilename);
+    findings = scanPHP(phpResult).map((f) => ({ ...f, file: filename ?? 'input' }));
   } else {
     // JS/TS files use the AST-based parser and detector suite
     let parsed;
@@ -1068,6 +1073,9 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
           } else if (ext === '.rs') {
             const parsed = parseRustCode(code, item.path);
             findings = scanRust(parsed);
+          } else if (ext === '.php') {
+            const parsed = parsePHPCode(code, item.path);
+            findings = scanPHP(parsed);
           } else {
             // JS/TS — use AST-based detectors
             const parsed = parseCode(code, item.path);
@@ -1175,7 +1183,7 @@ app.get('/watch', (req, res) => {
   res.write(`event: connected\ndata: ${JSON.stringify({ path: resolvedPath, ts: new Date().toISOString() })}\n\n`);
 
   const JS_TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-  const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb', '.kt', '.kts', '.swift', '.rs']);
+  const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb', '.kt', '.kts', '.swift', '.rs', '.php']);
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingFiles = new Set<string>();
@@ -1212,6 +1220,9 @@ app.get('/watch', (req, res) => {
       } else if (ext === '.rs') {
         const parsed = parseRustCode(code, filePath);
         return scanRust(parsed);
+      } else if (ext === '.php') {
+        const parsed = parsePHPCode(code, filePath);
+        return scanPHP(parsed);
       } else if (JS_TS_EXTENSIONS.has(ext)) {
         const parsed = parseCode(code, filePath);
         return [
