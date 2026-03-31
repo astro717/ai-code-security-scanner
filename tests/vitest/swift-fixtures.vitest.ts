@@ -171,6 +171,18 @@ describe('vulnerable.swift fixture', () => {
     expect(types).toContain('WEAK_CRYPTO');
   });
 
+  it('detects PERFORMANCE_N_PLUS_ONE findings', () => {
+    const result = scanSwift(parseSwiftFile(vulnerableFile));
+    const types = result.map((f) => f.type);
+    expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  it('detects at least 2 PERFORMANCE_N_PLUS_ONE findings (forEach + for-in)', () => {
+    const result = scanSwift(parseSwiftFile(vulnerableFile));
+    const n1Findings = result.filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE');
+    expect(n1Findings.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('each finding has correct file path', () => {
     const result = scanSwift(parseSwiftFile(vulnerableFile));
     for (const f of result) {
@@ -232,5 +244,83 @@ describe('Finding metadata', () => {
   it('does NOT scan comment lines', () => {
     const code = `// CC_MD5(bytes, len, &digest)`;
     expect(scan(code)).not.toContain('WEAK_CRYPTO');
+  });
+});
+
+// ── N1_QUERY sliding-window ───────────────────────────────────────────────────
+
+describe('N1_QUERY — sliding-window detector', () => {
+  it('fires when dataTask(with:) appears inside a forEach block', () => {
+    const code = [
+      'items.forEach {',
+      '    let task = URLSession.shared.dataTask(with: url)',
+      '    task.resume()',
+      '}',
+    ].join('\n');
+    expect(scan(code)).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  it('fires when context.fetch() appears inside a for-in loop', () => {
+    const code = [
+      'for item in items {',
+      '    let results = try context.fetch(fetchRequest)',
+      '}',
+    ].join('\n');
+    expect(scan(code)).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  it('fires when data(from:) appears inside a map block', () => {
+    const code = [
+      'let results = urls.map {',
+      '    let (data, _) = try await session.data(from: $0)',
+      '    return data',
+      '}',
+    ].join('\n');
+    expect(scan(code)).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  it('fires when fetchRequest.execute() appears within 5 lines of a forEach', () => {
+    const code = [
+      'items.forEach { item in',
+      '    let ctx = item.managedObjectContext',
+      '    let req = NSFetchRequest<Entity>(entityName: "Entity")',
+      '    req.predicate = NSPredicate(format: "id == %@", item.id)',
+      '    let found = try fetchRequest.execute()',
+      '}',
+    ].join('\n');
+    expect(scan(code)).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  it('does NOT fire when fetch call is outside any loop', () => {
+    const code = [
+      'func loadData() async throws {',
+      '    let (data, _) = try await session.data(from: url)',
+      '    return data',
+      '}',
+    ].join('\n');
+    expect(scan(code)).not.toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  it('does NOT fire when fetch call is more than 5 lines after loop open', () => {
+    const code = [
+      'items.forEach {',
+      '    let a = 1',
+      '    let b = 2',
+      '    let c = 3',
+      '    let d = 4',
+      '    let e = 5',
+      '    let task = URLSession.shared.dataTask(with: url)',
+      '}',
+    ].join('\n');
+    expect(scan(code)).not.toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  it('does NOT fire when commented-out fetch is inside a loop', () => {
+    const code = [
+      'items.forEach {',
+      '    // let task = URLSession.shared.dataTask(with: url)',
+      '}',
+    ].join('\n');
+    expect(scan(code)).not.toContain('PERFORMANCE_N_PLUS_ONE');
   });
 });

@@ -77,4 +77,24 @@ class VulnerableNetworkService {
     func insecureHash(data: Data) -> Insecure.MD5Digest {
         return Insecure.MD5.hash(data: data)
     }
+
+    // PERFORMANCE_N_PLUS_ONE — URLSession dataTask inside a forEach loop
+    func fetchAllProfiles(userIds: [String]) {
+        userIds.forEach { userId in
+            let url = URL(string: "https://api.example.com/users/\(userId)")!
+            URLSession.shared.dataTask(with: url) { data, _, _ in
+                print(data as Any)
+            }.resume()
+        }
+    }
+
+    // PERFORMANCE_N_PLUS_ONE — CoreData fetch inside a for-in loop
+    func loadRelatedEntities(ids: [String], context: NSManagedObjectContext) {
+        for id in ids {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "Item")
+            request.predicate = NSPredicate(format: "id == %@", id)
+            let results = try? context.fetch(request)
+            print(results as Any)
+        }
+    }
 }

@@ -16,6 +16,7 @@
     "pretest": "npm run build",
     "test": "npx ts-node --transpile-only tests/scanner.test.ts",
     "test:vitest": "vitest run",
+    "test:vitest:server": "vitest run tests/vitest/server-scan-*.vitest.ts",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
