@@ -48,13 +48,25 @@ import type { Finding } from './reporter';
  * be missed). Falls back to 'unknown' if package.json cannot be read.
  */
 function readScannerVersion(): string {
-  try {
-    const pkgPath = path.join(__dirname, '..', '..', 'package.json');
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-    return pkg.version ?? 'unknown';
-  } catch {
-    return 'unknown';
+  // Try multiple candidate paths in order so the function works both from
+  // the TypeScript source tree (__dirname = src/scanner/) and from a
+  // compiled dist/ bundle (__dirname = dist/scanner/) inside Docker.
+  const candidates = [
+    path.join(__dirname, '..', '..', 'package.json'),   // src/scanner/ → root
+    path.join(__dirname, '..', 'package.json'),          // dist/scanner/ → dist/ (sometimes)
+    path.join(process.cwd(), 'package.json'),            // CWD fallback (Docker WORKDIR)
+  ];
+
+  for (const pkgPath of candidates) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: string };
+      if (pkg.version) return pkg.version;
+    } catch {
+      // Path not readable — try next candidate
+    }
   }
+
+  return 'unknown';
 }
 
 const SCANNER_VERSION = readScannerVersion();
