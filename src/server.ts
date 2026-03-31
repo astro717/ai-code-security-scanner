@@ -37,6 +37,7 @@ import { parseRubyCode, scanRuby } from './scanner/ruby-parser';
 import { parseKotlinCode, scanKotlin } from './scanner/kotlin-parser';
 import { parseSwiftCode, scanSwift } from './scanner/swift-parser';
 import { parseRustCode, scanRust } from './scanner/rust-parser';
+import { detectCSRF } from './scanner/detectors/csrf';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
@@ -804,6 +805,7 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
       ...detectCORSMisconfiguration(parsed),
       ...detectReDoS(parsed),
       ...detectWeakCrypto(parsed),
+      ...detectCSRF(parsed),
     ].map((f) => ({ ...f, file: filename ?? 'input' }));
   }
 
@@ -1088,6 +1090,7 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
               ...detectCORSMisconfiguration(parsed),
               ...detectReDoS(parsed),
               ...detectWeakCrypto(parsed),
+              ...detectCSRF(parsed),
             ].map((f) => ({ ...f, file: item.path }));
           }
           allFindings.push(...findings);
@@ -1231,6 +1234,7 @@ app.get('/watch', (req, res) => {
           ...detectCORSMisconfiguration(parsed),
           ...detectReDoS(parsed),
           ...detectWeakCrypto(parsed),
+          ...detectCSRF(parsed),
         ].map((f) => ({ ...f, file: filePath }));
       }
       return [];
