@@ -148,6 +148,9 @@ export const FINDING_TO_OWASP: Record<string, string> = {
 
   // A01 — Broken Access Control (missing authentication)
   MISSING_AUTH:           'A01:2021',
+
+  // A01 — Broken Access Control (CSRF)
+  CSRF:                   'A01:2021',
 };
 
 /**
