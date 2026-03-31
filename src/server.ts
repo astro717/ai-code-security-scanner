@@ -514,7 +514,7 @@ if (!SERVER_API_KEY) {
 } else if (SERVER_API_KEY.length < 32) {
   console.warn(
     '[auth] WARNING: SERVER_API_KEY is shorter than 32 characters. ' +
-    'Use a long random value (e.g. openssl rand -hex 32) to prevent token guessing.',
+    'Use a long random value to prevent token guessing.',
   );
 }
 
