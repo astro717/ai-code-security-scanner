@@ -104,6 +104,8 @@ const SCAN_BODY_SCHEMA: Record<string, FieldSchema> = {
 const SCAN_REPO_BODY_SCHEMA: Record<string, FieldSchema> = {
   repoUrl:        { type: 'string', required: true },
   branch:         { type: 'string' },
+  sinceCommit:    { type: 'string' },
+  changedFilesOnly: { type: 'boolean' },
   ignorePatterns: { type: 'array', items: 'string' },
   ignoreTypes:    { type: 'array', items: 'string' },
   webhookUrl:     { type: 'string' },
@@ -625,6 +627,24 @@ export async function resetRateLimiters(): Promise<void> {
   ]);
 }
 
+// ── Scan timeout ─────────────────────────────────────────────────────────────
+// Wraps an async operation in a Promise.race with a timeout. Returns the
+// operation result or throws a timeout error. Prevents DoS via slow/malformed
+// inputs that could cause catastrophic backtracking in regex-based parsers.
+const SCAN_TIMEOUT_MS = parseInt(process.env.SCAN_TIMEOUT_MS ?? '30000', 10);
+
+function withScanTimeout<T>(operation: Promise<T>, timeoutMs = SCAN_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Scan timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    operation
+      .then((result) => { clearTimeout(timer); resolve(result); })
+      .catch((err) => { clearTimeout(timer); reject(err); });
+  });
+}
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.1.0' });
 });
@@ -634,6 +654,25 @@ app.get('/types', (_req, res) => {
 });
 
 app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
+  // ── Request timeout guard ──────────────────────────────────────────────────
+  // Prevent DoS via inputs that trigger catastrophic backtracking in regex-based
+  // parsers. If the handler hasn't responded within SCAN_TIMEOUT_MS, send 408.
+  let responded = false;
+  const timeoutHandle = setTimeout(() => {
+    if (!responded && !res.headersSent) {
+      responded = true;
+      res.status(408).json({
+        error: `Scan timed out after ${SCAN_TIMEOUT_MS}ms. The input may contain patterns that cause excessive processing time.`,
+      });
+    }
+  }, SCAN_TIMEOUT_MS);
+  const originalJson = res.json.bind(res);
+  res.json = ((body: unknown) => {
+    responded = true;
+    clearTimeout(timeoutHandle);
+    return originalJson(body);
+  }) as typeof res.json;
+
   // ?sarif=true returns a SARIF 2.1.0 document instead of the default JSON shape.
   const sarifMode = req.query['sarif'] === 'true';
   // Explicit payload size guard (belt-and-suspenders on top of express.json limit)
@@ -1024,9 +1063,11 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
     return;
   }
 
-  const { repoUrl, branch = 'main', ignorePatterns = [], ignoreTypes, webhookUrl, webhookSecret } = req.body as {
+  const { repoUrl, branch = 'main', sinceCommit, changedFilesOnly, ignorePatterns = [], ignoreTypes, webhookUrl, webhookSecret } = req.body as {
     repoUrl?: string;
     branch?: string;
+    sinceCommit?: string;
+    changedFilesOnly?: boolean;
     ignorePatterns?: string[];
     ignoreTypes?: string[];
     webhookUrl?: string;
@@ -1075,18 +1116,52 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
     }
 
     const patterns = [...bodyPatterns, ...dotAiScannerPatterns];
+
+    // ── Incremental mode: filter to changed files only ────────────────────────
+    // When sinceCommit is provided, use the GitHub Compare API to get only files
+    // changed between sinceCommit and the target branch. This dramatically reduces
+    // scan time for large repos in CI pipelines.
+    let changedFilePaths: Set<string> | null = null;
+    if (sinceCommit && typeof sinceCommit === 'string' && sinceCommit.length >= 7) {
+      try {
+        const compareUrl = `${apiBase}/compare/${encodeURIComponent(sinceCommit)}...${encodeURIComponent(branch)}`;
+        const compareData = await githubGet(compareUrl) as { files?: Array<{ filename: string; status: string }> };
+        if (compareData.files && Array.isArray(compareData.files)) {
+          changedFilePaths = new Set(
+            compareData.files
+              .filter((f) => f.status !== 'removed')
+              .map((f) => f.filename),
+          );
+          console.log(`[scan-repo] Incremental mode: ${changedFilePaths.size} file(s) changed since ${sinceCommit.slice(0, 8)}`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[scan-repo] Compare API failed (${msg}) — falling back to full scan`);
+      }
+    }
+
     const collected: GHItem[] = [];
     await collectFiles(apiBase, '', branch, collected, 50, patterns);
 
-    if (collected.length === 0) {
-      res.json({ findings: [], summary: summarize([]), filesScanned: 0 });
+    // Filter to changed files if incremental mode is active
+    const filesToScan = changedFilePaths
+      ? collected.filter((item) => changedFilePaths!.has(item.path))
+      : collected;
+
+    if (filesToScan.length === 0) {
+      res.json({
+        findings: [],
+        summary: summarize([]),
+        filesScanned: 0,
+        ...(changedFilePaths ? { incrementalMode: true, totalFiles: collected.length, changedFiles: changedFilePaths.size } : {}),
+      });
       return;
     }
 
     const allFindings: Finding[] = [];
 
     await Promise.all(
-      collected.map(async (item) => {
+      filesToScan.map(async (item) => {
         try {
           const code = await githubGetText(`${apiBase}/contents/${item.path}?ref=${encodeURIComponent(branch)}`);
           const ext = path.extname(item.name).toLowerCase();
@@ -1190,7 +1265,12 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       return;
     }
 
-    const responsePayload = { findings: dedupedFindings, summary: summarize(dedupedFindings), filesScanned: collected.length };
+    const responsePayload = {
+      findings: dedupedFindings,
+      summary: summarize(dedupedFindings),
+      filesScanned: filesToScan.length,
+      ...(changedFilePaths ? { incrementalMode: true, totalFiles: collected.length, changedFiles: changedFilePaths.size } : {}),
+    };
     res.json(responsePayload);
 
     // Fire-and-forget webhook delivery after responding to the client
