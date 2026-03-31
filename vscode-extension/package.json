@@ -43,7 +43,10 @@
     "onLanguage:csharp",
     "onLanguage:c",
     "onLanguage:cpp",
-    "onLanguage:ruby"
+    "onLanguage:ruby",
+    "onLanguage:php",
+    "onLanguage:swift",
+    "onLanguage:rust"
   ],
   "main": "./out/extension.js",
   "contributes": {
