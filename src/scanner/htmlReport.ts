@@ -158,6 +158,16 @@ function renderFinding(f: Finding, anchorId?: string): string {
     langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#7c3aed;background:#f5f3ff;padding:2px 7px;border-radius:3px;white-space:nowrap;">C#</span>`;
   }
 
+  // Confidence badge — shown when the parser emits a confidence value
+  const confidenceBadge = f.confidence != null
+    ? (() => {
+        const pct = Math.round(f.confidence * 100);
+        const confColor = pct >= 90 ? '#15803d' : pct >= 70 ? '#b45309' : '#6b7280';
+        const confBg = pct >= 90 ? '#f0fdf4' : pct >= 70 ? '#fffbeb' : '#f9fafb';
+        return `<span title="Detection confidence: ${pct}%" style="font-size:10px;font-weight:600;color:${confColor};background:${confBg};border:1px solid ${confColor}33;padding:2px 7px;border-radius:3px;white-space:nowrap;">${pct}% conf.</span>`;
+      })()
+    : '';
+
   const anchor = anchorId ? ` id="${anchorId}"` : '';
   return `
     <div class="finding finding-row"${anchor} data-severity="${escapeHtml(f.severity)}" style="border-left: 4px solid ${color}; background: ${bg}; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;">
@@ -166,6 +176,7 @@ function renderFinding(f: Finding, anchorId?: string): string {
         <code style="font-size:12px;color:#374151;background:#f3f4f6;padding:1px 6px;border-radius:3px;">${escapeHtml(f.type)}</code>
         ${owaspBadge}
         ${langBadge}
+        ${confidenceBadge}
         <span style="font-size:12px;color:#6b7280;">line ${f.line}, col ${f.column}</span>
       </div>
       <p style="margin:0;font-size:14px;color:#1f2937;">${escapeHtml(f.message)}</p>
