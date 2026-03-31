@@ -216,7 +216,7 @@ async function scanDocument(
 async function scanWorkspace(
   collection: vscode.DiagnosticCollection,
 ): Promise<void> {
-  const supportedGlob = '**/*.{ts,tsx,js,jsx,mjs,cjs,py,go,java,cs,c,cpp,h,hpp,rb}';
+  const supportedGlob = '**/*.{ts,tsx,js,jsx,mjs,cjs,py,go,java,cs,c,cpp,h,hpp,rb,php,swift,rs}';
   const files = await vscode.workspace.findFiles(supportedGlob, '**/node_modules/**');
 
   // Load .aiscanner ignore patterns from the workspace root
@@ -679,6 +679,9 @@ export function activate(context: vscode.ExtensionContext): void {
     { language: 'c' },
     { language: 'cpp' },
     { language: 'ruby' },
+    { language: 'php' },
+    { language: 'swift' },
+    { language: 'rust' },
   ];
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider(supportedLanguages, codeLensProvider),
@@ -753,7 +756,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const autoScan: boolean = config.get('autoScanOnSave') ?? true;
       const supported = [
         'typescript', 'typescriptreact', 'javascript', 'javascriptreact',
-        'python', 'go', 'java', 'csharp', 'c', 'cpp', 'ruby', 'kotlin', 'swift',
+        'python', 'go', 'java', 'csharp', 'c', 'cpp', 'ruby', 'kotlin', 'swift', 'php', 'rust',
       ];
       if (autoScan && supported.includes(document.languageId)) {
         queueWorkerScan(document, collection, statusBar, codeLensProvider);
@@ -861,7 +864,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const active = vscode.window.activeTextEditor;
   const supportedLangs = [
     'typescript', 'typescriptreact', 'javascript', 'javascriptreact',
-    'python', 'go', 'java', 'csharp', 'c', 'cpp', 'ruby',
+    'python', 'go', 'java', 'csharp', 'c', 'cpp', 'ruby', 'php', 'swift', 'rust',
   ];
   if (active && supportedLangs.includes(active.document.languageId)) {
     void scanDocumentWithStatus(active.document);
