@@ -24,6 +24,7 @@ import { detectCORSMisconfiguration } from './scanner/detectors/cors';
 import { detectReDoS } from './scanner/detectors/redos';
 import { detectWeakCrypto } from './scanner/detectors/weakCrypto';
 import { detectJWTNoneAlgorithm } from './scanner/detectors/jwtNone';
+import { detectCSRF } from './scanner/detectors/csrf';
 import { summarize, Finding, deduplicateFindings, KNOWN_TYPES } from './scanner/reporter';
 import { FINDING_TO_OWASP } from './scanner/owasp';
 import { buildSARIF } from './scanner/sarif';
@@ -804,6 +805,7 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
       ...detectCORSMisconfiguration(parsed),
       ...detectReDoS(parsed),
       ...detectWeakCrypto(parsed),
+      ...detectCSRF(parsed),
     ].map((f) => ({ ...f, file: filename ?? 'input' }));
   }
 
@@ -1088,6 +1090,7 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
               ...detectCORSMisconfiguration(parsed),
               ...detectReDoS(parsed),
               ...detectWeakCrypto(parsed),
+      ...detectCSRF(parsed),
             ].map((f) => ({ ...f, file: item.path }));
           }
           allFindings.push(...findings);
@@ -1231,6 +1234,7 @@ app.get('/watch', (req, res) => {
           ...detectCORSMisconfiguration(parsed),
           ...detectReDoS(parsed),
           ...detectWeakCrypto(parsed),
+      ...detectCSRF(parsed),
         ].map((f) => ({ ...f, file: filePath }));
       }
       return [];
