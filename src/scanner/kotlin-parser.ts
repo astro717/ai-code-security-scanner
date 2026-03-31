@@ -129,18 +129,69 @@ const KOTLIN_PATTERNS: KotlinPattern[] = [
 
 ];
 
-// ── N+1 query detection helpers ───────────────────────────────────────────────
+// ── Stateful N+1 query detector ───────────────────────────────────────────────
+//
+// Tracks entry into for/forEach/while loops and flags JPA, Hibernate, Room, or
+// repository calls found inside the loop body.
 
-/** Matches lines that look like a loop or iteration start. */
-const N1_LOOP_PATTERN = /\b(?:for\s*\(|\.(?:forEach|map|filter|flatMap|mapNotNull|flatMapIndexed)\s*\{)/;
+// Kotlin loop patterns: for (...) {, list.forEach {, items.map {
+const KOTLIN_LOOP_START = /\b(?:for\s*\(|\.forEach\s*\{|\.forEachIndexed\s*\{|\.map\s*\{|\.flatMap\s*\{|\.filter\s*\{|while\s*\()/;
 
-/** Matches lines that look like a DAO / ORM query call. */
-const N1_QUERY_PATTERN = /(?:\b(?:dao|Dao|db|DB)\s*\.|\b(?:find|query|select|load|get|fetch|insert|update|delete)\w*\s*\(|\.rawQuery\s*\(|runBlocking\s*\{)/;
+// ORM/DB call patterns for Kotlin: JPA, Hibernate, Room, Spring Data
+const KOTLIN_ORM_CALL =
+  /\b(?:repository|dao|userRepository|orderRepository|itemRepository|productRepository)\s*\.\s*(?:findBy\w+|findAll|save|getById|findById|query|count|existsBy\w+)\s*\(|\.load\s*\(|\.get\s*\(|entityManager\s*\.\s*find\s*\(|entityManager\s*\.\s*createQuery\s*\(|\.executeQuery\s*\(|db\s*\.\s*(?:query|insert|update|delete)\s*\(/;
 
-const N1_MESSAGE =
-  'Potential N+1 query: a database call appears inside a loop or iteration block. Each ' +
-  'iteration triggers a separate query. Batch-load related data before the loop using a ' +
-  'single query with IN, or use Room @Relation / Exposed JOIN to avoid one round-trip per item.';
+export function detectKotlinN1(lines: string[], filePath: string): Finding[] {
+  const findings: Finding[] = [];
+  let inLoop = false;
+  let loopBraceDepth = 0;
+  let loopStartLine = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+
+    if (!inLoop) {
+      if (KOTLIN_LOOP_START.test(line)) {
+        inLoop = true;
+        loopStartLine = i + 1;
+        loopBraceDepth = 0;
+      }
+    }
+
+    if (inLoop) {
+      for (const char of line) {
+        if (char === '{') loopBraceDepth++;
+        if (char === '}') loopBraceDepth--;
+      }
+
+      if (KOTLIN_ORM_CALL.test(line)) {
+        findings.push({
+          type: 'PERFORMANCE_N_PLUS_ONE',
+          severity: 'medium',
+          line: i + 1,
+          column: line.search(/\S/),
+          snippet: trimmed.slice(0, 100),
+          message:
+            'JPA/Hibernate/Room query inside a loop — N+1 query pattern detected. ' +
+            'Each iteration issues a separate database round-trip. ' +
+            'Use Spring Data batch loading, JPA JOIN FETCH, @BatchSize, or collect IDs first and use findAllById().',
+          confidence: 0.82,
+          file: filePath,
+        });
+      }
+
+      if (loopBraceDepth <= 0 && loopStartLine > 0) {
+        inLoop = false;
+        loopStartLine = 0;
+      }
+    }
+  }
+
+  return findings;
+}
 
 /**
  * Scans a parsed Kotlin source for security vulnerabilities using pattern matching.
@@ -172,38 +223,8 @@ export function scanKotlin(result: KotlinParseResult): Finding[] {
     }
   });
 
-  // ── Multi-line N+1 detection ─────────────────────────────────────────────────
-  // Scan a sliding window: if a loop-start line is followed within 6 lines by a
-  // DAO/query call, report N+1 at the loop line.
-  const lines = result.lines;
-  const alreadyFlagged = new Set<number>();
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
-
-    if (N1_LOOP_PATTERN.test(line)) {
-      // Look ahead up to 6 lines for a DB call
-      const windowEnd = Math.min(i + 7, lines.length);
-      for (let j = i + 1; j < windowEnd; j++) {
-        const inner = lines[j]!;
-        if (inner.trim().startsWith('//') || inner.trim().startsWith('*')) continue;
-        if (N1_QUERY_PATTERN.test(inner) && !alreadyFlagged.has(i)) {
-          alreadyFlagged.add(i);
-          findings.push({
-            type: 'PERFORMANCE_N_PLUS_ONE',
-            severity: 'low',
-            line: i + 1,
-            column: line.search(/\S/),
-            snippet: line.trim().slice(0, 100),
-            message: N1_MESSAGE,
-            file: result.filePath,
-          });
-          break;
-        }
-      }
-    }
-  }
+  // Stateful N+1 detection
+  findings.push(...detectKotlinN1(result.lines, result.filePath));
 
   return findings;
 }
