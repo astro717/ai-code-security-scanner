@@ -482,327 +482,45 @@ ${indent}    raise ValueError(${msg})`;
     },
   },
 
-  // ── INSECURE_RANDOM (Ruby): rand/Random.new → SecureRandom.hex ────────────
-  {
-    types: ['INSECURE_RANDOM'],
-    description: 'Replace Ruby rand()/Random.new with SecureRandom.hex (requires "require \'securerandom\'")',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.rb') return null;
-
-      // Pattern: rand() or rand(N) → SecureRandom.random_number(N)
-      if (/\brand\s*\(/.test(line)) {
-        const fixed = line.replace(
-          /\brand\s*\(([^)]*)\)/g,
-          (_, args) => args.trim() ? `SecureRandom.random_number(${args.trim()})` : 'SecureRandom.hex(16)',
-        );
-        return fixed !== line ? fixed : null;
-      }
-
-      // Pattern: Random.new.rand → SecureRandom.random_number
-      if (/Random\.new\.rand/.test(line)) {
-        const fixed = line.replace(/Random\.new\.rand/g, 'SecureRandom.random_number');
-        return fixed !== line ? fixed : null;
-      }
-
-      return null;
-    },
-  },
-
-  // ── SQL_INJECTION (Ruby): string interpolation in SQL → parameterized query note ──
-  {
-    types: ['SQL_INJECTION'],
-    description: 'Add TODO comment to replace Ruby SQL string interpolation with parameterized query',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.rb') return null;
-      // Match common Ruby SQL patterns with string interpolation: #{var}
-      if (!/#\{/.test(line)) return null;
-      if (/TODO.*SQL|parameterized|\?\s*,/.test(line)) return null;
-      const indent = line.match(/^(\s*)/)?.[1] ?? '';
-      return (
-        `${indent}# TODO(SQL_INJECTION): replace string interpolation with parameterized query,\n` +
-        `${indent}# e.g. db.execute("SELECT * FROM users WHERE id = ?", [id])\n` +
-        line
-      );
-    },
-  },
-
-  // ── INSECURE_SHARED_PREFS (Swift): UserDefaults for sensitive data ────────
+  // ── INSECURE_SHARED_PREFS (Kotlin/Android): getSharedPreferences → EncryptedSharedPreferences ──
   {
     types: ['INSECURE_SHARED_PREFS'],
-    description: 'Replace UserDefaults sensitive storage with Keychain access comment',
+    description: 'Note: replace getSharedPreferences with EncryptedSharedPreferences for sensitive data',
     transform(line: string, finding: Finding): string | null {
       const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.swift') return null;
-      if (!/UserDefaults\.standard\.set|UserDefaults\.standard\[/.test(line)) return null;
-      if (/TODO.*Keychain|KeychainSwift|KeychainWrapper/.test(line)) return null;
+      if (ext !== '.kt' && ext !== '.kts') return null;
+      if (/EncryptedSharedPreferences/.test(line)) return null;
+      if (!/getSharedPreferences\s*\(/.test(line)) return null;
       const indent = line.match(/^(\s*)/)?.[1] ?? '';
       return (
-        `${indent}// TODO(INSECURE_SHARED_PREFS): store sensitive data in Keychain instead of UserDefaults.\n` +
-        `${indent}// Use KeychainSwift: keychain.set(value, forKey: key)\n` +
+        `${indent}// TODO(INSECURE_SHARED_PREFS): Replace getSharedPreferences with EncryptedSharedPreferences\n` +
+        `${indent}// val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()\n` +
+        `${indent}// val prefs = EncryptedSharedPreferences.create(context, "secure_prefs", masterKey,\n` +
+        `${indent}//     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,\n` +
+        `${indent}//     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)\n` +
         line
       );
     },
   },
 
-  // ── UNSAFE_WEBVIEW (Swift): WKWebView loadHTMLString with user input ──────
+  // ── WEBVIEW_LOAD_URL (Kotlin/Android): loadUrl with user input → validate before loading ──
   {
-    types: ['UNSAFE_WEBVIEW'],
-    description: 'Add TODO to sanitize WKWebView loadHTMLString input',
+    types: ['WEBVIEW_LOAD_URL'],
+    description: 'Note: validate URL before passing to WebView.loadUrl() to prevent JavaScript injection',
     transform(line: string, finding: Finding): string | null {
       const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.swift') return null;
-      if (!/loadHTMLString\s*\(|loadRequest\s*\(|load\s*\(URLRequest/.test(line)) return null;
-      if (/TODO.*sanitize|allowList|isAllowed/.test(line)) return null;
+      if (ext !== '.kt' && ext !== '.kts') return null;
+      if (!/\.loadUrl\s*\(/.test(line)) return null;
+      // If already has URL validation patterns, skip
+      if (/startsWith\s*\(["']https|Uri\.parse|allowedUrls|whitelist/i.test(line)) return null;
       const indent = line.match(/^(\s*)/)?.[1] ?? '';
       return (
-        `${indent}// TODO(UNSAFE_WEBVIEW): validate/sanitize the URL and HTML content before loading.\n` +
-        `${indent}// Consider a WKNavigationDelegate allowlist to restrict navigable origins.\n` +
+        `${indent}// TODO(WEBVIEW_LOAD_URL): Validate URL before loading. Example:\n` +
+        `${indent}// val allowedHosts = setOf("example.com", "api.example.com")\n` +
+        `${indent}// val uri = Uri.parse(url)\n` +
+        `${indent}// if (uri.scheme != "https" || !allowedHosts.contains(uri.host)) return\n` +
         line
       );
-    },
-  },
-
-  // ── MISSING_AUTH (C#): endpoints without [Authorize] attribute ────────────
-  {
-    types: ['MISSING_AUTH'],
-    description: 'Add TODO comment to add [Authorize] attribute to C# controller action',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.cs') return null;
-      // Match controller action method declarations
-      if (!/public\s+(?:async\s+)?(?:Task<|IActionResult|ActionResult|string|int|bool)/.test(line)) return null;
-      if (/\[Authorize\]|\[AllowAnonymous\]/.test(line)) return null;
-      const indent = line.match(/^(\s*)/)?.[1] ?? '';
-      return (
-        `${indent}// TODO(MISSING_AUTH): add [Authorize] attribute (or [Authorize(Roles = "...")] for role-based access)\n` +
-        line
-      );
-    },
-  },
-
-  // ── UNSAFE_BLOCK (Rust): unsafe { ... } → scope-narrowing note ───────────
-  {
-    types: ['UNSAFE_BLOCK'],
-    description: 'Add TODO comment to narrow the unsafe block scope in Rust',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.rs') return null;
-      if (!/\bunsafe\s*\{/.test(line)) return null;
-      if (/TODO.*unsafe|SAFETY:/.test(line)) return null;
-      const indent = line.match(/^(\s*)/)?.[1] ?? '';
-      return (
-        `${indent}// SAFETY: TODO — document why this unsafe block is sound and narrow its scope\n` +
-        `${indent}// to the minimum set of operations that require unsafe.\n` +
-        line
-      );
-    },
-  },
-
-  // ── PERFORMANCE_N_PLUS_ONE: note-only guidance for N+1 query patterns ─────
-  {
-    types: ['PERFORMANCE_N_PLUS_ONE'],
-    description: 'Add TODO comment with N+1 query remediation guidance',
-    transform(line: string, finding: Finding): string | null {
-      // Already annotated
-      if (/TODO.*N\+1|prefetch|eager.?load|joinedload|includes?\(/i.test(line)) return null;
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      const indent = line.match(/^(\s*)/)?.[1] ?? '';
-      // Language-specific advice
-      if (ext === '.py') {
-        return (
-          `${indent}# TODO(N+1): batch this query before the loop — use select_related() / prefetch_related() (Django)\n` +
-          `${indent}# or joinedload() / subqueryload() (SQLAlchemy) to eliminate per-iteration round-trips.\n` +
-          line
-        );
-      }
-      if (ext === '.rb') {
-        return (
-          `${indent}# TODO(N+1): use .includes(:association) or .preload(:association) to eager-load\n` +
-          `${indent}# and avoid a separate query per iteration.\n` +
-          line
-        );
-      }
-      if (ext === '.go') {
-        return (
-          `${indent}// TODO(N+1): batch this query outside the loop — use a single WHERE … IN (?) query\n` +
-          `${indent}// or a JOIN to fetch all required rows in one round-trip.\n` +
-          line
-        );
-      }
-      if (ext === '.java') {
-        return (
-          `${indent}// TODO(N+1): use @EntityGraph, JOIN FETCH, or batch the query before the loop\n` +
-          `${indent}// to avoid a separate DB round-trip per iteration.\n` +
-          line
-        );
-      }
-      if (['.cs'].includes(ext)) {
-        return (
-          `${indent}// TODO(N+1): use .Include() / .ThenInclude() (EF Core) to eager-load\n` +
-          `${indent}// and avoid a separate query per loop iteration.\n` +
-          line
-        );
-      }
-      if (['.kt', '.kts'].includes(ext)) {
-        return (
-          `${indent}// TODO(N+1): batch this query outside the loop — use a single DAO query\n` +
-          `${indent}// with an IN clause or @Transaction to avoid per-iteration round-trips.\n` +
-          line
-        );
-      }
-      if (ext === '.swift') {
-        return (
-          `${indent}// TODO(N+1): batch this fetch/request outside the loop to avoid per-iteration overhead.\n` +
-          `${indent}// Use a single NSFetchRequest with a predicate or batch URLSession calls.\n` +
-          line
-        );
-      }
-      // Generic fallback
-      return (
-        `${indent}// TODO(N+1): move this query outside the loop and batch-load the data to avoid N+1.\n` +
-        line
-      );
-    },
-  },
-
-  // ── SQL_INJECTION (Rust): format! in SQL → parameterized query note ───────
-  {
-    types: ['SQL_INJECTION'],
-    description: 'Add TODO comment to replace Rust format! SQL string with parameterized query',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.rs') return null;
-      // Match format! macro or string concatenation in SQL context
-      if (!/format!\s*\(|\.to_string\(\)/.test(line)) return null;
-      if (/TODO.*SQL|bind\(|sqlx::query!/.test(line)) return null;
-      const indent = line.match(/^(\s*)/)?.[1] ?? '';
-      return (
-        `${indent}// TODO(SQL_INJECTION): use parameterized queries instead of format! string building.\n` +
-        `${indent}// With sqlx: sqlx::query!("SELECT ... WHERE id = ?", id).fetch_one(&pool).await\n` +
-        line
-      );
-    },
-  },
-
-  // ── WEAK_CRYPTO (Swift): CC_MD5/CC_SHA1 → CC_SHA256, Insecure.MD5 → SHA256 ─
-  {
-    types: ['WEAK_CRYPTO'],
-    description: 'Replace Swift weak hash (CC_MD5/CC_SHA1/Insecure.MD5) with SHA-256 equivalent',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.swift') return null;
-
-      let fixed = line;
-
-      // CommonCrypto: CC_MD5 → CC_SHA256
-      fixed = fixed.replace(/\bCC_MD5\b/g, 'CC_SHA256');
-      fixed = fixed.replace(/\bCC_MD5_DIGEST_LENGTH\b/g, 'CC_SHA256_DIGEST_LENGTH');
-
-      // CommonCrypto: CC_SHA1 → CC_SHA256
-      fixed = fixed.replace(/\bCC_SHA1\b/g, 'CC_SHA256');
-      fixed = fixed.replace(/\bCC_SHA1_DIGEST_LENGTH\b/g, 'CC_SHA256_DIGEST_LENGTH');
-
-      // CommonCrypto: kCCAlgorithmDES → kCCAlgorithmAES
-      fixed = fixed.replace(/\bkCCAlgorithmDES\b/g, 'kCCAlgorithmAES');
-      fixed = fixed.replace(/\bkCCKeySizeDES\b/g, 'kCCKeySizeAES256');
-      fixed = fixed.replace(/\bkCCBlockSizeDES\b/g, 'kCCBlockSizeAES128');
-
-      // CryptoKit: Insecure.MD5 → SHA256, Insecure.SHA1 → SHA256
-      fixed = fixed.replace(/\bInsecure\.MD5\b/g, 'SHA256');
-      fixed = fixed.replace(/\bInsecure\.SHA1\b/g, 'SHA256');
-
-      return fixed !== line ? fixed : null;
-    },
-  },
-
-  // ── BUFFER_OVERFLOW (Rust): raw pointer deref / unsafe arithmetic → note ──
-  {
-    types: ['BUFFER_OVERFLOW'],
-    description: 'Add TODO comment to replace unsafe pointer operation with safe Rust alternative',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.rs') return null;
-
-      // Match unsafe raw pointer patterns: *ptr, ptr.offset, ptr.add, ptr::read/write
-      if (!/\*\s*\w+|\.offset\s*\(|\.add\s*\(|ptr::\w+|slice::from_raw_parts/.test(line)) return null;
-      if (/TODO.*BUFFER_OVERFLOW|SAFETY:.*bounds/.test(line)) return null;
-
-      const indent = line.match(/^(\s*)/)?.[1] ?? '';
-      return (
-        `${indent}// TODO(BUFFER_OVERFLOW): replace raw pointer operation with safe Rust alternative.\n` +
-        `${indent}// Consider using slices, Vec, or checked indexing (.get()) instead of raw pointers.\n` +
-        line
-      );
-    },
-  },
-
-  // ── SECRET_HARDCODED (Rust): hardcoded credentials → environment variable ──
-  {
-    types: ['SECRET_HARDCODED'],
-    description: 'Replace hardcoded Rust secret with std::env::var() lookup',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.rs') return null;
-
-      // Match: let api_key = "sk-..."; or const PASSWORD: &str = "...";
-      if (!/(?:let|const|static)\s+\w*(?:key|secret|password|token|api_key)\w*\s*(?::\s*&?str\s*)?=\s*"/.test(line)) return null;
-      if (/std::env::var|env!|dotenv/.test(line)) return null;
-
-      // Extract variable name
-      const varMatch = line.match(/(?:let|const|static)\s+(\w+)/);
-      if (!varMatch) return null;
-      const varName = varMatch[1]!;
-      const envName = varName.toUpperCase();
-
-      const indent = line.match(/^(\s*)/)?.[1] ?? '';
-      return (
-        `${indent}let ${varName} = std::env::var("${envName}").expect("${envName} must be set");`
-      );
-    },
-  },
-
-  // ── SQL_INJECTION (Go): fmt.Sprintf in SQL → parameterized query ──────────
-  {
-    types: ['SQL_INJECTION'],
-    description: 'Replace Go fmt.Sprintf SQL string with parameterized query placeholder',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.go') return null;
-
-      // Match fmt.Sprintf("SELECT ... %s", var) or string concatenation in SQL
-      if (!/fmt\.Sprintf\s*\(|".*SELECT.*"\s*\+/.test(line)) return null;
-      if (/TODO.*SQL|\$1|\?/.test(line)) return null;
-
-      const indent = line.match(/^(\s*)/)?.[1] ?? '';
-      return (
-        `${indent}// TODO(SQL_INJECTION): use parameterized queries instead of string interpolation.\n` +
-        `${indent}// e.g. db.Query("SELECT * FROM users WHERE id = $1", id)\n` +
-        line
-      );
-    },
-  },
-
-  // ── COMMAND_INJECTION (Go): exec.Command with shell string → array form ───
-  {
-    types: ['COMMAND_INJECTION', 'COMMAND_INJECTION_GO'],
-    description: 'Replace Go shell command string with exec.Command array form',
-    transform(line: string, finding: Finding): string | null {
-      const ext = path.extname(finding.file ?? '').toLowerCase();
-      if (ext !== '.go') return null;
-
-      // Match exec.Command("sh", "-c", ...) or exec.Command("bash", "-c", ...)
-      if (/exec\.Command\s*\(\s*"(?:sh|bash)"\s*,\s*"-c"/.test(line)) {
-        const indent = line.match(/^(\s*)/)?.[1] ?? '';
-        return (
-          `${indent}// TODO(COMMAND_INJECTION): replace shell string with direct exec.Command("binary", "arg1", "arg2") form.\n` +
-          `${indent}// This avoids shell interpretation and prevents injection via user-controlled arguments.\n` +
-          line
-        );
-      }
-
-      return null;
     },
   },
 ];
