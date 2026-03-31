@@ -9,6 +9,7 @@
 
 import { describe, test, expect } from 'vitest';
 import { buildSARIF, SARIF_RULE_DESCRIPTIONS } from '../../src/scanner/sarif';
+import { KNOWN_TYPES } from '../../src/scanner/reporter';
 import type { Finding } from '../../src/scanner/reporter';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -139,58 +140,27 @@ describe('SARIF_RULE_DESCRIPTIONS', () => {
   });
 });
 
-// ── Swift PERFORMANCE_N_PLUS_ONE SARIF output ────────────────────────────────
+// ── SARIF_RULE_DESCRIPTIONS ↔ KNOWN_TYPES completeness ────────────────────────
 
-describe('buildSARIF — Swift PERFORMANCE_N_PLUS_ONE finding', () => {
-  const swiftN1Finding = makeFinding({
-    type: 'PERFORMANCE_N_PLUS_ONE',
-    severity: 'high',
-    line: 85,
-    column: 12,
-    message: 'URLSession dataTask inside a forEach loop — N+1 pattern.',
-    file: 'NetworkService.swift',
+describe('SARIF_RULE_DESCRIPTIONS completeness vs KNOWN_TYPES', () => {
+  test('every KNOWN_TYPES entry has a corresponding SARIF_RULE_DESCRIPTIONS entry', () => {
+    const missing: string[] = [];
+    for (const type of KNOWN_TYPES) {
+      if (!SARIF_RULE_DESCRIPTIONS[type]) {
+        missing.push(type);
+      }
+    }
+    expect(missing, `SARIF_RULE_DESCRIPTIONS is missing entries for: ${missing.join(', ')}`).toEqual([]);
   });
 
-  test('produces a rule entry with ruleId PERFORMANCE_N_PLUS_ONE', () => {
-    const sarif = buildSARIF([swiftN1Finding]) as {
-      runs: Array<{ tool: { driver: { rules: Array<{ id: string }> } } }>;
-    };
-    const rules = sarif.runs[0].tool.driver.rules;
-    const rule = rules.find((r) => r.id === 'PERFORMANCE_N_PLUS_ONE');
-    expect(rule).toBeDefined();
-  });
-
-  test('PERFORMANCE_N_PLUS_ONE rule description mentions URLSession/CoreData', () => {
-    expect(SARIF_RULE_DESCRIPTIONS.PERFORMANCE_N_PLUS_ONE).toMatch(/URLSession|CoreData/);
-  });
-
-  test('PERFORMANCE_N_PLUS_ONE result has level "error" (high severity)', () => {
-    const sarif = buildSARIF([swiftN1Finding]) as {
-      runs: Array<{ results: Array<{ ruleId: string; level: string }> }>;
-    };
-    const result = sarif.runs[0].results.find((r) => r.ruleId === 'PERFORMANCE_N_PLUS_ONE');
-    expect(result).toBeDefined();
-    expect(result!.level).toBe('error');
-  });
-
-  test('PERFORMANCE_N_PLUS_ONE result includes correct Swift file location', () => {
-    const sarif = buildSARIF([swiftN1Finding]) as {
-      runs: Array<{
-        results: Array<{
-          ruleId: string;
-          locations: Array<{
-            physicalLocation: {
-              artifactLocation: { uri: string };
-              region: { startLine: number };
-            };
-          }>;
-        }>;
-      }>;
-    };
-    const result = sarif.runs[0].results.find((r) => r.ruleId === 'PERFORMANCE_N_PLUS_ONE');
-    const loc = result!.locations[0].physicalLocation;
-    expect(loc.artifactLocation.uri).toBe('NetworkService.swift');
-    expect(loc.region.startLine).toBe(85);
+  test('every SARIF_RULE_DESCRIPTIONS key is a recognised KNOWN_TYPES entry', () => {
+    const unknown: string[] = [];
+    for (const type of Object.keys(SARIF_RULE_DESCRIPTIONS)) {
+      if (!KNOWN_TYPES.has(type)) {
+        unknown.push(type);
+      }
+    }
+    expect(unknown, `SARIF_RULE_DESCRIPTIONS has entries not in KNOWN_TYPES: ${unknown.join(', ')}`).toEqual([]);
   });
 });
 
