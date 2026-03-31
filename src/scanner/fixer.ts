@@ -653,7 +653,7 @@ ${indent}    raise ValueError(${msg})`;
 
 // ── File extension guard ───────────────────────────────────────────────────────
 
-const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb', '.swift', '.rs', '.go']);
+const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb']);
 
 function isFixableFile(filePath: string): boolean {
   return FIXABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
