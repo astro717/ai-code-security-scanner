@@ -10,9 +10,10 @@
  *   INSECURE_RANDOM        — java.util.Random for security-sensitive values
  *   WEAK_CRYPTO            — MD5 / SHA-1 MessageDigest calls
  *   INSECURE_SHARED_PREFS  — SharedPreferences storing sensitive data unencrypted
- *   WEBVIEW_LOAD_URL     — WebView.loadUrl with user-controlled input
+ *   WEBVIEW_LOAD_URL       — WebView.loadUrl with user-controlled input
  *   SQL_INJECTION          — rawQuery / execSQL with string concatenation
  *   PATH_TRAVERSAL         — File() constructor with user-controlled path
+ *   PERFORMANCE_N_PLUS_ONE — Room/Exposed ORM query inside a for/forEach loop
  */
 
 import * as fs from 'fs';
@@ -126,19 +127,20 @@ const KOTLIN_PATTERNS: KotlinPattern[] = [
       'android:permission are accessible to any app on the device.',
   },
 
-  // N+1 query pattern — database query call indented inside a loop body
-  // Because the scanner is line-by-line, matches query lines deeply indented (8+ spaces)
-  // inside a forEach/for block where the surrounding context suggests a loop.
-  {
-    type: 'PERFORMANCE_N_PLUS_ONE',
-    severity: 'medium',
-    pattern: /^\s{8,}(?:db|repository|dao|userRepository|orderRepository|itemRepository)\s*\.\s*(?:rawQuery|execSQL|findBy\w+|query|get\w+|fetch\w+)\s*\(/,
-    message:
-      'Database query appears to be called from inside a loop body (deeply indented). ' +
-      'This is a classic N+1 query pattern: one query per iteration causes O(n) database ' +
-      'roundtrips. Batch the query outside the loop or use a JOIN/IN clause instead.',
-  },
 ];
+
+// ── N+1 query detection helpers ───────────────────────────────────────────────
+
+/** Matches lines that look like a loop or iteration start. */
+const N1_LOOP_PATTERN = /\b(?:for\s*\(|\.(?:forEach|map|filter|flatMap|mapNotNull|flatMapIndexed)\s*\{)/;
+
+/** Matches lines that look like a DAO / ORM query call. */
+const N1_QUERY_PATTERN = /(?:\b(?:dao|Dao|db|DB)\s*\.|\b(?:find|query|select|load|get|fetch|insert|update|delete)\w*\s*\(|\.rawQuery\s*\(|runBlocking\s*\{)/;
+
+const N1_MESSAGE =
+  'Potential N+1 query: a database call appears inside a loop or iteration block. Each ' +
+  'iteration triggers a separate query. Batch-load related data before the loop using a ' +
+  'single query with IN, or use Room @Relation / Exposed JOIN to avoid one round-trip per item.';
 
 /**
  * Scans a parsed Kotlin source for security vulnerabilities using pattern matching.
@@ -169,6 +171,39 @@ export function scanKotlin(result: KotlinParseResult): Finding[] {
       }
     }
   });
+
+  // ── Multi-line N+1 detection ─────────────────────────────────────────────────
+  // Scan a sliding window: if a loop-start line is followed within 6 lines by a
+  // DAO/query call, report N+1 at the loop line.
+  const lines = result.lines;
+  const alreadyFlagged = new Set<number>();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
+
+    if (N1_LOOP_PATTERN.test(line)) {
+      // Look ahead up to 6 lines for a DB call
+      const windowEnd = Math.min(i + 7, lines.length);
+      for (let j = i + 1; j < windowEnd; j++) {
+        const inner = lines[j]!;
+        if (inner.trim().startsWith('//') || inner.trim().startsWith('*')) continue;
+        if (N1_QUERY_PATTERN.test(inner) && !alreadyFlagged.has(i)) {
+          alreadyFlagged.add(i);
+          findings.push({
+            type: 'PERFORMANCE_N_PLUS_ONE',
+            severity: 'low',
+            line: i + 1,
+            column: line.search(/\S/),
+            snippet: line.trim().slice(0, 100),
+            message: N1_MESSAGE,
+            file: result.filePath,
+          });
+          break;
+        }
+      }
+    }
+  }
 
   return findings;
 }

@@ -158,3 +158,80 @@ describe('/scan with Kotlin files (.kt)', () => {
     }
   });
 });
+
+// ── PERFORMANCE_N_PLUS_ONE unit tests ─────────────────────────────────────────
+
+import { parseKotlinCode, scanKotlin } from '../../src/scanner/kotlin-parser';
+
+describe('Kotlin scanner — PERFORMANCE_N_PLUS_ONE detection', () => {
+  test('detects N+1 query in a for loop calling dao.findById on the next line', () => {
+    const code = [
+      'fun loadAll(ids: List<Int>) {',
+      '    for (id in ids) {',
+      '        val user = dao.findById(id)',
+      '        println(user.name)',
+      '    }',
+      '}',
+    ].join('\n');
+    const result = parseKotlinCode(code, 'repo.kt');
+    const findings = scanKotlin(result);
+    const types = findings.map((f) => f.type);
+    expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  test('detects N+1 query in a forEach block with dao.query inside', () => {
+    const code = [
+      'fun processAll(items: List<String>) {',
+      '    items.forEach {',
+      '        val row = dao.query("SELECT * FROM t WHERE name = ?", it)',
+      '        handle(row)',
+      '    }',
+      '}',
+    ].join('\n');
+    const result = parseKotlinCode(code, 'service.kt');
+    const findings = scanKotlin(result);
+    const types = findings.map((f) => f.type);
+    expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  test('detects N+1 query in a map call with dao.load inside', () => {
+    const code = [
+      'val details = userIds.map { id ->',
+      '    val profile = dao.load(id)',
+      '    profile.toDto()',
+      '}',
+    ].join('\n');
+    const result = parseKotlinCode(code, 'mapper.kt');
+    const findings = scanKotlin(result);
+    const types = findings.map((f) => f.type);
+    expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  test('does NOT flag a single DAO call outside any loop', () => {
+    const code = [
+      'fun getUser(id: Int): User {',
+      '    return dao.findById(id)',
+      '}',
+    ].join('\n');
+    const result = parseKotlinCode(code, 'clean.kt');
+    const findings = scanKotlin(result);
+    const n1 = findings.filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE');
+    expect(n1).toHaveLength(0);
+  });
+
+  test('PERFORMANCE_N_PLUS_ONE findings report the loop line and have severity low', () => {
+    const code = [
+      'for (item in items) {',
+      '    val r = dao.select(item.id)',
+      '    process(r)',
+      '}',
+    ].join('\n');
+    const result = parseKotlinCode(code, 'loop.kt');
+    const findings = scanKotlin(result).filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE');
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings[0]!.line).toBe(1); // The for-loop is on line 1
+    for (const f of findings) {
+      expect(f.severity).toBe('low');
+    }
+  });
+});
