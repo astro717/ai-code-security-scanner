@@ -229,6 +229,55 @@ describe('kotlin-parser — SQL_INJECTION (via rawQuery)', () => {
   });
 });
 
+// ── N+1 stateful detector ─────────────────────────────────────────────────────
+
+describe('kotlin-parser — PERFORMANCE_N_PLUS_ONE (stateful)', () => {
+  test('detects repository.findById inside for loop', () => {
+    const code = `
+for (item in items) {
+  val user = userRepository.findById(item.userId)
+  process(user)
+}
+`;
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE').length).toBeGreaterThan(0);
+  });
+
+  test('detects JPA entityManager.find inside forEach', () => {
+    const code = `
+ids.forEach { id ->
+  val entity = entityManager.find(Order::class.java, id)
+  results.add(entity)
+}
+`;
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE').length).toBeGreaterThan(0);
+  });
+
+  test('does not flag repository call outside a loop', () => {
+    const code = `
+val ids = items.map { it.id }
+val users = userRepository.findAllById(ids)
+`;
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE')).toHaveLength(0);
+  });
+
+  test('N+1 finding has correct confidence value', () => {
+    const code = `
+for (item in items) {
+  val order = orderRepository.findById(item.id)
+}
+`;
+    const findings = scan(code).filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE');
+    expect(findings.length).toBeGreaterThan(0);
+    for (const f of findings) {
+      expect(f.confidence).toBeDefined();
+      expect(f.confidence).toBeGreaterThan(0);
+    }
+  });
+});
+
 // ── General finding shape ─────────────────────────────────────────────────────
 
 describe('kotlin-parser — finding shape', () => {
