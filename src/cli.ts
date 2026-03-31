@@ -29,6 +29,7 @@ import { buildHTMLReport } from './scanner/htmlReport';
 import { buildJUnit } from './scanner/junit';
 
 import { buildSonarQube } from './scanner/sonarqube';
+import { buildMarkdownReport } from './scanner/markdown';
 import { parsePythonFile, scanPython } from './scanner/python-parser';
 import { parseGoFile, scanGo } from './scanner/go-parser';
 import { parseJavaFile, scanJava } from './scanner/java-parser';
@@ -283,7 +284,7 @@ function scanFileUncached(filePath: string): Finding[] {
 interface AiSecScanConfig {
   ignore?: string[];
   severity?: string;
-  format?: 'text' | 'json' | 'sarif' | 'html' | 'junit' | 'sonarqube';
+  format?: 'text' | 'json' | 'sarif' | 'html' | 'junit' | 'sonarqube' | 'markdown';
   fix?: boolean;
   /** Per-rule severity overrides. Maps finding type (e.g. "SQL_INJECTION") to a severity level. */
   rules?: Record<string, 'critical' | 'high' | 'medium' | 'low'>;
@@ -301,7 +302,7 @@ function validateConfig(obj: unknown): string[] {
 
   const allowed = new Set(['ignore', 'severity', 'format', 'fix', 'rules', 'cacheTtlDays']);
   const knownSeverities = new Set(['critical', 'high', 'medium', 'low']);
-  const knownFormats = new Set(['text', 'json', 'sarif', 'html', 'junit', 'sonarqube']);
+  const knownFormats = new Set(['text', 'json', 'sarif', 'html', 'junit', 'sonarqube', 'markdown']);
 
   // Check for unknown keys — a typo here silently dropped config before this fix
   for (const key of Object.keys(obj as Record<string, unknown>)) {
@@ -558,7 +559,7 @@ program
     'Write a self-contained HTML report to <output-path>. Shorthand for --format html --output <output-path>. ' +
     'The file can be opened directly in a browser without a server.',
   )
-  .option('--format <format>', 'Output format: text | json | sarif | html | junit | sonarqube (overrides --json / --sarif flags)')
+  .option('--format <format>', 'Output format: text | json | sarif | html | junit | sonarqube | markdown (overrides --json / --sarif flags)')
   .option('--severity <level>', 'Minimum severity to report (critical|high|medium|low)', 'low')
   .option(
     '--min-severity <level>',
@@ -1132,6 +1133,11 @@ program
       emit(buildHTMLReport(filtered, scanRoot, undefined, _fixResults, options.cacheStats ? getCacheStats() : undefined));
       if (outputPath) {
         console.error('[html] Self-contained HTML report written. Open in a browser to review.');
+      }
+    } else if (effectiveFormat === 'markdown') {
+      emit(buildMarkdownReport(filtered, scanRoot));
+      if (outputPath) {
+        console.error('[markdown] Markdown report written. Paste into a GitHub PR comment or issue.');
       }
     } else {
       if (outputPath) {
