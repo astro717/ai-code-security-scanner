@@ -100,3 +100,25 @@ describe('getOwaspCategory', () => {
     expect(getOwaspCategory('DOES_NOT_EXIST')).toBeUndefined();
   });
 });
+
+// ── Rust-specific finding type OWASP mappings ─────────────────────────────────
+
+describe('Rust-specific OWASP mappings', () => {
+  test('UNSAFE_DESERIALIZATION maps to A08:2021 (Software and Data Integrity Failures)', () => {
+    const cat = getOwaspCategory('UNSAFE_DESERIALIZATION');
+    expect(cat).toBeDefined();
+    expect(cat!.id).toBe('A08:2021');
+  });
+
+  test('BUFFER_OVERFLOW maps to A04:2021 (Insecure Design)', () => {
+    const cat = getOwaspCategory('BUFFER_OVERFLOW');
+    expect(cat).toBeDefined();
+    expect(cat!.id).toBe('A04:2021');
+  });
+
+  test('FORMAT_STRING maps to A03:2021 (Injection)', () => {
+    const cat = getOwaspCategory('FORMAT_STRING');
+    expect(cat).toBeDefined();
+    expect(cat!.id).toBe('A03:2021');
+  });
+});

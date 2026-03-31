@@ -12,8 +12,9 @@
  *   EVAL_INJECTION   — eval(<expr>)   -> JSON.parse(<expr>)  (best-effort)
  *   WEAK_CRYPTO      — md5 / sha1 hash creation  -> sha256 equivalent note
  *
- * The fixer never modifies Python / Go / Java / C / Ruby / C# files; those
- * require manual review.
+ * The fixer also supports Ruby (INSECURE_RANDOM → SecureRandom, SSTI, PATH_TRAVERSAL,
+ * COMMAND_INJECTION) and Swift (WEAK_CRYPTO → CC_SHA256). Go, Java, and C files
+ * still require manual review.
  */
 
 import * as fs from 'fs';
@@ -460,11 +461,179 @@ ${indent}    raise ValueError(${msg})`;
       return null;
     },
   },
+
+  // ── INSECURE_RANDOM (Ruby): rand/Random.new → SecureRandom.hex ────────────
+  {
+    types: ['INSECURE_RANDOM'],
+    description: 'Replace Ruby rand()/Random.new with SecureRandom.hex (requires "require \'securerandom\'")',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rb') return null;
+
+      // Pattern: rand() or rand(N) → SecureRandom.random_number(N)
+      if (/\brand\s*\(/.test(line)) {
+        const fixed = line.replace(
+          /\brand\s*\(([^)]*)\)/g,
+          (_, args) => args.trim() ? `SecureRandom.random_number(${args.trim()})` : 'SecureRandom.hex(16)',
+        );
+        return fixed !== line ? fixed : null;
+      }
+
+      // Pattern: Random.new.rand → SecureRandom.random_number
+      if (/Random\.new\.rand/.test(line)) {
+        const fixed = line.replace(/Random\.new\.rand/g, 'SecureRandom.random_number');
+        return fixed !== line ? fixed : null;
+      }
+
+      return null;
+    },
+  },
+
+  // ── SQL_INJECTION (Ruby): string interpolation in SQL → parameterized query note ──
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Add TODO comment to replace Ruby SQL string interpolation with parameterized query',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rb') return null;
+      // Match common Ruby SQL patterns with string interpolation: #{var}
+      if (!/#\{/.test(line)) return null;
+      if (/TODO.*SQL|parameterized|\?\s*,/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}# TODO(SQL_INJECTION): replace string interpolation with parameterized query,\n` +
+        `${indent}# e.g. db.execute("SELECT * FROM users WHERE id = ?", [id])\n` +
+        line
+      );
+    },
+  },
+
+  // ── INSECURE_SHARED_PREFS (Swift): UserDefaults for sensitive data ────────
+  {
+    types: ['INSECURE_SHARED_PREFS'],
+    description: 'Replace UserDefaults sensitive storage with Keychain access comment',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+      if (!/UserDefaults\.standard\.set|UserDefaults\.standard\[/.test(line)) return null;
+      if (/TODO.*Keychain|KeychainSwift|KeychainWrapper/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(INSECURE_SHARED_PREFS): store sensitive data in Keychain instead of UserDefaults.\n` +
+        `${indent}// Use KeychainSwift: keychain.set(value, forKey: key)\n` +
+        line
+      );
+    },
+  },
+
+  // ── UNSAFE_WEBVIEW (Swift): WKWebView loadHTMLString with user input ──────
+  {
+    types: ['UNSAFE_WEBVIEW'],
+    description: 'Add TODO to sanitize WKWebView loadHTMLString input',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+      if (!/loadHTMLString\s*\(|loadRequest\s*\(|load\s*\(URLRequest/.test(line)) return null;
+      if (/TODO.*sanitize|allowList|isAllowed/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(UNSAFE_WEBVIEW): validate/sanitize the URL and HTML content before loading.\n` +
+        `${indent}// Consider a WKNavigationDelegate allowlist to restrict navigable origins.\n` +
+        line
+      );
+    },
+  },
+
+  // ── MISSING_AUTH (C#): endpoints without [Authorize] attribute ────────────
+  {
+    types: ['MISSING_AUTH'],
+    description: 'Add TODO comment to add [Authorize] attribute to C# controller action',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.cs') return null;
+      // Match controller action method declarations
+      if (!/public\s+(?:async\s+)?(?:Task<|IActionResult|ActionResult|string|int|bool)/.test(line)) return null;
+      if (/\[Authorize\]|\[AllowAnonymous\]/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(MISSING_AUTH): add [Authorize] attribute (or [Authorize(Roles = "...")] for role-based access)\n` +
+        line
+      );
+    },
+  },
+
+  // ── UNSAFE_BLOCK (Rust): unsafe { ... } → scope-narrowing note ───────────
+  {
+    types: ['UNSAFE_BLOCK'],
+    description: 'Add TODO comment to narrow the unsafe block scope in Rust',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+      if (!/\bunsafe\s*\{/.test(line)) return null;
+      if (/TODO.*unsafe|SAFETY:/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// SAFETY: TODO — document why this unsafe block is sound and narrow its scope\n` +
+        `${indent}// to the minimum set of operations that require unsafe.\n` +
+        line
+      );
+    },
+  },
+
+  // ── SQL_INJECTION (Rust): format! in SQL → parameterized query note ───────
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Add TODO comment to replace Rust format! SQL string with parameterized query',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+      // Match format! macro or string concatenation in SQL context
+      if (!/format!\s*\(|\.to_string\(\)/.test(line)) return null;
+      if (/TODO.*SQL|bind\(|sqlx::query!/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(SQL_INJECTION): use parameterized queries instead of format! string building.\n` +
+        `${indent}// With sqlx: sqlx::query!("SELECT ... WHERE id = ?", id).fetch_one(&pool).await\n` +
+        line
+      );
+    },
+  },
+
+  // ── WEAK_CRYPTO (Swift): CC_MD5/CC_SHA1 → CC_SHA256, Insecure.MD5 → SHA256 ─
+  {
+    types: ['WEAK_CRYPTO'],
+    description: 'Replace Swift weak hash (CC_MD5/CC_SHA1/Insecure.MD5) with SHA-256 equivalent',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+
+      let fixed = line;
+
+      // CommonCrypto: CC_MD5 → CC_SHA256
+      fixed = fixed.replace(/\bCC_MD5\b/g, 'CC_SHA256');
+      fixed = fixed.replace(/\bCC_MD5_DIGEST_LENGTH\b/g, 'CC_SHA256_DIGEST_LENGTH');
+
+      // CommonCrypto: CC_SHA1 → CC_SHA256
+      fixed = fixed.replace(/\bCC_SHA1\b/g, 'CC_SHA256');
+      fixed = fixed.replace(/\bCC_SHA1_DIGEST_LENGTH\b/g, 'CC_SHA256_DIGEST_LENGTH');
+
+      // CommonCrypto: kCCAlgorithmDES → kCCAlgorithmAES
+      fixed = fixed.replace(/\bkCCAlgorithmDES\b/g, 'kCCAlgorithmAES');
+      fixed = fixed.replace(/\bkCCKeySizeDES\b/g, 'kCCKeySizeAES256');
+      fixed = fixed.replace(/\bkCCBlockSizeDES\b/g, 'kCCBlockSizeAES128');
+
+      // CryptoKit: Insecure.MD5 → SHA256, Insecure.SHA1 → SHA256
+      fixed = fixed.replace(/\bInsecure\.MD5\b/g, 'SHA256');
+      fixed = fixed.replace(/\bInsecure\.SHA1\b/g, 'SHA256');
+
+      return fixed !== line ? fixed : null;
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────
 
-const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb']);
+const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb', '.swift', '.rs', '.go']);
 
 function isFixableFile(filePath: string): boolean {
   return FIXABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());

@@ -139,6 +139,61 @@ describe('SARIF_RULE_DESCRIPTIONS', () => {
   });
 });
 
+// ── Swift PERFORMANCE_N_PLUS_ONE SARIF output ────────────────────────────────
+
+describe('buildSARIF — Swift PERFORMANCE_N_PLUS_ONE finding', () => {
+  const swiftN1Finding = makeFinding({
+    type: 'PERFORMANCE_N_PLUS_ONE',
+    severity: 'high',
+    line: 85,
+    column: 12,
+    message: 'URLSession dataTask inside a forEach loop — N+1 pattern.',
+    file: 'NetworkService.swift',
+  });
+
+  test('produces a rule entry with ruleId PERFORMANCE_N_PLUS_ONE', () => {
+    const sarif = buildSARIF([swiftN1Finding]) as {
+      runs: Array<{ tool: { driver: { rules: Array<{ id: string }> } } }>;
+    };
+    const rules = sarif.runs[0].tool.driver.rules;
+    const rule = rules.find((r) => r.id === 'PERFORMANCE_N_PLUS_ONE');
+    expect(rule).toBeDefined();
+  });
+
+  test('PERFORMANCE_N_PLUS_ONE rule description mentions URLSession/CoreData', () => {
+    expect(SARIF_RULE_DESCRIPTIONS.PERFORMANCE_N_PLUS_ONE).toMatch(/URLSession|CoreData/);
+  });
+
+  test('PERFORMANCE_N_PLUS_ONE result has level "error" (high severity)', () => {
+    const sarif = buildSARIF([swiftN1Finding]) as {
+      runs: Array<{ results: Array<{ ruleId: string; level: string }> }>;
+    };
+    const result = sarif.runs[0].results.find((r) => r.ruleId === 'PERFORMANCE_N_PLUS_ONE');
+    expect(result).toBeDefined();
+    expect(result!.level).toBe('error');
+  });
+
+  test('PERFORMANCE_N_PLUS_ONE result includes correct Swift file location', () => {
+    const sarif = buildSARIF([swiftN1Finding]) as {
+      runs: Array<{
+        results: Array<{
+          ruleId: string;
+          locations: Array<{
+            physicalLocation: {
+              artifactLocation: { uri: string };
+              region: { startLine: number };
+            };
+          }>;
+        }>;
+      }>;
+    };
+    const result = sarif.runs[0].results.find((r) => r.ruleId === 'PERFORMANCE_N_PLUS_ONE');
+    const loc = result!.locations[0].physicalLocation;
+    expect(loc.artifactLocation.uri).toBe('NetworkService.swift');
+    expect(loc.region.startLine).toBe(85);
+  });
+});
+
 // ── Multi-finding SARIF output ────────────────────────────────────────────────
 
 describe('buildSARIF — multiple findings', () => {
