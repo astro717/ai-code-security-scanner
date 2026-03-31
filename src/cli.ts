@@ -690,7 +690,17 @@ program
     '(Anthropic or OpenAI) for plain-language explanations and fix suggestions. ' +
     'Requires a running ai-sec-scan server or direct API key via --openai-key / ANTHROPIC_API_KEY.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; diff: boolean; fix: boolean; dryRun: boolean; typeList: boolean; listTypes: boolean; summaryOnly: boolean; aiProvider?: string; openaiKey?: string; explain?: boolean }) => {
+  .option(
+    '--min-confidence <threshold>',
+    'Filter out findings with a confidence score below <threshold> (0.0–1.0). ' +
+    'Findings without a confidence value are kept. Mirrors the minConfidence query parameter on the /scan endpoint.',
+    (val: string) => {
+      const n = parseFloat(val);
+      if (isNaN(n) || n < 0 || n > 1) throw new Error('--min-confidence must be a number between 0.0 and 1.0');
+      return n;
+    },
+  )
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; diff: boolean; fix: boolean; dryRun: boolean; typeList: boolean; listTypes: boolean; summaryOnly: boolean; aiProvider?: string; openaiKey?: string; explain?: boolean; minConfidence?: number }) => {
     // --type-list: print all known finding types and exit immediately.
     if (options.typeList) {
       const types = [...KNOWN_TYPES].sort();
@@ -997,6 +1007,20 @@ program
       const suppressed = before - filtered.length;
       if (suppressed > 0) {
         console.error(`[ignore-type] ${suppressed} finding(s) suppressed for type(s): ${[...suppressedTypes].join(', ')}`);
+      }
+    }
+
+    // ── --min-confidence filtering ─────────────────────────────────────────
+    // Remove findings below the caller-specified confidence threshold.
+    // Findings without a confidence value are kept (absence means the
+    // detector did not emit a confidence estimate, not that it is low).
+    if (options.minConfidence !== undefined) {
+      const threshold = options.minConfidence;
+      const before = filtered.length;
+      filtered = filtered.filter((f) => (f.confidence ?? 1) >= threshold);
+      const dropped = before - filtered.length;
+      if (dropped > 0) {
+        console.error(`[min-confidence] ${dropped} finding(s) below confidence threshold ${threshold}`);
       }
     }
 

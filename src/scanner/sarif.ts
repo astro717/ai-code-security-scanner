@@ -21,6 +21,7 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   COMMAND_INJECTION:     'User-controlled value used as the command in a child_process call.',
   COMMAND_INJECTION_C:   'User-controlled value used as the command in a system/popen call (C/C++).',
   COMMAND_INJECTION_CS:  'User-controlled value used in Process.Start() or ProcessStartInfo (C#), enabling arbitrary command execution.',
+  COMMAND_INJECTION_GO:  'User-controlled value passed to exec.Command() in Go, enabling arbitrary command execution.',
   CORS_MISCONFIGURATION: 'CORS policy allows wildcard or reflected origin with credentials.',
   JWT_HARDCODED_SECRET:  'JWT signed with a hardcoded secret literal.',
   JWT_WEAK_SECRET:       'JWT signed with a secret shorter than 32 characters.',
@@ -39,11 +40,15 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   MASS_ASSIGNMENT:       'Mass assignment via permit(:all) or unrestricted parameter binding.',
   FORMAT_STRING:         'Non-literal format string passed to printf/fprintf family — memory read/write risk.',
   SSTI:                  'Template string rendered from user-controlled input — arbitrary server-side code execution via SSTI.',
-  INSECURE_SHARED_PREFS: 'Sensitive data stored in Android SharedPreferences without encryption.',
-  WEBVIEW_LOAD_URL:      'WebView loads a URL derived from user-controlled input — potential open redirect or XSS.',
-  SQL_INJECTION_CS:      'User-controlled input used in a SQL query without parameterisation (C#).',
-  PATH_TRAVERSAL_CS:     'User-controlled path used in a filesystem call without sanitisation (C#).',
-  PERFORMANCE_N_PLUS_ONE: 'Database query executed inside a loop — N+1 query pattern causing excessive round-trips.',
+  INSECURE_SHARED_PREFS: 'Sensitive data written to Android SharedPreferences without encryption.',
+  WEBVIEW_LOAD_URL:      'WebView loads a URL derived from user-controlled input — potential XSS or content injection.',
+  SQL_INJECTION_CS:      'User-controlled input concatenated into a SQL query in a C# context without parameterisation.',
+  PATH_TRAVERSAL_CS:     'User-controlled path used in a C# filesystem call without sanitisation or bounds checking.',
+  PERFORMANCE_N_PLUS_ONE: 'ORM, database query, or network request (URLSession/CoreData) executed inside a loop — N+1 query pattern degrades performance under load.',
+  FORCE_TRY:             'Swift try! used — program crashes at runtime if the expression throws.',
+  FORCE_UNWRAP:          'Swift force-unwrap (!) on an optional — program crashes at runtime if the value is nil.',
+  UNSAFE_BLOCK:          'Rust unsafe block detected — memory-safety guarantees are suspended within this scope.',
+  MISSING_AUTH:          'Public controller endpoint missing an authorization attribute — unauthenticated access possible.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';

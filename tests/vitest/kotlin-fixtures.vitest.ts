@@ -256,3 +256,91 @@ describe('kotlin-parser — finding shape', () => {
     expect(findings.filter((f) => f.type === 'SECRET_HARDCODED')).toHaveLength(0);
   });
 });
+
+// ── PERFORMANCE_N_PLUS_ONE — stateful brace-depth detector ───────────────────
+
+describe('kotlin-parser — PERFORMANCE_N_PLUS_ONE (stateful brace-depth)', () => {
+  test('fires on Room dao.findById inside a for loop', () => {
+    const code = [
+      'for (id in ids) {',
+      '    val user = dao.findById(id)',
+      '}',
+    ].join('\n');
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'PERFORMANCE_N_PLUS_ONE')).toBe(true);
+  });
+
+  test('fires on db.query inside a forEach block', () => {
+    const code = [
+      'items.forEach { item ->',
+      '    val row = db.query("SELECT * FROM t WHERE id=?", arrayOf(item.id))',
+      '}',
+    ].join('\n');
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'PERFORMANCE_N_PLUS_ONE')).toBe(true);
+  });
+
+  test('fires on database.execSQL inside a for loop', () => {
+    const code = [
+      'for (item in items) {',
+      '    database.execSQL("DELETE FROM cache WHERE key=?", arrayOf(item.key))',
+      '}',
+    ].join('\n');
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'PERFORMANCE_N_PLUS_ONE')).toBe(true);
+  });
+
+  test('does NOT fire on db.query outside any loop', () => {
+    const code = [
+      'fun loadUsers(): List<User> {',
+      '    return dao.getAllUsers()',
+      '}',
+    ].join('\n');
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE')).toHaveLength(0);
+  });
+
+  test('does NOT fire when no DB call is inside the loop', () => {
+    const code = [
+      'for (item in items) {',
+      '    val name = item.name.uppercase()',
+      '}',
+    ].join('\n');
+    const findings = scan(code);
+    expect(findings.filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE')).toHaveLength(0);
+  });
+
+  test('N+1 finding has medium severity', () => {
+    const code = [
+      'for (id in ids) {',
+      '    val user = dao.findById(id)',
+      '}',
+    ].join('\n');
+    const findings = scan(code).filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE');
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings[0]!.severity).toBe('medium');
+  });
+
+  test('N+1 finding includes a non-empty message', () => {
+    const code = [
+      'for (id in ids) {',
+      '    val result = db.query("SELECT * FROM items WHERE id=?", arrayOf(id))',
+      '}',
+    ].join('\n');
+    const findings = scan(code).filter((f) => f.type === 'PERFORMANCE_N_PLUS_ONE');
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings[0]!.message.length).toBeGreaterThan(0);
+  });
+
+  test('handles nested brace depth — outer loop + inner block', () => {
+    const code = [
+      'for (id in ids) {',
+      '    if (id > 0) {',
+      '        val user = dao.findById(id)',
+      '    }',
+      '}',
+    ].join('\n');
+    const findings = scan(code);
+    expect(findings.some((f) => f.type === 'PERFORMANCE_N_PLUS_ONE')).toBe(true);
+  });
+});

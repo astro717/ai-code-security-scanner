@@ -600,6 +600,73 @@ ${indent}    raise ValueError(${msg})`;
     },
   },
 
+  // ── PERFORMANCE_N_PLUS_ONE: note-only guidance for N+1 query patterns ─────
+  {
+    types: ['PERFORMANCE_N_PLUS_ONE'],
+    description: 'Add TODO comment with N+1 query remediation guidance',
+    transform(line: string, finding: Finding): string | null {
+      // Already annotated
+      if (/TODO.*N\+1|prefetch|eager.?load|joinedload|includes?\(/i.test(line)) return null;
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      // Language-specific advice
+      if (ext === '.py') {
+        return (
+          `${indent}# TODO(N+1): batch this query before the loop — use select_related() / prefetch_related() (Django)\n` +
+          `${indent}# or joinedload() / subqueryload() (SQLAlchemy) to eliminate per-iteration round-trips.\n` +
+          line
+        );
+      }
+      if (ext === '.rb') {
+        return (
+          `${indent}# TODO(N+1): use .includes(:association) or .preload(:association) to eager-load\n` +
+          `${indent}# and avoid a separate query per iteration.\n` +
+          line
+        );
+      }
+      if (ext === '.go') {
+        return (
+          `${indent}// TODO(N+1): batch this query outside the loop — use a single WHERE … IN (?) query\n` +
+          `${indent}// or a JOIN to fetch all required rows in one round-trip.\n` +
+          line
+        );
+      }
+      if (ext === '.java') {
+        return (
+          `${indent}// TODO(N+1): use @EntityGraph, JOIN FETCH, or batch the query before the loop\n` +
+          `${indent}// to avoid a separate DB round-trip per iteration.\n` +
+          line
+        );
+      }
+      if (['.cs'].includes(ext)) {
+        return (
+          `${indent}// TODO(N+1): use .Include() / .ThenInclude() (EF Core) to eager-load\n` +
+          `${indent}// and avoid a separate query per loop iteration.\n` +
+          line
+        );
+      }
+      if (['.kt', '.kts'].includes(ext)) {
+        return (
+          `${indent}// TODO(N+1): batch this query outside the loop — use a single DAO query\n` +
+          `${indent}// with an IN clause or @Transaction to avoid per-iteration round-trips.\n` +
+          line
+        );
+      }
+      if (ext === '.swift') {
+        return (
+          `${indent}// TODO(N+1): batch this fetch/request outside the loop to avoid per-iteration overhead.\n` +
+          `${indent}// Use a single NSFetchRequest with a predicate or batch URLSession calls.\n` +
+          line
+        );
+      }
+      // Generic fallback
+      return (
+        `${indent}// TODO(N+1): move this query outside the loop and batch-load the data to avoid N+1.\n` +
+        line
+      );
+    },
+  },
+
   // ── SQL_INJECTION (Rust): format! in SQL → parameterized query note ───────
   {
     types: ['SQL_INJECTION'],
@@ -647,6 +714,95 @@ ${indent}    raise ValueError(${msg})`;
       fixed = fixed.replace(/\bInsecure\.SHA1\b/g, 'SHA256');
 
       return fixed !== line ? fixed : null;
+    },
+  },
+
+  // ── BUFFER_OVERFLOW (Rust): raw pointer deref / unsafe arithmetic → note ──
+  {
+    types: ['BUFFER_OVERFLOW'],
+    description: 'Add TODO comment to replace unsafe pointer operation with safe Rust alternative',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+
+      // Match unsafe raw pointer patterns: *ptr, ptr.offset, ptr.add, ptr::read/write
+      if (!/\*\s*\w+|\.offset\s*\(|\.add\s*\(|ptr::\w+|slice::from_raw_parts/.test(line)) return null;
+      if (/TODO.*BUFFER_OVERFLOW|SAFETY:.*bounds/.test(line)) return null;
+
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(BUFFER_OVERFLOW): replace raw pointer operation with safe Rust alternative.\n` +
+        `${indent}// Consider using slices, Vec, or checked indexing (.get()) instead of raw pointers.\n` +
+        line
+      );
+    },
+  },
+
+  // ── SECRET_HARDCODED (Rust): hardcoded credentials → environment variable ──
+  {
+    types: ['SECRET_HARDCODED'],
+    description: 'Replace hardcoded Rust secret with std::env::var() lookup',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+
+      // Match: let api_key = "sk-..."; or const PASSWORD: &str = "...";
+      if (!/(?:let|const|static)\s+\w*(?:key|secret|password|token|api_key)\w*\s*(?::\s*&?str\s*)?=\s*"/.test(line)) return null;
+      if (/std::env::var|env!|dotenv/.test(line)) return null;
+
+      // Extract variable name
+      const varMatch = line.match(/(?:let|const|static)\s+(\w+)/);
+      if (!varMatch) return null;
+      const varName = varMatch[1]!;
+      const envName = varName.toUpperCase();
+
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}let ${varName} = std::env::var("${envName}").expect("${envName} must be set");`
+      );
+    },
+  },
+
+  // ── SQL_INJECTION (Go): fmt.Sprintf in SQL → parameterized query ──────────
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Replace Go fmt.Sprintf SQL string with parameterized query placeholder',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.go') return null;
+
+      // Match fmt.Sprintf("SELECT ... %s", var) or string concatenation in SQL
+      if (!/fmt\.Sprintf\s*\(|".*SELECT.*"\s*\+/.test(line)) return null;
+      if (/TODO.*SQL|\$1|\?/.test(line)) return null;
+
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(SQL_INJECTION): use parameterized queries instead of string interpolation.\n` +
+        `${indent}// e.g. db.Query("SELECT * FROM users WHERE id = $1", id)\n` +
+        line
+      );
+    },
+  },
+
+  // ── COMMAND_INJECTION (Go): exec.Command with shell string → array form ───
+  {
+    types: ['COMMAND_INJECTION', 'COMMAND_INJECTION_GO'],
+    description: 'Replace Go shell command string with exec.Command array form',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.go') return null;
+
+      // Match exec.Command("sh", "-c", ...) or exec.Command("bash", "-c", ...)
+      if (/exec\.Command\s*\(\s*"(?:sh|bash)"\s*,\s*"-c"/.test(line)) {
+        const indent = line.match(/^(\s*)/)?.[1] ?? '';
+        return (
+          `${indent}// TODO(COMMAND_INJECTION): replace shell string with direct exec.Command("binary", "arg1", "arg2") form.\n` +
+          `${indent}// This avoids shell interpretation and prevents injection via user-controlled arguments.\n` +
+          line
+        );
+      }
+
+      return null;
     },
   },
 ];
@@ -721,26 +877,41 @@ export function applyFixes(findings: Finding[], dryRun = false): FixResult[] {
         continue;
       }
 
-      const rule = FIX_RULES.find((r) => r.types.includes(finding.type));
-      if (!rule) {
+      // Try ALL rules for this finding type in order — the first one whose
+      // transform() returns a non-null value wins.  Multiple rules for the
+      // same type (e.g. SQL_INJECTION for Go, Ruby, Rust, C#) are each
+      // language-guarded internally; using find() would stop at the first
+      // language's rule even when it returns null for a different language.
+      const matchingRules = FIX_RULES.filter((r) => r.types.includes(finding.type));
+      if (matchingRules.length === 0) {
         results.push({ file: filePath, finding, applied: false, description: `No auto-fix rule for finding type "${finding.type}" — manual fix required.` });
         continue;
       }
 
       const originalLine = lines[lineIdx]!;
-      const fixedLine = rule.transform(originalLine, finding);
+      let appliedRule: FixRule | null = null;
+      let fixedLine: string | null = null;
+      for (const candidate of matchingRules) {
+        const result = candidate.transform(originalLine, finding);
+        if (result !== null) {
+          appliedRule = candidate;
+          fixedLine = result;
+          break;
+        }
+      }
 
-      if (fixedLine === null) {
+      if (fixedLine === null || appliedRule === null) {
         results.push({
           file: filePath,
           finding,
           applied: false,
-          description: `${rule.description} — pattern not matched on this line; manual fix required.`,
+          description: `${matchingRules.map(r => r.description).join(' / ')} — pattern not matched on this line; manual fix required.`,
           originalLine,
         });
         continue;
       }
 
+      const rule = appliedRule;
       lines[lineIdx] = fixedLine;
       modified.add(lineIdx);
       results.push({

@@ -9,7 +9,7 @@
  * Covered vulnerability classes:
  *   - SSRF (net/http with user input)
  *   - SQL_INJECTION (fmt.Sprintf in queries)
- *   - COMMAND_INJECTION (exec.Command with user input)
+ *   - COMMAND_INJECTION_GO (exec.Command with user input)
  *   - SECRET_HARDCODED (hardcoded credentials)
  *   - EVAL_INJECTION (unsafe reflect / template execution)
  *   - WEAK_CRYPTO (md5, sha1)
@@ -70,7 +70,7 @@ const GO_PATTERNS: GoPattern[] = [
 
   // Command injection via exec.Command with user input
   {
-    type: 'COMMAND_INJECTION',
+    type: 'COMMAND_INJECTION_GO',
     severity: 'critical',
     pattern: /exec\.Command\s*\(\s*(?!")[^)]*(?:request|req\.|r\.|input|param|query|args|os\.Args)/i,
     message:
@@ -78,7 +78,7 @@ const GO_PATTERNS: GoPattern[] = [
       'Validate and sanitise all arguments before passing them to external commands.',
   },
   {
-    type: 'COMMAND_INJECTION',
+    type: 'COMMAND_INJECTION_GO',
     severity: 'critical',
     pattern: /exec\.Command\s*\(\s*"(?:sh|bash|cmd)"\s*,\s*"-c"\s*,/,
     message:
@@ -198,6 +198,18 @@ const GO_PATTERNS: GoPattern[] = [
     message:
       'Go template parsed from user-controlled input — server-side template injection. ' +
       'Template source must come from trusted static files, not user input.',
+  },
+
+  // Go unsafe.Pointer usage — bypasses type safety
+  {
+    type: 'UNSAFE_BLOCK',
+    severity: 'medium',
+    pattern: /\bunsafe\.Pointer\b/,
+    message:
+      'unsafe.Pointer usage detected — Go type safety and garbage collector assumptions are bypassed. ' +
+      'Incorrect pointer arithmetic can cause memory corruption or data races. ' +
+      'Prefer type-safe alternatives; if unsafe is required, document the invariants.',
+    confidence: 0.9,
   },
 ];
 

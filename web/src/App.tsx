@@ -218,8 +218,17 @@ function App() {
   const [sseWatchPath, setSseWatchPath] = useState<string>('')
   const [sseConnected, setSseConnected] = useState<boolean>(false)
   const sseRef = useRef<EventSource | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectAttemptsRef = useRef<number>(0)
+  const MAX_RECONNECT_DELAY = 30000 // 30s cap
 
   const connectWatch = useCallback((watchPath: string) => {
+    // Clear any pending reconnect timer
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+
     if (sseRef.current) {
       sseRef.current.close()
       sseRef.current = null
@@ -231,7 +240,10 @@ function App() {
     const es = new EventSource(url)
     sseRef.current = es
 
-    es.addEventListener('connected', () => setSseConnected(true))
+    es.addEventListener('connected', () => {
+      setSseConnected(true)
+      reconnectAttemptsRef.current = 0 // Reset backoff on successful connection
+    })
 
     es.addEventListener('scan', (e: MessageEvent) => {
       try {
@@ -250,12 +262,35 @@ function App() {
       } catch { /* ignore malformed events */ }
     })
 
-    es.onerror = () => setSseConnected(false)
+    es.onerror = () => {
+      setSseConnected(false)
+      es.close()
+      sseRef.current = null
+
+      // Exponential backoff reconnect: 1s, 2s, 4s, 8s, 16s, 30s cap
+      const attempt = reconnectAttemptsRef.current
+      const delay = Math.min(1000 * Math.pow(2, attempt), MAX_RECONNECT_DELAY)
+      reconnectAttemptsRef.current = attempt + 1
+
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null
+        // Only reconnect if we still want to watch this path
+        if (watchPath.trim()) {
+          connectWatch(watchPath)
+        }
+      }, delay)
+    }
   }, [addToHistory])
 
-  // Disconnect SSE on unmount
+  // Disconnect SSE and cancel reconnect on unmount
   useEffect(() => {
-    return () => { sseRef.current?.close() }
+    return () => {
+      sseRef.current?.close()
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+    }
   }, [])
 
   const handleScan = async () => {
@@ -670,8 +705,14 @@ function App() {
               <button
                 className="px-3 py-1 text-xs font-mono rounded border border-[#30363d] bg-[#1c2333] text-[#7d8590] hover:text-[#cdd5e0] hover:border-[#58a6ff] transition-colors"
                 onClick={() => {
-                  if (sseConnected && sseRef.current) {
-                    sseRef.current.close()
+                  if (sseConnected || sseRef.current) {
+                    // User-initiated disconnect: cancel any pending reconnect timer first
+                    if (reconnectTimerRef.current) {
+                      clearTimeout(reconnectTimerRef.current)
+                      reconnectTimerRef.current = null
+                    }
+                    reconnectAttemptsRef.current = 0
+                    sseRef.current?.close()
                     sseRef.current = null
                     setSseConnected(false)
                   } else {
