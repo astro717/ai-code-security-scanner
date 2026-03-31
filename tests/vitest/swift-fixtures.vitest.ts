@@ -132,6 +132,49 @@ describe('WEAK_CRYPTO', () => {
   });
 });
 
+// ── FORCE_TRY ───────────────────────────────────────────────────────────────
+
+describe('FORCE_TRY', () => {
+  it('fires on try! expression', () => {
+    const code = `let data = try! JSONSerialization.jsonObject(with: input)`;
+    expect(scan(code)).toContain('FORCE_TRY');
+  });
+
+  it('does NOT fire on regular try', () => {
+    const code = `let data = try JSONSerialization.jsonObject(with: input)`;
+    expect(scan(code)).not.toContain('FORCE_TRY');
+  });
+
+  it('does NOT fire on try?', () => {
+    const code = `let data = try? JSONSerialization.jsonObject(with: input)`;
+    expect(scan(code)).not.toContain('FORCE_TRY');
+  });
+});
+
+// ── FORCE_UNWRAP ────────────────────────────────────────────────────────────
+
+describe('FORCE_UNWRAP', () => {
+  it('fires on implicitly unwrapped optional declaration', () => {
+    const code = `var manager: NetworkManager!`;
+    expect(scan(code)).toContain('FORCE_UNWRAP');
+  });
+
+  it('fires on let declaration with IUO', () => {
+    const code = `let service: AuthService!`;
+    expect(scan(code)).toContain('FORCE_UNWRAP');
+  });
+
+  it('does NOT fire on regular optional', () => {
+    const code = `var manager: NetworkManager?`;
+    expect(scan(code)).not.toContain('FORCE_UNWRAP');
+  });
+
+  it('does NOT fire on non-optional declaration', () => {
+    const code = `let manager: NetworkManager`;
+    expect(scan(code)).not.toContain('FORCE_UNWRAP');
+  });
+});
+
 // ── Fixture file tests ────────────────────────────────────────────────────────
 
 describe('vulnerable.swift fixture', () => {
@@ -175,6 +218,18 @@ describe('vulnerable.swift fixture', () => {
     const result = scanSwift(parseSwiftFile(vulnerableFile));
     const types = result.map((f) => f.type);
     expect(types).toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+
+  it('detects FORCE_TRY findings', () => {
+    const result = scanSwift(parseSwiftFile(vulnerableFile));
+    const types = result.map((f) => f.type);
+    expect(types).toContain('FORCE_TRY');
+  });
+
+  it('detects FORCE_UNWRAP findings', () => {
+    const result = scanSwift(parseSwiftFile(vulnerableFile));
+    const types = result.map((f) => f.type);
+    expect(types).toContain('FORCE_UNWRAP');
   });
 
   it('detects at least 2 PERFORMANCE_N_PLUS_ONE findings (forEach + for-in)', () => {
@@ -322,5 +377,100 @@ describe('N1_QUERY — sliding-window detector', () => {
       '}',
     ].join('\n');
     expect(scan(code)).not.toContain('PERFORMANCE_N_PLUS_ONE');
+  });
+});
+
+// ── FORCE_TRY ─────────────────────────────────────────────────────────────────
+
+describe('FORCE_TRY — try! detection', () => {
+  it('fires on try! JSONSerialization call', () => {
+    const code = `let json = try! JSONSerialization.jsonObject(with: data)`;
+    expect(scan(code)).toContain('FORCE_TRY');
+  });
+
+  it('fires on try! with assignment', () => {
+    const code = `let result = try! someThrowingFunction()`;
+    expect(scan(code)).toContain('FORCE_TRY');
+  });
+
+  it('fires on try! in function call chain', () => {
+    const code = `let data = try! Data(contentsOf: url)`;
+    expect(scan(code)).toContain('FORCE_TRY');
+  });
+
+  it('does NOT fire on regular try', () => {
+    const code = `let json = try JSONSerialization.jsonObject(with: data)`;
+    expect(scan(code)).not.toContain('FORCE_TRY');
+  });
+
+  it('does NOT fire on try? (optional try)', () => {
+    const code = `let json = try? JSONSerialization.jsonObject(with: data)`;
+    expect(scan(code)).not.toContain('FORCE_TRY');
+  });
+
+  it('does NOT fire on a comment mentioning try!', () => {
+    const code = `// avoid try! in production code`;
+    expect(scan(code)).not.toContain('FORCE_TRY');
+  });
+
+  it('returns high severity', () => {
+    const code = `let x = try! riskyCall()`;
+    const findings = scanFull(code).filter((f) => f.type === 'FORCE_TRY');
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings[0]!.severity).toBe('high');
+  });
+
+  it('reports correct line number', () => {
+    const code = ['func setup() {', '  let x = try! riskyCall()', '}'].join('\n');
+    const findings = scanFull(code).filter((f) => f.type === 'FORCE_TRY');
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings[0]!.line).toBe(2);
+  });
+});
+
+// ── FORCE_UNWRAP ──────────────────────────────────────────────────────────────
+
+describe('FORCE_UNWRAP — implicitly unwrapped optional detection', () => {
+  it('fires on let with String! type', () => {
+    const code = `let name: String! = fetchName()`;
+    expect(scan(code)).toContain('FORCE_UNWRAP');
+  });
+
+  it('fires on var with UILabel! type', () => {
+    const code = `var label: UILabel! = nil`;
+    expect(scan(code)).toContain('FORCE_UNWRAP');
+  });
+
+  it('fires on let with Int! type', () => {
+    const code = `let count: Int! = getCount()`;
+    expect(scan(code)).toContain('FORCE_UNWRAP');
+  });
+
+  it('does NOT fire on regular optional (Type?)', () => {
+    const code = `let name: String? = fetchName()`;
+    expect(scan(code)).not.toContain('FORCE_UNWRAP');
+  });
+
+  it('does NOT fire on non-optional type', () => {
+    const code = `let name: String = "hello"`;
+    expect(scan(code)).not.toContain('FORCE_UNWRAP');
+  });
+
+  it('returns medium severity', () => {
+    const code = `let x: NSString! = nil`;
+    const findings = scanFull(code).filter((f) => f.type === 'FORCE_UNWRAP');
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings[0]!.severity).toBe('medium');
+  });
+
+  it('reports correct line number', () => {
+    const code = [
+      'class ViewController: UIViewController {',
+      '  var button: UIButton! = nil',
+      '}',
+    ].join('\n');
+    const findings = scanFull(code).filter((f) => f.type === 'FORCE_UNWRAP');
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings[0]!.line).toBe(2);
   });
 });

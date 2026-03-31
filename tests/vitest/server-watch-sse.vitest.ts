@@ -88,3 +88,85 @@ describe('GET /watch — SSE stream', () => {
     fs.rmSync(tmpDir, { recursive: true });
   });
 });
+import {
+  initCache,
+  getCachedFindings,
+  setCachedFindings,
+  clearCache,
+} from '../../src/scanner/scan-cache';
+
+// ── /watch cache integration ──────────────────────────────────────────────────
+
+describe('GET /watch — scan result caching', () => {
+  test('getCachedFindings returns null before a file is scanned via /watch (cache miss)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'watch-cache-'));
+    const testFile = path.join(tmpDir, 'test.ts');
+    const content = 'const x = 1; // clean file';
+    fs.writeFileSync(testFile, content, 'utf-8');
+
+    // Before any scan, the cache should have nothing for this file
+    clearCache();
+    initCache({ cacheDir: path.join(tmpDir, '.cache') });
+    const result = getCachedFindings(testFile, content);
+    expect(result).toBeNull();
+
+    clearCache();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('setCachedFindings stores findings that getCachedFindings can retrieve', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'watch-cache2-'));
+
+    clearCache();
+    initCache({ cacheDir: path.join(tmpDir, '.cache') });
+
+    const filePath = path.join(tmpDir, 'auth.ts');
+    const fileContent = 'const token = Math.random();';
+    const fakeFindings = [{
+      type: 'INSECURE_RANDOM',
+      severity: 'high' as const,
+      line: 1,
+      column: 14,
+      snippet: fileContent,
+      message: 'Insecure random detected',
+      file: filePath,
+    }];
+
+    // Simulate what scanFile in /watch does: cache miss → scan → cache store
+    setCachedFindings(filePath, fileContent, fakeFindings);
+
+    // Next lookup with same content should hit
+    const hit = getCachedFindings(filePath, fileContent);
+    expect(hit).not.toBeNull();
+    expect(hit!).toHaveLength(1);
+    expect(hit![0]!.type).toBe('INSECURE_RANDOM');
+
+    clearCache();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('getCachedFindings returns null after file content changes (content hash mismatch)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'watch-cache3-'));
+
+    clearCache();
+    initCache({ cacheDir: path.join(tmpDir, '.cache') });
+
+    const filePath = path.join(tmpDir, 'service.ts');
+    const contentV1 = 'const a = 1;';
+    const contentV2 = 'const a = 2; // changed';
+    const findings = [{ type: 'XSS', severity: 'high' as const, line: 1, column: 0, message: 'test', file: filePath }];
+
+    setCachedFindings(filePath, contentV1, findings);
+
+    // Content changed → cache miss
+    const miss = getCachedFindings(filePath, contentV2);
+    expect(miss).toBeNull();
+
+    // Original content → cache hit
+    const hit = getCachedFindings(filePath, contentV1);
+    expect(hit).not.toBeNull();
+
+    clearCache();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+});

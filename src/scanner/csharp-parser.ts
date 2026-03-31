@@ -16,6 +16,8 @@
  *   - XSS (Response.Write with unencoded user input in ASP.NET)
  *   - SSRF (HttpClient/WebClient/WebRequest with user input)
  *   - OPEN_REDIRECT (Response.Redirect with user input)
+ *   - UNSAFE_BLOCK (unsafe{} blocks with pointer manipulation)
+ *   - MISSING_AUTH (ASP.NET controller endpoints missing [Authorize])
  */
 
 import * as fs from 'fs';
@@ -179,6 +181,18 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
       'Response.Redirect() called with user-controlled input. This can be exploited for phishing ' +
       'via open redirect. Validate that the target URL is a relative path or a known safe domain.',
   },
+
+  // C# unsafe block — managed memory-safety is suspended
+  {
+    type: 'UNSAFE_BLOCK',
+    severity: 'medium',
+    pattern: /\bunsafe\s*\{/,
+    message:
+      'C# unsafe block detected — managed memory-safety guarantees (bounds checking, null reference protection) ' +
+      'are suspended within this scope. Pointer arithmetic and direct memory access can cause buffer overflows ' +
+      'and use-after-free vulnerabilities. Minimize the unsafe scope and document why it is necessary.',
+    confidence: 0.9,
+  },
 ];
 
 /**
@@ -187,6 +201,18 @@ const CSHARP_PATTERNS: CSharpPattern[] = [
  */
 export function scanCSharp(result: CSharpParseResult): Finding[] {
   const findings: Finding[] = [];
+
+  // ── Stateful N+1 detection: foreach/for loop + EF Core / ADO.NET calls ──────
+  // Uses a brace-depth counter to track when we are inside a loop body.
+  // Fires PERFORMANCE_N_PLUS_ONE when an EF Core or ADO.NET query is found
+  // inside the loop.
+  let inLoop = false;
+  let loopBraceDepth = 0;
+
+  // Patterns that indicate entry into a foreach or for loop
+  const LOOP_ENTRY = /\b(?:foreach|for)\s*\(/;
+  // EF Core or ADO.NET query calls inside a loop body
+  const N1_QUERY = /\b(?:context|_context|dbContext|DbContext|_db|db)\s*\.\s*(?:\w+\s*\.)?\s*(?:Find|FindAsync|FirstOrDefault|FirstOrDefaultAsync|Where|ToList|ToListAsync|SingleOrDefault|SingleOrDefaultAsync|Any|AnyAsync|Count|CountAsync|Sum|SumAsync|Include|ThenInclude)\s*\(|\bExecuteReader\s*\(|\bExecuteScalar\s*\(|\bnew\s+SqlCommand\s*\(/i;
 
   result.lines.forEach((line, idx) => {
     const lineNum = idx + 1;
@@ -198,7 +224,39 @@ export function scanCSharp(result: CSharpParseResult): Finding[] {
       trimmed.startsWith('*') ||
       trimmed.startsWith('/*') ||
       trimmed.startsWith('#')
-    ) return;
+    ) {
+      // Still need to count braces for loop depth even in block comments, but
+      // single-line comments and preprocessor directives can be skipped entirely.
+      return;
+    }
+
+    const openBraces = (line.match(/\{/g) ?? []).length;
+    const closeBraces = (line.match(/\}/g) ?? []).length;
+
+    if (!inLoop && LOOP_ENTRY.test(line)) {
+      inLoop = true;
+      loopBraceDepth = openBraces - closeBraces;
+    } else if (inLoop) {
+      loopBraceDepth += openBraces - closeBraces;
+      if (loopBraceDepth <= 0) {
+        inLoop = false;
+        loopBraceDepth = 0;
+      } else if (N1_QUERY.test(line)) {
+        findings.push({
+          type: 'PERFORMANCE_N_PLUS_ONE',
+          severity: 'low',
+          line: lineNum,
+          column: line.search(/\S/),
+          snippet: trimmed.slice(0, 100),
+          message:
+            'Database query inside a foreach/for loop — this is an N+1 query pattern. ' +
+            'Each iteration issues a separate DB round-trip. Use eager loading ' +
+            '(.Include()), batch queries, or load data before the loop to avoid N+1 performance issues.',
+          file: result.filePath,
+        });
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     for (const { type, severity, pattern, message } of CSHARP_PATTERNS) {
       if (pattern.test(line)) {
@@ -211,6 +269,80 @@ export function scanCSharp(result: CSharpParseResult): Finding[] {
           message,
           file: result.filePath,
         });
+      }
+    }
+  });
+
+  // ── Stateful MISSING_AUTH detection ─────────────────────────────────────────
+  // Two-pass: first detect whether we're inside a Controller class, then flag
+  // public action methods that lack [Authorize] or [AllowAnonymous] attributes.
+  // A class-level [Authorize] exempts all its methods.
+  let inController = false;
+  let classHasAuthorize = false;
+  let classBraceDepth = 0;
+  let recentAttributes: string[] = [];  // accumulates attributes before a method
+
+  const CONTROLLER_CLASS = /\bclass\s+\w+\s*(?:<[^>]*>)?\s*:\s*(?:.*?)(?:Controller|ControllerBase)\b/;
+  const ACTION_METHOD = /\bpublic\s+(?:async\s+)?(?:Task<|IActionResult|ActionResult|JsonResult|ViewResult|ContentResult|FileResult|ObjectResult|StatusCodeResult)/;
+  const ATTR_LINE = /^\s*\[([^\]]+)\]/;
+
+  result.lines.forEach((line, idx) => {
+    const lineNum = idx + 1;
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) return;
+
+    const openBraces = (line.match(/\{/g) ?? []).length;
+    const closeBraces = (line.match(/\}/g) ?? []).length;
+
+    if (!inController) {
+      // Check for [Authorize] on lines immediately before the class
+      const attrMatch = ATTR_LINE.exec(line);
+      if (attrMatch) {
+        recentAttributes.push(attrMatch[1]!);
+      } else if (CONTROLLER_CLASS.test(line)) {
+        inController = true;
+        classHasAuthorize = recentAttributes.some(a => /\bAuthorize\b/.test(a));
+        classBraceDepth = openBraces - closeBraces;
+        recentAttributes = [];
+      } else if (!/^\s*$/.test(line)) {
+        // Non-empty, non-attribute, non-class line — reset accumulated attributes
+        recentAttributes = [];
+      }
+    } else {
+      classBraceDepth += openBraces - closeBraces;
+
+      if (classBraceDepth <= 0) {
+        inController = false;
+        classHasAuthorize = false;
+        classBraceDepth = 0;
+        recentAttributes = [];
+        return;
+      }
+
+      const attrMatch = ATTR_LINE.exec(line);
+      if (attrMatch) {
+        recentAttributes.push(attrMatch[1]!);
+      } else if (ACTION_METHOD.test(line) && !classHasAuthorize) {
+        const hasAuth = recentAttributes.some(a => /\bAuthorize\b|\bAllowAnonymous\b/.test(a));
+        if (!hasAuth) {
+          findings.push({
+            type: 'MISSING_AUTH',
+            severity: 'high',
+            line: lineNum,
+            column: line.search(/\S/),
+            snippet: trimmed.slice(0, 100),
+            message:
+              'ASP.NET controller action missing [Authorize] attribute — this endpoint is accessible ' +
+              'without authentication. Add [Authorize] to enforce auth, or [AllowAnonymous] to mark it ' +
+              'as intentionally public.',
+            file: result.filePath,
+            confidence: 0.85,
+          });
+        }
+        recentAttributes = [];
+      } else if (!/^\s*$/.test(line)) {
+        recentAttributes = [];
       }
     }
   });

@@ -93,6 +93,7 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   COMMAND_INJECTION:      'A03:2021',
   COMMAND_INJECTION_C:    'A03:2021',
   COMMAND_INJECTION_CS:   'A03:2021',
+  COMMAND_INJECTION_GO:   'A03:2021',
   SHELL_INJECTION:        'A03:2021',
   EVAL_INJECTION:         'A03:2021',
   XSS:                    'A03:2021',
@@ -137,6 +138,16 @@ export const FINDING_TO_OWASP: Record<string, string> = {
 
   // A05 — Security Misconfiguration (iOS WebView)
   UNSAFE_WEBVIEW:         'A05:2021',
+
+  // A04 — Insecure Design (Swift crash-risk patterns)
+  FORCE_TRY:              'A04:2021',
+  FORCE_UNWRAP:           'A04:2021',
+
+  // A04 — Insecure Design (Rust unsafe blocks)
+  UNSAFE_BLOCK:           'A04:2021',
+
+  // A01 — Broken Access Control (missing authentication)
+  MISSING_AUTH:           'A01:2021',
 };
 
 /**

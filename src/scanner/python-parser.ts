@@ -318,13 +318,58 @@ const PYTHON_PATTERNS: PythonPattern[] = [
 export function scanPython(result: PythonParseResult): Finding[] {
   const findings: Finding[] = [];
 
+  // ── Stateful N+1 detection ──────────────────────────────────────────────────
+  // Python uses indentation-based blocks, so we track whether we are inside a
+  // for/while loop by recording the indentation level of the loop header and
+  // considering all subsequent lines with greater indentation as "inside the loop".
+  let loopIndent = -1;  // -1 = not inside a loop
+
+  // Django ORM / SQLAlchemy query calls that cause a DB round-trip
+  const PY_ORM_QUERY = /\.(?:objects\.(?:get|filter|exclude|all|first|last|count|exists|create|update|delete|values|values_list|annotate|aggregate|select_related|prefetch_related|order_by|distinct)|query\.(?:filter|filter_by|get|all|first|one|one_or_none|count|delete|update)|execute|fetchone|fetchall|fetchmany|scalar)\s*\(/;
+  const PY_LOOP_START = /^(\s*)(?:for\s+.+\s+in\s+|while\s+)/;
+
   result.lines.forEach((line, idx) => {
     const lineNum = idx + 1;
     const trimmed = line.trim();
 
-    // Skip pure comments
-    if (trimmed.startsWith('#')) return;
+    // Skip pure comments and blank lines
+    if (trimmed.startsWith('#') || trimmed === '') return;
 
+    // Compute leading whitespace width (spaces; treat tab as 4 spaces)
+    const leadingSpaces = line.search(/\S/);
+    const indent = leadingSpaces >= 0 ? leadingSpaces : 0;
+
+    // ── Loop tracking ───────────────────────────────────────────────────────
+    if (loopIndent >= 0) {
+      // Still inside the loop body if current indent is greater than loop header
+      if (indent <= loopIndent) {
+        // Exited the loop body
+        loopIndent = -1;
+      } else if (PY_ORM_QUERY.test(line)) {
+        findings.push({
+          type: 'PERFORMANCE_N_PLUS_ONE',
+          severity: 'low',
+          line: lineNum,
+          column: indent,
+          snippet: trimmed.slice(0, 100),
+          message:
+            'ORM or database query called inside a loop — this is an N+1 query pattern. ' +
+            'Each iteration issues a separate DB round-trip. For Django, use select_related() ' +
+            'or prefetch_related() to batch-load associations. For SQLAlchemy, use joinedload() ' +
+            'or subqueryload(). Alternatively, batch the query before the loop.',
+          file: result.filePath,
+          confidence: 0.8,
+        });
+      }
+    }
+
+    // Check if this line starts a new loop (even if we just exited one)
+    const loopMatch = PY_LOOP_START.exec(line);
+    if (loopMatch) {
+      loopIndent = indent;
+    }
+
+    // ── Pattern-based detection ─────────────────────────────────────────────
     for (const { type, severity, pattern, message, confidence } of PYTHON_PATTERNS) {
       if (pattern.test(line)) {
         findings.push({
