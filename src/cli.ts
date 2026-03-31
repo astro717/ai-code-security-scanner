@@ -39,9 +39,11 @@ import { parseRubyFile, scanRuby } from './scanner/ruby-parser';
 import { parseKotlinCode, parseKotlinFile, scanKotlin } from './scanner/kotlin-parser';
 import { parseSwiftFile, scanSwift } from './scanner/swift-parser';
 import { parseRustFile, scanRust } from './scanner/rust-parser';
+import { parsePHPFile, scanPHP } from './scanner/php-parser';
 import { initCache, persistCache, getCachedFindings, setCachedFindings, getCacheStats } from './scanner/scan-cache';
 import { applyFixes, printFixSummary, buildUnifiedDiff } from './scanner/fixer';
 import * as os from 'os';
+import prompts from 'prompts';
 
 // JS/TS extensions use the TypeScript ESLint AST parser.
 // Python files use the regex-based python-parser module.
@@ -56,6 +58,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   '.kt', '.kts',
   '.swift',
   '.rs',
+  '.php',
 ]);
 
 // ── .aiscanner ignore file ────────────────────────────────────────────────────
@@ -243,6 +246,18 @@ function scanFileUncached(filePath: string): Finding[] {
     try {
       const parsed = parseRustFile(filePath);
       return scanRust(parsed);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  [skip] ${filePath}: ${msg}`);
+      return [];
+    }
+  }
+
+  // PHP files use the dedicated regex-based scanner.
+  if (ext === '.php') {
+    try {
+      const parsed = parsePHPFile(filePath);
+      return scanPHP(parsed);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  [skip] ${filePath}: ${msg}`);
@@ -1077,27 +1092,51 @@ program
       if (options.dryRun && !options.fix) {
         console.error('[fix] --dry-run requires --fix. Ignoring --dry-run.');
       } else {
-        const fixResults = applyFixes(filtered, options.dryRun ?? false);
+        const fixResults = applyFixes(filtered, true); // Compute fixes in dry-run mode first
         _fixResults = fixResults;
-        printFixSummary(fixResults, options.dryRun ?? false);
-        if (options.dryRun) {
-          const diff = buildUnifiedDiff(fixResults);
-          if (diff.trim()) {
-            process.stderr.write('\n[fix --dry-run] Unified diff:\n');
-            process.stderr.write(diff + '\n');
-          }
+
+        // Show the proposed fixes to the user
+        printFixSummary(fixResults, true);
+
+        const diff = buildUnifiedDiff(fixResults);
+        if (diff.trim()) {
+          process.stderr.write('\n[fix] Proposed changes (unified diff):\n');
+          process.stderr.write(diff + '\n');
         }
-        // Re-filter: remove findings that were successfully fixed from the reported output
-        // so the scan output reflects the remaining (unfixed) state.
-        if (!options.dryRun) {
+
+        // Prompt for user confirmation unless --dry-run is specified (which only shows without asking)
+        let shouldApply = options.dryRun === true; // In dry-run mode, don't actually apply
+
+        if (options.fix && !options.dryRun) {
+          // Ask user for confirmation before applying fixes
+          const response = await prompts({
+            type: 'confirm',
+            name: 'value',
+            message: 'Apply these fixes?',
+            initial: false,
+          });
+          shouldApply = response.value === true;
+        }
+
+        // Apply fixes if confirmed (and not in dry-run mode)
+        if (shouldApply && options.fix && !options.dryRun) {
+          const appliedResults = applyFixes(filtered, false);
+          _fixResults = appliedResults;
+          console.error('[fix] Fixes applied successfully');
+
+          // Re-filter: remove findings that were successfully fixed from the reported output
           const fixedKeys = new Set(
-            fixResults
+            appliedResults
               .filter((r) => r.applied)
               .map((r) => `${r.finding.type}|${r.file ?? ''}|${r.finding.line}|${r.finding.column}`),
           );
           filtered = filtered.filter(
             (f) => !fixedKeys.has(`${f.type}|${f.file ?? ''}|${f.line}|${f.column}`),
           );
+        } else if (options.dryRun) {
+          console.error('[fix --dry-run] No changes were applied (dry-run mode)');
+        } else {
+          console.error('[fix] Fixes were not applied (user declined)');
         }
       }
     }

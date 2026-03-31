@@ -38,7 +38,8 @@ import { parseRubyCode, scanRuby } from './scanner/ruby-parser';
 import { parseKotlinCode, scanKotlin } from './scanner/kotlin-parser';
 import { parseSwiftCode, scanSwift } from './scanner/swift-parser';
 import { parseRustCode, scanRust } from './scanner/rust-parser';
-import { initCache, getCachedFindings, setCachedFindings } from './scanner/scan-cache';
+import { parsePHPCode, scanPHP } from './scanner/php-parser';
+import { initCache, getCachedFindings, setCachedFindings, persistCache } from './scanner/scan-cache';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
@@ -482,6 +483,15 @@ const PORT = process.env.PORT ?? 3001;
 // Initialize scan result cache for /watch SSE endpoint caching
 initCache({ disabled: process.env.SCAN_CACHE_DISABLED === 'true' });
 
+// Periodically flush scan cache to disk every 5 minutes for resilience
+// against unclean shutdowns. The interval is cleared on graceful shutdown.
+const CACHE_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
+const cacheFlushTimer = setInterval(() => {
+  persistCache();
+}, CACHE_FLUSH_INTERVAL_MS);
+// Prevent the timer from keeping the process alive when tests shut down
+if (cacheFlushTimer.unref) cacheFlushTimer.unref();
+
 app.use(cors());
 
 // Limit request body to 500 KB. Express will automatically respond with 413
@@ -692,7 +702,7 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     return;
   }
 
-  const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes, webhookUrl, webhookSecret } = req.body as {
+  const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes, webhookUrl, webhookSecret, minConfidence: bodyMinConfidence } = req.body as {
     code?: string;
     filename?: string;
     packageJson?: string;
@@ -700,7 +710,17 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     ignoreTypes?: string[];
     webhookUrl?: string;
     webhookSecret?: string;
+    minConfidence?: number;
   };
+
+  // minConfidence: filter out findings below this threshold (0.0–1.0).
+  // Accepted from body field or query parameter; body takes precedence.
+  const rawMinConf = bodyMinConfidence ?? (req.query['minConfidence'] ? parseFloat(req.query['minConfidence'] as string) : undefined);
+  if (rawMinConf !== undefined && (typeof rawMinConf !== 'number' || isNaN(rawMinConf) || rawMinConf < 0 || rawMinConf > 1)) {
+    res.status(400).json({ error: 'minConfidence must be a number between 0.0 and 1.0' });
+    return;
+  }
+  const minConfidence = rawMinConf;
 
   if (!code || typeof code !== 'string') {
     res.status(400).json({ error: 'Missing required field: code (string)' });
@@ -781,6 +801,10 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     // Rust files use the dedicated regex-based Rust scanner
     const rustResult = parseRustCode(code, effectiveFilename);
     findings = scanRust(rustResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+  } else if (ext === '.php') {
+    // PHP files use the dedicated regex-based PHP scanner
+    const phpResult = parsePHPCode(code, effectiveFilename);
+    findings = scanPHP(phpResult).map((f) => ({ ...f, file: filename ?? 'input' }));
   } else {
     // JS/TS files use the AST-based parser and detector suite
     let parsed;
@@ -832,6 +856,27 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     if (typesToIgnore.size > 0) {
       findings = findings.filter((f) => !typesToIgnore.has(f.type));
     }
+  }
+
+  // Optional minConfidence filter — drop findings with a confidence score below the
+  // caller-specified threshold.  Findings that do not carry a confidence field are
+  // always kept (conservative: absence of a score means the detector didn't rate
+  // itself, not that it is low-confidence).
+  const rawMinConfidence = req.query['minConfidence'];
+  if (rawMinConfidence !== undefined) {
+    const threshold = parseFloat(String(rawMinConfidence));
+    if (!Number.isNaN(threshold) && threshold >= 0 && threshold <= 1) {
+      findings = findings.filter(
+        (f) => (f as unknown as Record<string, unknown>).confidence === undefined ||
+               ((f as unknown as Record<string, unknown>).confidence as number) >= threshold,
+      );
+    }
+  }
+
+  // Optional minConfidence threshold — remove findings below the confidence threshold.
+  // Findings without a confidence value are kept (they pass the filter).
+  if (minConfidence !== undefined) {
+    findings = findings.filter((f) => (f.confidence ?? 1) >= minConfidence);
   }
 
   // AI explain enrichment — supports Anthropic (default) and OpenAI backends.
@@ -1074,6 +1119,9 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
           } else if (ext === '.rs') {
             const parsed = parseRustCode(code, item.path);
             findings = scanRust(parsed);
+          } else if (ext === '.php') {
+            const parsed = parsePHPCode(code, item.path);
+            findings = scanPHP(parsed);
           } else {
             // JS/TS — use AST-based detectors
             const parsed = parseCode(code, item.path);
@@ -1299,7 +1347,7 @@ app.get('/watch', (req, res) => {
   res.write(`event: connected\ndata: ${JSON.stringify({ path: resolvedPath, ts: new Date().toISOString() })}\n\n`);
 
   const JS_TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-  const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb', '.kt', '.kts', '.swift', '.rs']);
+  const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb', '.kt', '.kts', '.swift', '.rs', '.php']);
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingFiles = new Set<string>();
@@ -1342,6 +1390,9 @@ app.get('/watch', (req, res) => {
       } else if (ext === '.rs') {
         const parsed = parseRustCode(code, filePath);
         findings = scanRust(parsed);
+      } else if (ext === '.php') {
+        const parsed = parsePHPCode(code, filePath);
+        findings = scanPHP(parsed);
       } else if (JS_TS_EXTENSIONS.has(ext)) {
         const parsed = parseCode(code, filePath);
         findings = [
@@ -1435,6 +1486,8 @@ export const server = process.env.NODE_ENV === 'test'
 // cleanly and production process managers can do zero-downtime restarts.
 function gracefulShutdown(signal: string): void {
   console.log(`[server] ${signal} received — closing HTTP server...`);
+  clearInterval(cacheFlushTimer);
+  persistCache();
   if (server) {
     server.close(() => {
       console.log('[server] HTTP server closed. Exiting.');

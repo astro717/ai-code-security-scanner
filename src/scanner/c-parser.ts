@@ -42,6 +42,8 @@ interface CPattern {
   severity: Finding['severity'];
   pattern: RegExp;
   message: string;
+  /** Detection confidence [0.0–1.0]. High-specificity patterns use 0.9+, heuristics use lower values. */
+  confidence?: number;
 }
 
 const C_PATTERNS: CPattern[] = [
@@ -53,6 +55,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'gets() is unconditionally unsafe — it performs no bounds checking and will overflow any ' +
       'fixed-size buffer. Replace with fgets(buf, sizeof(buf), stdin).',
+    confidence: 0.98,
   },
   {
     type: 'BUFFER_OVERFLOW',
@@ -61,6 +64,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'strcpy() does not check the destination buffer size. If the source string exceeds the ' +
       'destination, this causes a buffer overflow. Use strlcpy() or strncpy() with explicit bounds.',
+    confidence: 0.96,
   },
   {
     type: 'BUFFER_OVERFLOW',
@@ -69,6 +73,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'strcat() does not check the destination buffer size. Use strlcat() or strncat() with ' +
       'explicit length bounds to prevent buffer overflows.',
+    confidence: 0.95,
   },
   {
     type: 'BUFFER_OVERFLOW',
@@ -77,6 +82,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'sprintf() writes to a buffer without a size limit. Use snprintf() with an explicit ' +
       'buffer size argument to prevent buffer overflows.',
+    confidence: 0.93,
   },
   {
     type: 'BUFFER_OVERFLOW',
@@ -85,6 +91,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'scanf() with %s format specifier reads an unbounded string into a buffer. ' +
       'Use scanf("%<N>s", buf) with an explicit width limit, or use fgets().',
+    confidence: 0.91,
   },
   {
     type: 'BUFFER_OVERFLOW',
@@ -92,6 +99,7 @@ const C_PATTERNS: CPattern[] = [
     pattern: /\bvsprintf\s*\(/,
     message:
       'vsprintf() writes to a buffer without a size limit. Use vsnprintf() with an explicit size.',
+    confidence: 0.94,
   },
 
   // Format string vulnerabilities
@@ -103,6 +111,7 @@ const C_PATTERNS: CPattern[] = [
       'printf/fprintf called with a non-literal format string as the first argument. If the ' +
       'format string is user-controlled, this allows reading arbitrary memory or code execution. ' +
       'Always use a literal format string: printf("%s", user_input).',
+    confidence: 0.85,
   },
 
   // Command injection via system() and popen() — C/C++-specific type
@@ -114,6 +123,7 @@ const C_PATTERNS: CPattern[] = [
       'system() called with what appears to be a dynamically-constructed command string. ' +
       'If any part is user-controlled, this allows arbitrary command injection. ' +
       'Use execve() with a fixed argument list instead.',
+    confidence: 0.84,
   },
   {
     type: 'COMMAND_INJECTION_C',
@@ -122,6 +132,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'popen() called with a dynamically-constructed command. User-controlled input in shell ' +
       'commands allows command injection. Use execve() with individual arguments.',
+    confidence: 0.86,
   },
   {
     type: 'COMMAND_INJECTION_C',
@@ -131,6 +142,7 @@ const C_PATTERNS: CPattern[] = [
       'exec() family function detected. Ensure the executable path and all arguments are ' +
       'fully controlled by the application and never derived from user input without strict ' +
       'allowlisting, as this could enable arbitrary command execution.',
+    confidence: 0.68,
   },
 
   // Hardcoded secrets
@@ -141,6 +153,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'Potential hardcoded credential in C/C++ source. Secrets must be loaded from environment ' +
       'variables (getenv()) or a configuration file outside the source tree.',
+    confidence: 0.84,
   },
 
   // Path traversal
@@ -152,6 +165,7 @@ const C_PATTERNS: CPattern[] = [
       'fopen()/open() called with a user-controlled path. Without path canonicalisation, ' +
       'attackers can traverse the filesystem using ../ sequences. Use realpath() to resolve and ' +
       'validate the path before opening.',
+    confidence: 0.80,
   },
 
   // Insecure random
@@ -163,6 +177,7 @@ const C_PATTERNS: CPattern[] = [
       'rand() is a low-quality pseudo-random number generator and must not be used for ' +
       'security-sensitive values (tokens, session IDs, cryptographic keys). ' +
       'Use getrandom() on Linux or arc4random() on BSD/macOS.',
+    confidence: 0.92,
   },
   {
     type: 'INSECURE_RANDOM',
@@ -171,6 +186,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'srand(time(NULL)) seeds the PRNG with a predictable value. An attacker who knows ' +
       'the approximate process start time can predict all subsequent rand() outputs.',
+    confidence: 0.90,
   },
 
   // Weak crypto
@@ -181,6 +197,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'MD5 hashing is cryptographically broken and collision-prone. ' +
       'Use SHA-256 (SHA256_Init/SHA256_Update/SHA256_Final) or SHA-3 for security-sensitive hashing.',
+    confidence: 0.96,
   },
   {
     type: 'WEAK_CRYPTO',
@@ -189,6 +206,7 @@ const C_PATTERNS: CPattern[] = [
     message:
       'SHA-1 is cryptographically weak and vulnerable to collision attacks. ' +
       'Use SHA-256 or SHA-3 (SHA256, SHA3_256 in OpenSSL) for security-sensitive hashing.',
+    confidence: 0.95,
   },
 ];
 
@@ -213,7 +231,7 @@ export function scanC(result: CParseResult): Finding[] {
       trimmed.startsWith('#pragma')
     ) return;
 
-    for (const { type, severity, pattern, message } of C_PATTERNS) {
+    for (const { type, severity, pattern, message, confidence } of C_PATTERNS) {
       if (pattern.test(line)) {
         findings.push({
           type,
@@ -222,6 +240,7 @@ export function scanC(result: CParseResult): Finding[] {
           column: line.search(/\S/),
           snippet: trimmed.slice(0, 100),
           message,
+          ...(confidence !== undefined ? { confidence } : {}),
           file: result.filePath,
         });
       }
