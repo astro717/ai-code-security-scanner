@@ -1474,8 +1474,7 @@ app.get('/watch', (req, res) => {
   });
 });
 
-// In test mode (NODE_ENV=test), do not start the HTTP server automatically.
-// Tests use supertest(app) directly to avoid port conflicts.
+// In test mode, do not auto-start: let supertest or the test create its own server.
 export const server = process.env.NODE_ENV === 'test'
   ? null
   : app.listen(PORT, () => {
