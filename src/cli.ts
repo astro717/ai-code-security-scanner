@@ -301,6 +301,8 @@ interface AiSecScanConfig {
   severity?: string;
   format?: 'text' | 'json' | 'sarif' | 'html' | 'junit' | 'sonarqube' | 'markdown';
   fix?: boolean;
+  /** Skip interactive confirmation prompt when applying fixes. Useful for CI pipelines. */
+  yes?: boolean;
   /** Per-rule severity overrides. Maps finding type (e.g. "SQL_INJECTION") to a severity level. */
   rules?: Record<string, 'critical' | 'high' | 'medium' | 'low'>;
   /** Scan cache TTL in days. Entries older than this are automatically evicted. Default: 7. */
@@ -315,7 +317,7 @@ function validateConfig(obj: unknown): string[] {
     return ['Config root must be a JSON object, got: ' + (Array.isArray(obj) ? 'array' : typeof obj)];
   }
 
-  const allowed = new Set(['ignore', 'severity', 'format', 'fix', 'rules', 'cacheTtlDays']);
+  const allowed = new Set(['ignore', 'severity', 'format', 'fix', 'yes', 'rules', 'cacheTtlDays']);
   const knownSeverities = new Set(['critical', 'high', 'medium', 'low']);
   const knownFormats = new Set(['text', 'json', 'sarif', 'html', 'junit', 'sonarqube', 'markdown']);
 
@@ -379,6 +381,13 @@ function validateConfig(obj: unknown): string[] {
   if ('fix' in record) {
     if (typeof record['fix'] !== 'boolean') {
       errors.push(`"fix" must be a boolean, got: ${typeof record['fix']}`);
+    }
+  }
+
+  // yes: must be a boolean (skip fix confirmation prompt in CI)
+  if ('yes' in record) {
+    if (typeof record['yes'] !== 'boolean') {
+      errors.push(`"yes" must be a boolean, got: ${typeof record['yes']}`);
     }
   }
 
