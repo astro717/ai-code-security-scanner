@@ -186,6 +186,16 @@ const RUST_PATTERNS: RustPattern[] = [
       'out in release builds — use assert! or an explicit runtime check instead.',
     confidence: 0.90,
   },
+  // unsafe blocks without safety comments
+  {
+    type: 'UNSAFE_BLOCK',
+    severity: 'medium',
+    pattern: /unsafe\s*\{/,
+    message:
+      'unsafe block detected. Ensure the unsafe code is justified and add a // SAFETY comment ' +
+      'explaining why this unsafe block is necessary and what invariants are maintained.',
+    confidence: 0.95,
+  },
 ];
 
 /**

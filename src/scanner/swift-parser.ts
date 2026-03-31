@@ -38,6 +38,8 @@ interface SwiftPattern {
   severity: Finding['severity'];
   pattern: RegExp;
   message: string;
+  /** Detection confidence [0.0–1.0]. High-specificity patterns use 0.9+, heuristics use lower values. */
+  confidence?: number;
 }
 
 const SWIFT_PATTERNS: SwiftPattern[] = [
@@ -50,6 +52,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
       'URLSession request made with a potentially user-controlled URL. Without URL validation, ' +
       'attackers can force the app to make requests to internal services (SSRF). Validate the URL ' +
       'against an allowlist of trusted hosts before making requests.',
+    confidence: 0.78,
   },
   {
     type: 'SSRF',
@@ -58,6 +61,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
     message:
       'URLRequest constructed with a variable that may be user-controlled. Validate the URL ' +
       'against an allowlist of trusted hosts to prevent SSRF.',
+    confidence: 0.72,
   },
 
   // Keychain misuse: sensitive data stored in UserDefaults
@@ -69,6 +73,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
       'Sensitive data (password, token, or credential) stored in UserDefaults. UserDefaults are ' +
       'stored in plaintext in the app sandbox and can be extracted by attackers. Use the iOS Keychain ' +
       'via SecItemAdd/SecItemCopyMatching or a Keychain wrapper library instead.',
+    confidence: 0.89,
   },
   {
     type: 'INSECURE_SHARED_PREFS',
@@ -77,6 +82,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
     message:
       'Sensitive value stored in UserDefaults with a security-sensitive key name. Use the iOS Keychain ' +
       'instead of UserDefaults for credentials and tokens.',
+    confidence: 0.87,
   },
 
   // WKWebView with allowsArbitraryLoads / NSAllowsArbitraryLoads
@@ -88,6 +94,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
       'NSAllowsArbitraryLoads is enabled in App Transport Security settings. This disables TLS ' +
       'enforcement and allows cleartext HTTP connections, exposing the app to man-in-the-middle attacks. ' +
       'Remove this key and ensure all endpoints support HTTPS.',
+    confidence: 0.94,
   },
   {
     type: 'UNSAFE_WEBVIEW',
@@ -96,6 +103,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
     message:
       'WKWebViewConfiguration.allowsArbitraryLoads is set to true. This disables App Transport ' +
       'Security and permits cleartext connections. Remove this setting and use HTTPS exclusively.',
+    confidence: 0.92,
   },
 
   // Hardcoded secrets / API keys
@@ -107,6 +115,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
       'Potential hardcoded secret or API key detected in Swift source. Credentials embedded in ' +
       'source code are exposed in the compiled binary and version control history. Load secrets from ' +
       'a secure backend, environment configuration, or the iOS Keychain.',
+    confidence: 0.91,
   },
   {
     type: 'SECRET_HARDCODED',
@@ -115,6 +124,29 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
     message:
       'Possible API key literal detected (matches common key prefix patterns). Hardcoded credentials ' +
       'should be stored in the iOS Keychain or loaded from a secure configuration endpoint.',
+    confidence: 0.73,
+  },
+
+  // Force try — crashes at runtime on error
+  {
+    type: 'FORCE_TRY',
+    severity: 'high',
+    pattern: /\btry!\s/,
+    message:
+      'try! (force try) will crash the app at runtime if the expression throws an error. ' +
+      'Use do-catch or try? to handle errors gracefully instead of force-unwrapping the result.',
+    confidence: 0.95,
+  },
+
+  // Force unwrap via implicitly unwrapped optional declaration
+  {
+    type: 'FORCE_UNWRAP',
+    severity: 'medium',
+    pattern: /(?:let|var)\s+\w+\s*:\s*\w+\s*!/,
+    message:
+      'Implicitly unwrapped optional (Type!) detected. If the value is nil at access time, ' +
+      'the app will crash. Use a regular optional (Type?) with proper nil handling instead.',
+    confidence: 0.82,
   },
 
   // Weak cryptography: CommonCrypto MD5 / SHA1
@@ -126,6 +158,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
       'CC_MD5 (CommonCrypto MD5) is used. MD5 is cryptographically broken and unsuitable for ' +
       'security-sensitive hashing (passwords, signatures, integrity checks). Use CC_SHA256 or ' +
       'CryptoKit\'s SHA256 instead.',
+    confidence: 0.97,
   },
   {
     type: 'WEAK_CRYPTO',
@@ -134,6 +167,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
     message:
       'CC_SHA1 (CommonCrypto SHA-1) is used. SHA-1 is deprecated for security purposes due to known ' +
       'collision attacks. Use CC_SHA256 or CryptoKit\'s SHA256 for security-sensitive operations.',
+    confidence: 0.96,
   },
   {
     type: 'WEAK_CRYPTO',
@@ -142,6 +176,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
     message:
       'DES encryption is used via CommonCrypto. DES has a 56-bit key and is considered insecure. ' +
       'Use AES-256 (kCCAlgorithmAES) with a secure key size instead.',
+    confidence: 0.98,
   },
   {
     type: 'WEAK_CRYPTO',
@@ -150,6 +185,7 @@ const SWIFT_PATTERNS: SwiftPattern[] = [
     message:
       'CryptoKit Insecure.MD5 or Insecure.SHA1 is used. These are marked insecure by Apple for ' +
       'a reason — use SHA256 or SHA512 for security-sensitive hashing.',
+    confidence: 0.97,
   },
 ];
 
@@ -205,6 +241,7 @@ function detectSwiftN1(parsed: SwiftParseResult): Finding[] {
             'before the loop (e.g. batch URLSession requests or use an NSBatchFetchRequest) ' +
             'to avoid O(n) round-trips.',
           file: parsed.filePath,
+          confidence: 0.75,
         });
         break; // One finding per loop opening
       }
@@ -238,6 +275,7 @@ export function scanSwift(parsed: SwiftParseResult): Finding[] {
           column: 0,
           snippet: line.trim().slice(0, 120),
           message: pat.message,
+          ...(pat.confidence !== undefined ? { confidence: pat.confidence } : {}),
           file: parsed.filePath,
         });
         break; // One finding per line per pass (avoid duplicates for overlapping patterns)

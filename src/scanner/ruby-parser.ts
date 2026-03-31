@@ -259,7 +259,7 @@ const RUBY_PATTERNS: RubyPattern[] = [
   {
     type: 'COMMAND_INJECTION',
     severity: 'critical',
-    pattern: /\.send\s*\(\s*(?:params|request|#\{)/,
+    pattern: /\.send\s*\(\s*(?:params|request|#\{|"[^"]*#\{)/,
     message:
       'send() called with user-controlled method name. An attacker can invoke any method on the ' +
       'object, including dangerous ones. Use a whitelist of allowed method names before dispatching.',
@@ -305,7 +305,7 @@ const RUBY_PATTERNS: RubyPattern[] = [
   {
     type: 'MASS_ASSIGNMENT',
     severity: 'high',
-    pattern: /\bModel\.new\s*\(\s*params(?:\[:[^\]]+\])?\s*\)/,
+    pattern: /\b[A-Z]\w*\.new\s*\(\s*params(?:\[:[^\]]+\])?\s*\)/,
     message:
       'ActiveRecord model instantiated directly from params hash without strong parameters. ' +
       'Use params.require(:model).permit(:field1, :field2) to limit assignable attributes.',
@@ -327,12 +327,78 @@ const RUBY_PATTERNS: RubyPattern[] = [
 export function scanRuby(result: RubyParseResult): Finding[] {
   const findings: Finding[] = [];
 
+  // ── Stateful N+1 detection: each/map/select + ActiveRecord calls ─────────────
+  //
+  // Ruby blocks use either `do...end` or `{...}` syntax.  We track both:
+  //   - brace depth: incremented on `{`, decremented on `}` (inline blocks)
+  //   - do-end depth: incremented on `do` keyword, decremented on `end` keyword
+  //
+  // When an iteration method (each, map, select, collect, detect, find, reject,
+  // flat_map, each_with_object, each_with_index) starts a block, we enter
+  // "loop context" and flag any ActiveRecord query inside it.
+  let inIterBlock = false;
+  let iterBraceDepth = 0;
+  let iterDoDepth = 0;
+
+  // Detects the start of an iteration block (each/map/select/etc. followed by do or {)
+  const ITER_START_BRACE = /\.\s*(?:each|map|select|collect|detect|find|reject|flat_map|each_with_object|each_with_index)\s*(?:\{|(?:\s*\|[^|]*\|\s*\{))/;
+  const ITER_START_DO    = /\.\s*(?:each|map|select|collect|detect|find|reject|flat_map|each_with_object|each_with_index)\s*(?:do\b|\|[^|]*\|\s*$)/;
+
+  // ActiveRecord query calls that cause a DB round-trip
+  const AR_QUERY = /\b(?:\.find\b|\.find_by\b|\.find_by_|\.where\b|\.first\b|\.last\b|\.all\b|\.count\b|\.exists\b|\.pluck\b|\.sum\b|\.average\b|\.minimum\b|\.maximum\b|\.create\b|\.create!\b|\.update\b|\.update!\b|\.save\b|\.save!\b|\.destroy\b|\.reload\b)/;
+
   result.lines.forEach((line, idx) => {
     const lineNum = idx + 1;
     const trimmed = line.trim();
 
     // Skip pure comments
     if (trimmed.startsWith('#')) return;
+
+    // ── Stateful block tracking ──────────────────────────────────────────────
+    if (!inIterBlock) {
+      // Check for iteration block start
+      if (ITER_START_BRACE.test(line)) {
+        inIterBlock = true;
+        iterBraceDepth = (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length;
+        iterDoDepth = 0;
+      } else if (ITER_START_DO.test(line)) {
+        inIterBlock = true;
+        iterDoDepth = 1;
+        iterBraceDepth = 0;
+      }
+    } else {
+      // We are inside an iteration block — track depth changes
+      const openBraces = (line.match(/\{/g) ?? []).length;
+      const closeBraces = (line.match(/\}/g) ?? []).length;
+      iterBraceDepth += openBraces - closeBraces;
+
+      // do-end depth: count `do` and `end` keywords (conservative: only standalone tokens)
+      const doCount = (line.match(/\bdo\b/g) ?? []).length;
+      const endCount = (line.match(/\bend\b/g) ?? []).length;
+      iterDoDepth += doCount - endCount;
+
+      const exitedBraceBlock = iterBraceDepth <= 0 && iterDoDepth <= 0;
+      if (exitedBraceBlock) {
+        inIterBlock = false;
+        iterBraceDepth = 0;
+        iterDoDepth = 0;
+      } else if (AR_QUERY.test(line)) {
+        findings.push({
+          type: 'PERFORMANCE_N_PLUS_ONE',
+          severity: 'low',
+          line: lineNum,
+          column: line.search(/\S/),
+          snippet: trimmed.slice(0, 100),
+          message:
+            'ActiveRecord query called inside an each/map/select block — this is an N+1 query pattern. ' +
+            'Each iteration issues a separate DB round-trip. Use eager loading (.includes(:association)) ' +
+            'or batch the query before the loop (e.g. Model.where(id: ids).index_by(&:id)) to avoid N+1.',
+          file: result.filePath,
+          confidence: 0.8,
+        });
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     for (const { type, severity, pattern, message, confidence } of RUBY_PATTERNS) {
       if (pattern.test(line)) {

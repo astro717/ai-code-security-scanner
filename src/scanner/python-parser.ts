@@ -57,6 +57,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'Python SQL execute() call uses string interpolation or concatenation. ' +
       'Use parameterised queries (cursor.execute(query, params)) instead.',
+    confidence: 0.95,
   },
   // OS command injection via os.system / subprocess.call with shell=True + variable
   {
@@ -66,6 +67,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'os.system() called with a non-literal argument. ' +
       'Use subprocess.run() with a list of arguments and shell=False.',
+    confidence: 0.90,
   },
   {
     type: 'COMMAND_INJECTION',
@@ -74,6 +76,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'subprocess called with shell=True. If any part of the command is user-controlled, ' +
       'this allows arbitrary shell command injection. Pass a list of arguments with shell=False.',
+    confidence: 0.95,
   },
   // eval / exec with dynamic content
   {
@@ -83,6 +86,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'eval() called with a non-literal argument. eval() executes arbitrary Python code ' +
       'and must never be called with user-supplied input.',
+    confidence: 0.92,
   },
   {
     type: 'EVAL_INJECTION',
@@ -91,6 +95,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'exec() called with a non-literal argument. Like eval(), exec() can execute arbitrary ' +
       'code and must not receive untrusted input.',
+    confidence: 0.90,
   },
   // Pickle deserialization
   {
@@ -101,6 +106,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'pickle.load/loads deserializes arbitrary Python objects. ' +
       'Deserializing untrusted data with pickle can lead to arbitrary code execution. ' +
       'Use json or a safe serialization library instead.',
+    confidence: 0.93,
   },
   // Hardcoded secrets (password/token/secret = literal string)
   {
@@ -110,6 +116,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'Potential hardcoded credential. Secrets must be loaded from environment variables ' +
       'or a secrets manager, never stored in source code.',
+    confidence: 0.85,
   },
   // Weak crypto
   {
@@ -120,6 +127,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'hashlib.md5() or hashlib.sha1() uses a cryptographically weak algorithm. ' +
       'For security-sensitive hashing, use SHA-256 or SHA-3. ' +
       'For passwords, use bcrypt, scrypt, or Argon2.',
+    confidence: 0.95,
   },
   // Path traversal
   {
@@ -129,6 +137,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'File open() with a path derived from user input. Without path sanitization, ' +
       'attackers can traverse the filesystem with ../.. sequences.',
+    confidence: 0.70,
   },
   // SSRF via requests
   {
@@ -138,6 +147,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'requests call with a non-literal URL argument. If the URL is user-controlled, ' +
       'attackers can force the server to make requests to internal services (SSRF).',
+    confidence: 0.75,
   },
   // assert for security checks (assert is disabled in optimized mode)
   {
@@ -148,6 +158,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'assert used for authentication or permission checks. ' +
       'Python assert statements are stripped when running with -O (optimized mode). ' +
       'Use explicit if/raise instead.',
+    confidence: 0.88,
   },
   // Bind to 0.0.0.0 without explicit intent
   {
@@ -157,6 +168,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'Server bound to 0.0.0.0. This exposes the service on all network interfaces. ' +
       'In production, bind to a specific interface or use a reverse proxy.',
+    confidence: 0.92,
   },
 
   // ── XML injection (XXE) ────────────────────────────────────────────────────
@@ -169,6 +181,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'xml.etree.ElementTree is vulnerable to XML External Entity (XXE) attacks. ' +
       'Use defusedxml.ElementTree instead, which disables external entity expansion by default.',
+    confidence: 0.90,
   },
 
   // Direct import of xml.etree.ElementTree (catches "import xml.etree.ElementTree")
@@ -179,6 +192,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'Importing xml.etree directly instead of defusedxml. The standard library XML parsers ' +
       'are vulnerable to XXE attacks. Use defusedxml as a drop-in replacement.',
+    confidence: 0.95,
   },
 
   // ── XSS / template injection ────────────────────────────────────────────────
@@ -196,6 +210,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'template string is user-controlled, this allows Server-Side Template Injection (SSTI), ' +
       'which can lead to arbitrary server-side code execution. Use render_template() with a ' +
       'static template file and pass data as context variables instead.',
+    confidence: 0.85,
   },
 
   // Django mark_safe with variable content
@@ -206,6 +221,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'mark_safe() called with a value that appears to include user input. This bypasses ' +
       "Django's auto-escaping and allows XSS. Ensure content is sanitised before marking safe.",
+    confidence: 0.80,
   },
 
   // ── Insecure random ──────────────────────────────────────────────────────────
@@ -218,6 +234,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'Python random module is not cryptographically secure. For security-sensitive values ' +
       '(tokens, passwords, salts, session IDs) use secrets.token_bytes(), ' +
       'secrets.token_hex(), or secrets.token_urlsafe() instead.',
+    confidence: 0.75,
   },
 
   // ── Open redirect ────────────────────────────────────────────────────────────
@@ -231,6 +248,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'Redirect target appears to include user-controlled input. Without validation ' +
       'this allows open redirect attacks. Validate that the destination is a relative URL ' +
       'or belongs to a trusted domain before redirecting.',
+    confidence: 0.78,
   },
 
   // ── SQL injection (additional patterns) ──────────────────────────────────────
@@ -243,6 +261,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
     message:
       'ORM raw() or extra() query built with string formatting. User input in the query ' +
       'string leads to SQL injection. Use parameterised queries or ORM filters.',
+    confidence: 0.92,
   },
 
   // ── Path traversal (additional pattern) ──────────────────────────────────────
@@ -260,6 +279,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'os.path.join() called with what appears to be user-controlled input. A path like ' +
       '"/etc/passwd" as a component overrides earlier segments. Validate and sanitise ' +
       'all user-supplied path components.',
+    confidence: 0.82,
   },
 
   // ── Shell injection (additional patterns) ─────────────────────────────────────
@@ -273,6 +293,7 @@ const PYTHON_PATTERNS: PythonPattern[] = [
       'os.system() called with a value that appears to include user input. User-controlled ' +
       'shell commands allow arbitrary code execution. Use subprocess with a list of arguments ' +
       'and shell=False.',
+    confidence: 0.88,
   },
 
   // ── CSRF — Django: @csrf_exempt disables built-in CSRF protection ─────────

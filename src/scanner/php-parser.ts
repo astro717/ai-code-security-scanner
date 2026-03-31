@@ -19,7 +19,6 @@
  *   - WEAK_CRYPTO (md5/sha1 for security hashing)
  *   - XML_INJECTION (simplexml_load_string without entity disabling)
  *   - SSTI (Twig raw filter with user input)
- *   - MISSING_AUTH (endpoint handlers lacking session/auth checks before sensitive ops)
  */
 
 import * as fs from 'fs';
@@ -48,11 +47,13 @@ interface PHPPattern {
   severity: Finding['severity'];
   pattern: RegExp;
   message: string;
-  confidence: number;
+  confidence?: number;
 }
 
 const PHP_PATTERNS: PHPPattern[] = [
   // ── SQL Injection ───────────────────────────────────────────────────────────
+
+  // mysqli_query / $mysqli->query with string concatenation or interpolation
   {
     type: 'SQL_INJECTION',
     severity: 'critical',
@@ -71,6 +72,7 @@ const PHP_PATTERNS: PHPPattern[] = [
       'Use prepared statements (PDO::prepare with bindParam/bindValue) instead.',
     confidence: 0.9,
   },
+  // Raw SQL via concatenation (generic)
   {
     type: 'SQL_INJECTION',
     severity: 'critical',
@@ -82,13 +84,14 @@ const PHP_PATTERNS: PHPPattern[] = [
   },
 
   // ── XSS ─────────────────────────────────────────────────────────────────────
+
   {
     type: 'XSS',
     severity: 'high',
     pattern: /\b(?:echo|print)\s+\$_(?:GET|POST|REQUEST|COOKIE)\b/,
     message:
       'User input from superglobal echoed directly to output without escaping. ' +
-      "Use htmlspecialchars($input, ENT_QUOTES, 'UTF-8') to prevent XSS.",
+      'Use htmlspecialchars($input, ENT_QUOTES, \'UTF-8\') to prevent XSS.',
     confidence: 0.95,
   },
   {
@@ -102,6 +105,7 @@ const PHP_PATTERNS: PHPPattern[] = [
   },
 
   // ── Command Injection ───────────────────────────────────────────────────────
+
   {
     type: 'COMMAND_INJECTION',
     severity: 'critical',
@@ -123,6 +127,7 @@ const PHP_PATTERNS: PHPPattern[] = [
   },
 
   // ── Path Traversal ─────────────────────────────────────────────────────────
+
   {
     type: 'PATH_TRAVERSAL',
     severity: 'high',
@@ -145,148 +150,126 @@ const PHP_PATTERNS: PHPPattern[] = [
   },
 
   // ── Eval Injection ─────────────────────────────────────────────────────────
+
   {
     type: 'EVAL_INJECTION',
     severity: 'critical',
     pattern: /\beval\s*\([^)]*\$_(?:GET|POST|REQUEST|COOKIE)/,
     message:
-      'eval() called with user-controlled input. This allows arbitrary PHP code execution. ' +
-      'Never pass user input to eval().',
-    confidence: 0.98,
+      'eval() called with user-controlled input — this allows arbitrary PHP code execution. ' +
+      'Remove eval entirely or use a safe alternative.',
+    confidence: 0.95,
   },
   {
     type: 'EVAL_INJECTION',
     severity: 'critical',
-    pattern: /\bpreg_replace\s*\(\s*['"][^'"]*\/e[^'"]*['"]/,
+    pattern: /\bpreg_replace\s*\(\s*['"]\/[^'"]*\/e['"]/,
     message:
-      'preg_replace() used with /e modifier, which evaluates the replacement as PHP code. ' +
-      "Use preg_replace_callback() instead — the /e modifier was removed in PHP 7.",
+      'preg_replace() with /e modifier evaluates the replacement as PHP code. ' +
+      'This is deprecated and dangerous. Use preg_replace_callback() instead.',
     confidence: 0.95,
   },
 
-  // ── Hardcoded Secrets ───────────────────────────────────────────────────────
+  // ── Hardcoded Secrets ──────────────────────────────────────────────────────
+
   {
     type: 'SECRET_HARDCODED',
     severity: 'high',
-    pattern: /\$(?:password|passwd|api_key|apikey|secret|token|access_key|private_key)\s*=\s*["'][^"']{8,}["']/i,
+    pattern: /(?:\$(?:password|passwd|secret|token|api_key|apikey|db_pass))\s*=\s*['"][^'"]{4,}['"]/i,
     message:
-      'Hardcoded credential or secret detected. Store secrets in environment variables ' +
-      'or a secrets manager and retrieve with getenv() at runtime.',
-    confidence: 0.85,
+      'Potential hardcoded credential in PHP variable. Secrets must be loaded from environment ' +
+      'variables (getenv()) or a secrets manager, never stored in source code.',
+    confidence: 0.8,
   },
 
-  // ── SSRF ───────────────────────────────────────────────────────────────────
+  // ── SSRF ────────────────────────────────────────────────────────────────────
+
   {
     type: 'SSRF',
     severity: 'high',
-    pattern: /\bfile_get_contents\s*\([^)]*\$_(?:GET|POST|REQUEST)/,
+    pattern: /\b(?:file_get_contents|curl_setopt.*CURLOPT_URL)\s*\([^)]*\$_(?:GET|POST|REQUEST)/,
     message:
-      'file_get_contents() called with user-controlled URL — Server-Side Request Forgery (SSRF). ' +
-      'Validate and whitelist the URL scheme and host before making server-side requests.',
+      'HTTP request made to a URL derived from user input. Without URL validation, ' +
+      'attackers can force the server to request internal services (SSRF). ' +
+      'Validate and whitelist target URLs.',
     confidence: 0.9,
   },
   {
     type: 'SSRF',
     severity: 'high',
-    pattern: /\bcurl_setopt\s*\([^,]+,\s*CURLOPT_URL\s*,\s*\$_(?:GET|POST|REQUEST)/,
+    pattern: /curl_setopt\s*\([^)]*CURLOPT_URL\s*,[^)]*\$_(?:GET|POST|REQUEST)/,
     message:
-      'curl request URL set from user-controlled superglobal — SSRF vulnerability. ' +
-      'Validate URLs against an allowlist before making outbound requests.',
-    confidence: 0.92,
-  },
-
-  // ── Open Redirect ──────────────────────────────────────────────────────────
-  {
-    type: 'OPEN_REDIRECT',
-    severity: 'medium',
-    pattern: /\bheader\s*\(\s*["']Location:\s*\$_(?:GET|POST|REQUEST|COOKIE)/,
-    message:
-      'Open redirect via header() with user-controlled URL. ' +
-      'Validate redirects against an allowlist of trusted destinations.',
+      'cURL URL set from user-controlled input — SSRF risk. ' +
+      'Validate the URL against an allowlist before making the request.',
     confidence: 0.9,
   },
+
+  // ── Open Redirect ───────────────────────────────────��──────────────────────
+
   {
     type: 'OPEN_REDIRECT',
     severity: 'medium',
-    pattern: /\bheader\s*\(\s*["']Location:\s*[^"']*\$_(?:GET|POST|REQUEST)/,
+    pattern: /\bheader\s*\(\s*['"]Location:\s*[^'"]*\$_(?:GET|POST|REQUEST)/,
     message:
-      'Open redirect: header Location includes user-controlled superglobal. ' +
-      'Restrict redirect targets to known safe URLs.',
-    confidence: 0.85,
+      'HTTP redirect with user-controlled Location header. Without validation, ' +
+      'this allows open redirect attacks for phishing. Validate that the target ' +
+      'is a relative URL or belongs to a trusted domain.',
+    confidence: 0.9,
   },
 
-  // ── Unsafe Deserialization ──────────────────────────────────────────────────
+  // ── Unsafe Deserialization ─────────────────────────────────────────────────
+
   {
     type: 'UNSAFE_DESERIALIZATION',
     severity: 'critical',
-    pattern: /\bunserialize\s*\([^)]*\$_(?:GET|POST|REQUEST|COOKIE|SESSION)/,
+    pattern: /\bunserialize\s*\([^)]*\$_(?:GET|POST|REQUEST|COOKIE)/,
     message:
-      'unserialize() called with user-controlled data. This can lead to Remote Code Execution ' +
-      'via PHP object injection. Use json_decode() for data exchange instead.',
+      'unserialize() called with user-controlled input. PHP object injection can lead to ' +
+      'arbitrary code execution via magic methods (__wakeup, __destruct). ' +
+      'Use json_decode() instead, or validate/sign the serialized data.',
     confidence: 0.95,
   },
 
-  // ── Insecure Random ─────────────────────────────────────────────────────────
+  // ── Insecure Random ────────────────────────────────────────────────────────
+
   {
     type: 'INSECURE_RANDOM',
     severity: 'medium',
-    pattern: /\brand\s*\(/,
+    pattern: /\b(?:rand|mt_rand|array_rand)\s*\(/,
     message:
-      'rand() is not cryptographically secure. Use random_int() for security-sensitive ' +
-      'values such as tokens, nonces, and CSRF values.',
-    confidence: 0.8,
-  },
-  {
-    type: 'INSECURE_RANDOM',
-    severity: 'medium',
-    pattern: /\bmt_rand\s*\(/,
-    message:
-      'mt_rand() (Mersenne Twister) is predictable and not suitable for security use. ' +
-      'Use random_int() or random_bytes() for cryptographically secure randomness.',
-    confidence: 0.8,
+      'rand()/mt_rand() are not cryptographically secure. For tokens, passwords, ' +
+      'or session IDs, use random_bytes() or random_int() instead.',
+    confidence: 0.7,
   },
 
   // ── Weak Crypto ────────────────────────────────────────────────────────────
+
   {
     type: 'WEAK_CRYPTO',
     severity: 'high',
-    pattern: /\bmd5\s*\(/,
+    pattern: /\b(?:md5|sha1)\s*\(\s*\$/,
     message:
-      'MD5 is a broken hash function. For passwords, use password_hash() with PASSWORD_BCRYPT ' +
-      "or PASSWORD_ARGON2ID. For data integrity, use hash('sha256', ...).",
-    confidence: 0.85,
-  },
-  {
-    type: 'WEAK_CRYPTO',
-    severity: 'high',
-    pattern: /\bsha1\s*\(/,
-    message:
-      'SHA-1 is deprecated for security use. For passwords, use password_hash(). ' +
-      "For data integrity, use hash('sha256', ...).",
+      'md5()/sha1() used for hashing — these are cryptographically broken. ' +
+      'For password hashing, use password_hash() with PASSWORD_BCRYPT or PASSWORD_ARGON2ID. ' +
+      'For data integrity, use hash(\'sha256\', $data).',
     confidence: 0.8,
   },
 
-  // ── XML Injection ──────────────────────────────────────────────────────────
+  // ── XML Injection (XXE) ────────────────────────────────────────────────────
+
   {
     type: 'XML_INJECTION',
     severity: 'high',
     pattern: /\bsimplexml_load_string\s*\(/,
     message:
-      'simplexml_load_string() without disabling external entities is vulnerable to XXE. ' +
-      "Use libxml_disable_entity_loader(true) and LIBXML_NOENT flag, or switch to json_decode() for data exchange.",
+      'simplexml_load_string() is vulnerable to XXE attacks by default. ' +
+      'Call libxml_disable_entity_loader(true) before parsing, or use ' +
+      'LIBXML_NOENT | LIBXML_NONET flags to disable external entities.',
     confidence: 0.75,
-  },
-  {
-    type: 'XML_INJECTION',
-    severity: 'high',
-    pattern: /\bnew\s+DOMDocument\s*\(\s*\)(?:[^;]*\n){0,3}.*\bloadXML\s*\([^)]*\$_(?:GET|POST|REQUEST)/,
-    message:
-      'DOMDocument::loadXML() with user-controlled input is vulnerable to XXE injection. ' +
-      'Disable external entities before parsing: $dom->substituteEntities = false.',
-    confidence: 0.8,
   },
 
   // ── SSTI (Twig) ────────────────────────────────────────────────────────────
+
   {
     type: 'SSTI',
     severity: 'high',
@@ -298,6 +281,7 @@ const PHP_PATTERNS: PHPPattern[] = [
   },
 
   // ── Insecure Binding ───────────────────────────────────────────────────────
+
   {
     type: 'INSECURE_BINDING',
     severity: 'low',
@@ -307,92 +291,7 @@ const PHP_PATTERNS: PHPPattern[] = [
       'In production, bind to a specific interface or use a reverse proxy.',
     confidence: 0.6,
   },
-
-  // ── Missing Auth ───────────────────────────────────────────────────────────
-  // Flags endpoint handlers that process sensitive superglobal data ($_POST,
-  // $_GET for mutations) without a preceding session_start() / auth check.
-  // Pattern: a function/method that accesses $_POST or makes a DB call but
-  // does NOT contain session_start() or any is_logged_in / auth guard call.
-  {
-    type: 'MISSING_AUTH',
-    severity: 'high',
-    pattern: /\$_SERVER\s*\[\s*['"]REQUEST_METHOD['"]\s*\]\s*===?\s*['"](?:POST|PUT|DELETE|PATCH)['"]/,
-    message:
-      'HTTP method check detected without an adjacent auth guard. Ensure sensitive endpoints ' +
-      'call session_start() and verify user identity (e.g. $_SESSION["user_id"] or an auth middleware) ' +
-      'before processing the request.',
-    confidence: 0.7,
-  },
 ];
-
-// ── Stateful MISSING_AUTH detector ───────────────────────────────────────────
-//
-// Scans functions/methods that access $_POST/$_GET for mutations but lack
-// any session_start() or auth-checking call in their body.
-
-const AUTH_GUARD_PATTERN = /\b(?:session_start|is_logged_in|checkAuth|requireAuth|Auth::check|auth_required|isAuthenticated)\s*\(/i;
-const SENSITIVE_OP_PATTERN = /\$_(?:POST|PUT|DELETE|PATCH)\b|\$_GET\[.*(?:id|action|delete|update|create)/i;
-const FUNCTION_START_PATTERN = /\bfunction\s+\w+\s*\(/;
-
-function detectMissingAuth(lines: string[], filePath: string): Finding[] {
-  const findings: Finding[] = [];
-  let inFunction = false;
-  let functionStartLine = 0;
-  let braceDepth = 0;
-  let hasSensitiveOp = false;
-  let hasAuthGuard = false;
-  let functionName = '';
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    const trimmed = line.trim();
-    if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('*')) continue;
-
-    if (!inFunction) {
-      const fnMatch = line.match(/\bfunction\s+(\w+)\s*\(/);
-      if (fnMatch) {
-        inFunction = true;
-        functionStartLine = i + 1;
-        braceDepth = 0;
-        hasSensitiveOp = false;
-        hasAuthGuard = false;
-        functionName = fnMatch[1] ?? 'anonymous';
-      }
-    }
-
-    if (inFunction) {
-      for (const char of line) {
-        if (char === '{') braceDepth++;
-        if (char === '}') braceDepth--;
-      }
-
-      if (AUTH_GUARD_PATTERN.test(line)) hasAuthGuard = true;
-      if (SENSITIVE_OP_PATTERN.test(line)) hasSensitiveOp = true;
-
-      if (braceDepth === 0 && functionStartLine > 0) {
-        if (hasSensitiveOp && !hasAuthGuard) {
-          findings.push({
-            type: 'MISSING_AUTH',
-            severity: 'high',
-            line: functionStartLine,
-            column: 0,
-            snippet: `function ${functionName}(...)`,
-            message:
-              `Function '${functionName}' processes sensitive user input ($_POST/$_GET) without an ` +
-              'auth guard. Add session_start() and verify $_SESSION["user_id"] (or equivalent) ' +
-              'at the top of the function.',
-            confidence: 0.75,
-            file: filePath,
-          });
-        }
-        inFunction = false;
-        functionStartLine = 0;
-      }
-    }
-  }
-
-  return findings;
-}
 
 /**
  * Scans a parsed PHP source for security vulnerabilities using pattern matching.
@@ -406,13 +305,7 @@ export function scanPHP(result: PHPParseResult): Finding[] {
     const trimmed = line.trim();
 
     // Skip comments
-    if (
-      trimmed.startsWith('//') ||
-      trimmed.startsWith('#') ||
-      trimmed.startsWith('*') ||
-      trimmed.startsWith('/*')
-    )
-      return;
+    if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return;
 
     for (const { type, severity, pattern, message, confidence } of PHP_PATTERNS) {
       if (pattern.test(line)) {
@@ -429,9 +322,6 @@ export function scanPHP(result: PHPParseResult): Finding[] {
       }
     }
   });
-
-  // Stateful MISSING_AUTH detection
-  findings.push(...detectMissingAuth(result.lines, result.filePath));
 
   return findings;
 }

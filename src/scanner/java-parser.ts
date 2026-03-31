@@ -59,6 +59,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'SQL query built with string concatenation in JDBC. User input interpolated into ' +
       'SQL strings leads to SQL injection. Use PreparedStatement with parameterised queries instead.',
+    confidence: 0.93,
   },
   {
     type: 'SQL_INJECTION',
@@ -67,6 +68,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'JPA/Hibernate query built with string concatenation. Use parameterised queries ' +
       'or Criteria API to prevent SQL injection.',
+    confidence: 0.91,
   },
 
   // Command injection via Runtime.exec
@@ -78,6 +80,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
       'Runtime.exec() called with string concatenation. If any part of the command is ' +
       'user-controlled, this allows arbitrary command injection. Use ProcessBuilder with ' +
       'a list of arguments instead.',
+    confidence: 0.94,
   },
   {
     type: 'COMMAND_INJECTION',
@@ -87,6 +90,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
       'Runtime.exec() called with a non-literal argument. If any part of the command is ' +
       'user-controlled, this allows arbitrary command execution. Use ProcessBuilder with ' +
       'a list of arguments and avoid shell interpretation.',
+    confidence: 0.88,
   },
   {
     type: 'COMMAND_INJECTION',
@@ -95,6 +99,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'ProcessBuilder constructed with user-controlled input. Validate and sanitise ' +
       'all arguments before passing them to external commands.',
+    confidence: 0.80,
   },
 
   // Hardcoded secrets
@@ -105,6 +110,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'Potential hardcoded credential in Java source. Secrets must be loaded from ' +
       'environment variables, system properties, or a secrets manager.',
+    confidence: 0.85,
   },
 
   // Weak crypto — MD5, SHA-1, DES
@@ -115,6 +121,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'Weak hashing algorithm (MD5 or SHA-1) used via MessageDigest. ' +
       'Use SHA-256 or SHA-3 for security-sensitive hashing. For passwords, use bcrypt or Argon2.',
+    confidence: 0.96,
   },
   {
     type: 'WEAK_CRYPTO',
@@ -123,6 +130,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'Weak or deprecated cipher algorithm used. DES, 3DES, RC4, and Blowfish are ' +
       'considered insecure. Use AES-256-GCM or ChaCha20-Poly1305.',
+    confidence: 0.95,
   },
 
   // Path traversal via File constructor with user input
@@ -133,6 +141,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'File object created with user-controlled input. Without path sanitisation, ' +
       'attackers can traverse the filesystem with ../ sequences. Validate and canonicalise paths.',
+    confidence: 0.82,
   },
 
   // Insecure random — java.util.Random instead of SecureRandom
@@ -143,6 +152,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'java.util.Random is not cryptographically secure. For tokens, passwords, ' +
       'or session IDs, use java.security.SecureRandom instead.',
+    confidence: 0.78,
   },
 
   // Unsafe deserialization — ObjectInputStream.readObject
@@ -154,6 +164,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
       'ObjectInputStream.readObject() deserializes arbitrary Java objects. ' +
       'Deserializing untrusted data can lead to remote code execution. ' +
       'Use ObjectInputFilter (Java 9+) or avoid Java serialization entirely.',
+    confidence: 0.75,
   },
 
   // XSS via direct output in servlets
@@ -164,6 +175,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'User input written directly to HTTP response without encoding. ' +
       'This allows Cross-Site Scripting (XSS). HTML-encode all user input before output.',
+    confidence: 0.84,
   },
 
   // SSRF via URL/HttpURLConnection with user input
@@ -174,6 +186,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'URL object created with user-controlled input. Without URL validation, ' +
       'attackers can force the server to make requests to internal services (SSRF).',
+    confidence: 0.79,
   },
 
   // ScriptEngine eval
@@ -184,6 +197,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'ScriptEngine.eval() called with user-controlled input. This executes arbitrary ' +
       'code and must never receive untrusted input.',
+    confidence: 0.86,
   },
 
   // XXE (XML external entity injection)
@@ -195,6 +209,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
       'DocumentBuilderFactory created without disabling external entity processing. ' +
       'This may allow XXE attacks that read local files or trigger SSRF. ' +
       'Call factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true).',
+    confidence: 0.72,
   },
   {
     type: 'XML_INJECTION',
@@ -203,6 +218,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'SAXParserFactory created without configuring secure processing. ' +
       'Enable FEATURE_SECURE_PROCESSING and disable external entity resolution to prevent XXE.',
+    confidence: 0.70,
   },
 
   // LDAP injection
@@ -213,6 +229,7 @@ const JAVA_PATTERNS: JavaPattern[] = [
     message:
       'LDAP DirContext.search() called with a concatenated filter string. ' +
       'User input in LDAP filters allows LDAP injection. Use parameterised queries.',
+    confidence: 0.89,
   },
 
   // N+1 query pattern — detected statefully in scanJava (see loop-tracking logic below)
