@@ -42,7 +42,7 @@ describe('CLI --format=sonarqube', () => {
     const result = spawnSync(
       process.execPath,
       [DIST_CLI, FIXTURE, '--format=sonarqube'],
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 },
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
     );
     expect(result.status).toBe(1);
     expect(result.stdout.trim().length).toBeGreaterThan(0);
@@ -52,7 +52,7 @@ describe('CLI --format=sonarqube', () => {
     const result = spawnSync(
       process.execPath,
       [DIST_CLI, FIXTURE, '--format=sonarqube'],
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 },
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
     );
     expect(() => JSON.parse(result.stdout)).not.toThrow();
   });
@@ -61,7 +61,7 @@ describe('CLI --format=sonarqube', () => {
     const result = spawnSync(
       process.execPath,
       [DIST_CLI, FIXTURE, '--format=sonarqube'],
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 },
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
     );
     const parsed = JSON.parse(result.stdout) as { issues?: unknown[] };
     expect(Array.isArray(parsed.issues)).toBe(true);
@@ -72,7 +72,7 @@ describe('CLI --format=sonarqube', () => {
     const result = spawnSync(
       process.execPath,
       [DIST_CLI, FIXTURE, '--format=sonarqube'],
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 },
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
     );
     const parsed = JSON.parse(result.stdout) as {
       issues: Array<{
@@ -116,7 +116,7 @@ describe('CLI --format=sonarqube', () => {
     const result = spawnSync(
       process.execPath,
       [DIST_CLI, FIXTURE, '--format=sonarqube'],
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 },
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
     );
     const parsed = JSON.parse(result.stdout) as { issues: Array<{ engineId: string }> };
     for (const issue of parsed.issues) {
@@ -128,7 +128,7 @@ describe('CLI --format=sonarqube', () => {
     const result = spawnSync(
       process.execPath,
       [DIST_CLI, FIXTURE, '--format=sonarqube'],
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 },
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
     );
     const parsed = JSON.parse(result.stdout) as {
       issues: Array<{ severity: string }>;
@@ -145,7 +145,7 @@ describe('CLI --format=sonarqube', () => {
     const result = spawnSync(
       process.execPath,
       [DIST_CLI, cleanFixture, '--format=sonarqube'],
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 },
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
     );
     expect(result.status).toBe(0);
     const parsed = JSON.parse(result.stdout) as { issues: unknown[] };
