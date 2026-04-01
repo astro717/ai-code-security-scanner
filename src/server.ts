@@ -625,6 +625,55 @@ export async function resetRateLimiters(): Promise<void> {
   ]);
 }
 
+
+// ── Badge endpoint ────────────────────────────────────────────────────────────
+// GET /badge/:orgId?count=<n>&label=<label>
+// Returns a shields.io-compatible SVG badge showing critical finding count.
+// The count parameter is provided by the caller (e.g. CI pipeline after scanning).
+// Example: GET /badge/my-org?count=3 → SVG badge "security | 3 critical"
+app.get('/badge/:orgId', (req, res): void => {
+  const orgId = req.params['orgId'] ?? 'unknown';
+  const count = parseInt(String(req.query['count'] ?? '0'), 10);
+  const label = String(req.query['label'] ?? 'security');
+  const color = count === 0 ? '4c1' : count < 5 ? 'orange' : 'red';
+  const labelText = label.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] ?? c));
+  const valueText = count === 0 ? 'passing' : `${count} critical`;
+
+  // Shields.io-compatible flat badge SVG
+  const labelWidth = Math.max(labelText.length * 6 + 20, 60);
+  const valueWidth = Math.max(valueText.length * 6 + 20, 60);
+  const totalWidth = labelWidth + valueWidth;
+  const lx = labelWidth / 2 + 1;
+  const vx = labelWidth + valueWidth / 2 - 1;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="20" role="img" aria-label="${labelText}: ${valueText}">
+  <title>${labelText}: ${valueText}</title>
+  <linearGradient id="s" x2="0" y2="100%">
+    <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+    <stop offset="1" stop-opacity=".1"/>
+  </linearGradient>
+  <clipPath id="r">
+    <rect width="${totalWidth}" height="20" rx="3" fill="#fff"/>
+  </clipPath>
+  <g clip-path="url(#r)">
+    <rect width="${labelWidth}" height="20" fill="#555"/>
+    <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="#${color}"/>
+    <rect width="${totalWidth}" height="20" fill="url(#s)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="110">
+    <text x="${lx * 10}" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="${(labelWidth - 10) * 10}">${labelText}</text>
+    <text x="${lx * 10}" y="140" transform="scale(.1)" textLength="${(labelWidth - 10) * 10}">${labelText}</text>
+    <text x="${vx * 10}" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="${(valueWidth - 10) * 10}">${valueText}</text>
+    <text x="${vx * 10}" y="140" transform="scale(.1)" textLength="${(valueWidth - 10) * 10}">${valueText}</text>
+  </g>
+</svg>`;
+
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('X-Org-Id', orgId);
+  res.send(svg);
+});
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', version: '0.1.0' });
 });
