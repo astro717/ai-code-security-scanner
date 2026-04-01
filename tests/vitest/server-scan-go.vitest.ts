@@ -108,7 +108,7 @@ describe('/scan with Go files', () => {
     const types = new Set(body.findings.map((f) => f.type));
 
     expect(types.has('SQL_INJECTION')).toBe(true);
-    expect(types.has('COMMAND_INJECTION')).toBe(true);
+    expect(types.has('COMMAND_INJECTION_GO')).toBe(true);
     expect(types.has('WEAK_CRYPTO')).toBe(true);
     expect(types.has('SECRET_HARDCODED')).toBe(true);
     expect(types.has('INSECURE_RANDOM')).toBe(true);
