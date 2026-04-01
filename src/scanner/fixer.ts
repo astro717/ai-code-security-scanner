@@ -33,8 +33,31 @@
  * Kotlin (.kt, .kts):
  *   Supported extension — individual rule coverage is added incrementally.
  *
- * Languages with no auto-fix rules yet (manual review required):
- *   Go, Java, C/C++, Swift, Rust
+ * Go (.go):
+ *   PATH_TRAVERSAL     — filepath.Clean + base-dir check note
+ *   SQL_INJECTION      — parameterized query note
+ *   COMMAND_INJECTION_GO — separate args note
+ *   INSECURE_RANDOM    — crypto/rand note
+ *   WEAK_CRYPTO        — sha256 note
+ *
+ * Java (.java):
+ *   SQL_INJECTION      — PreparedStatement note
+ *   COMMAND_INJECTION  — ProcessBuilder note
+ *   WEAK_CRYPTO        — MessageDigest.getInstance("MD5"|"SHA-1") → "SHA-256" replacement
+ *   UNSAFE_DESERIALIZATION — ObjectInputStream note
+ *
+ * Swift (.swift):
+ *   INSECURE_RANDOM    — SecRandomCopyBytes note
+ *   WEAK_CRYPTO        — CryptoKit SHA256 note
+ *   FORCE_UNWRAP       — guard let / if let note
+ *   FORCE_TRY          — do/catch note
+ *   WEBVIEW_LOAD_URL   — navigationDelegate + allowlist note
+ *
+ * C/C++ (.c, .cpp, .h, .hpp):
+ *   BUFFER_OVERFLOW    — strcpy → strncpy, strcat → strncat (mechanical)
+ *   FORMAT_STRING      — printf(var) → printf("%s", var) (mechanical)
+ *   COMMAND_INJECTION_C — system() → execv() array args note
+ *   INSECURE_RANDOM    — rand() → getrandom()/arc4random() note
  */
 
 import * as fs from 'fs';
@@ -714,11 +737,366 @@ ${indent}    raise ValueError(${msg})`;
       );
     },
   },
+
+  // ── UNSAFE_BLOCK (Rust): unsafe { } block — scope minimization guidance ─────
+  {
+    types: ['UNSAFE_BLOCK'],
+    description: 'Add TODO annotation to minimize the unsafe block scope in Rust',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.rs') return null;
+      if (!/\bunsafe\s*\{/.test(line)) return null;
+      if (/TODO.*UNSAFE_BLOCK/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(UNSAFE_BLOCK): minimize the unsafe block — only include the exact lines that require unsafe operations\n` +
+        line
+      );
+    },
+  },
+
+  // ── Go language auto-fix rules ────────────────────────────────────────────────
+
+  // ── PATH_TRAVERSAL (Go): filepath.Join with user input → filepath.Clean + base check ──
+  {
+    types: ['PATH_TRAVERSAL'],
+    description: 'Add filepath.Clean and base-directory guard for Go path traversal',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.go') return null;
+      if (/filepath\.Clean|strings\.HasPrefix/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(PATH_TRAVERSAL): use filepath.Clean(p) and verify strings.HasPrefix(clean, baseDir) before use\n` +
+        line
+      );
+    },
+  },
+
+  // ── SQL_INJECTION (Go): string-concatenated query → parameterized note ───────
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Add TODO note to use parameterized queries (db.Query with ?) in Go',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.go') return null;
+      if (/\?\s*,|\$\d+/.test(line)) return null; // already parameterized
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(SQL_INJECTION): use parameterized query: db.Query("SELECT ... WHERE id = ?", id)\n` +
+        line
+      );
+    },
+  },
+
+  // ── COMMAND_INJECTION_GO (Go): exec.Command with shell string → array args note ──
+  {
+    types: ['COMMAND_INJECTION_GO'],
+    description: 'Note: pass arguments as separate strings to exec.Command to avoid shell injection in Go',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.go') return null;
+      if (!/exec\.Command\s*\(|exec\.CommandContext\s*\(/.test(line)) return null;
+      if (/TODO.*COMMAND_INJECTION_GO/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(COMMAND_INJECTION_GO): pass each argument separately — exec.Command("cmd", arg1, arg2) — never use "sh", "-c"\n` +
+        line
+      );
+    },
+  },
+
+  // ── INSECURE_RANDOM (Go): math/rand → crypto/rand note ───────────────────────
+  {
+    types: ['INSECURE_RANDOM'],
+    description: 'Note: replace math/rand with crypto/rand for cryptographic operations in Go',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.go') return null;
+      if (/crypto\/rand/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(INSECURE_RANDOM): replace math/rand with crypto/rand — import "crypto/rand"; rand.Read(buf)\n` +
+        line
+      );
+    },
+  },
+
+  // ── WEAK_CRYPTO (Go): md5/sha1 import → sha256 note ─────────────────────────
+  {
+    types: ['WEAK_CRYPTO'],
+    description: 'Note: replace md5/sha1 with crypto/sha256 in Go',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.go') return null;
+      if (/sha256|sha512/.test(line)) return null;
+      if (/\bmd5\b|\bsha1\b/.test(line)) {
+        const indent = line.match(/^(\s*)/)?.[1] ?? '';
+        return (
+          `${indent}// TODO(WEAK_CRYPTO): replace md5/sha1 with crypto/sha256 — import "crypto/sha256"; sha256.Sum256(data)\n` +
+          line
+        );
+      }
+      return null;
+    },
+  },
+
+  // ── Java language auto-fix rules ─────────────────────────────────────────────
+
+  // ── SQL_INJECTION (Java): SqlCommand/string concat → PreparedStatement note ──
+  {
+    types: ['SQL_INJECTION'],
+    description: 'Note: use PreparedStatement with ? placeholders instead of string concatenation in Java',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.java') return null;
+      if (/PreparedStatement|prepareStatement|setString|setInt/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(SQL_INJECTION): PreparedStatement pstmt = conn.prepareStatement("SELECT ... WHERE id = ?"); pstmt.setString(1, id);\n` +
+        line
+      );
+    },
+  },
+
+  // ── COMMAND_INJECTION (Java): Runtime.exec with string concat → array form note ──
+  {
+    types: ['COMMAND_INJECTION'],
+    description: 'Note: use ProcessBuilder with separate args instead of Runtime.exec(String) in Java',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.java') return null;
+      if (!/Runtime\.getRuntime\(\)\.exec|ProcessBuilder/.test(line)) return null;
+      if (/TODO.*COMMAND_INJECTION/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(COMMAND_INJECTION): new ProcessBuilder("cmd", arg1, arg2).start() — never concatenate user input into shell strings\n` +
+        line
+      );
+    },
+  },
+
+  // ── WEAK_CRYPTO (Java): MessageDigest MD5/SHA-1 → SHA-256 note ───────────────
+  {
+    types: ['WEAK_CRYPTO'],
+    description: 'Note: replace MD5/SHA-1 MessageDigest with SHA-256 in Java',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.java') return null;
+      if (!/MessageDigest\.getInstance\s*\(/.test(line)) return null;
+      if (/SHA-256|SHA-512|SHA-384/.test(line)) return null;
+      const fixed = line.replace(
+        /MessageDigest\.getInstance\s*\(\s*["'](?:MD5|SHA-?1|SHA1)["']\s*\)/gi,
+        'MessageDigest.getInstance("SHA-256")',
+      );
+      return fixed !== line ? fixed : null;
+    },
+  },
+
+  // ── UNSAFE_DESERIALIZATION (Java): ObjectInputStream → note-only ─────────────
+  {
+    types: ['UNSAFE_DESERIALIZATION'],
+    description: 'Note: replace ObjectInputStream with a safe deserialization alternative in Java',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.java') return null;
+      if (!/ObjectInputStream|readObject\s*\(/.test(line)) return null;
+      if (/TODO.*UNSAFE_DESERIALIZATION/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(UNSAFE_DESERIALIZATION): replace ObjectInputStream with a safe alternative (e.g. Jackson with type restrictions or XStream with allowlists)\n` +
+        line
+      );
+    },
+  },
+
+  // ── Swift language auto-fix rules ────────────────────────────────────────────
+
+  // ── INSECURE_RANDOM (Swift): arc4random → SecRandomCopyBytes note ────────────
+  {
+    types: ['INSECURE_RANDOM'],
+    description: 'Note: replace arc4random with SecRandomCopyBytes in Swift',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+      if (!/arc4random/.test(line)) return null;
+      if (/SecRandomCopyBytes/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(INSECURE_RANDOM): replace arc4random with SecRandomCopyBytes(kSecRandomDefault, count, &buf)\n` +
+        line
+      );
+    },
+  },
+
+  // ── WEAK_CRYPTO (Swift): CC_MD5/CC_SHA1/Insecure.MD5 → CryptoKit SHA256 note ─
+  {
+    types: ['WEAK_CRYPTO'],
+    description: 'Note: replace CommonCrypto MD5/SHA1 with CryptoKit SHA256 in Swift',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+      if (!/CC_MD5|CC_SHA1|Insecure\.MD5|Insecure\.SHA1|kCCAlgorithmDES/.test(line)) return null;
+      if (/SHA256|CryptoKit/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(WEAK_CRYPTO): replace with CryptoKit — import CryptoKit; let hash = SHA256.hash(data: data)\n` +
+        line
+      );
+    },
+  },
+
+  // ── FORCE_UNWRAP (Swift): Type! → guard let / if let note ────────────────────
+  {
+    types: ['FORCE_UNWRAP'],
+    description: 'Note: replace implicitly unwrapped optional (Type!) with guard let / if let in Swift',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+      if (!/(?:let|var)\s+\w+\s*:\s*\w+\s*!/.test(line)) return null;
+      if (/TODO.*FORCE_UNWRAP/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(FORCE_UNWRAP): replace implicitly unwrapped optional with optional (?) and use guard let / if let\n` +
+        line
+      );
+    },
+  },
+
+  // ── FORCE_TRY (Swift): try! → do/catch note ───────────────────────────────────
+  {
+    types: ['FORCE_TRY'],
+    description: 'Note: replace try! with do/catch error handling in Swift',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+      if (!/\btry!\s/.test(line)) return null;
+      if (/TODO.*FORCE_TRY/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(FORCE_TRY): replace try! with do { let x = try ... } catch { /* handle error */ }\n` +
+        line
+      );
+    },
+  },
+
+  // ── WEBVIEW_LOAD_URL (Swift): WKWebView loadURL → navigationDelegate + allowlist note ──
+  {
+    types: ['WEBVIEW_LOAD_URL'],
+    description: 'Note: add navigationDelegate and URL allowlist before loading URLs in WKWebView',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (ext !== '.swift') return null;
+      if (!/\.load\s*\(|\.loadHTMLString\s*\(/.test(line)) return null;
+      if (/TODO.*WEBVIEW_LOAD_URL|navigationDelegate/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(WEBVIEW_LOAD_URL): implement WKNavigationDelegate.webView(_:decidePolicyFor:) to allowlist allowed hosts\n` +
+        line
+      );
+    },
+  },
+
+  // ── C/C++ language auto-fix rules ────────────────────────────────────────────
+
+  // ── BUFFER_OVERFLOW (C/C++): strcpy/strcat → strncpy/strncat note ────────────
+  {
+    types: ['BUFFER_OVERFLOW'],
+    description: 'Replace strcpy/strcat with size-bounded strncpy/strncat in C/C++',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (!['.c', '.cpp', '.h', '.hpp'].includes(ext)) return null;
+
+      // Direct mechanical replacement for strcpy → strncpy
+      if (/\bstrcpy\s*\(/.test(line)) {
+        const m = line.match(/\bstrcpy\s*\(\s*([^,]+),\s*([^)]+)\)/);
+        if (m) {
+          const dest = m[1]!.trim();
+          const src = m[2]!.trim();
+          const fixed = line.replace(
+            /\bstrcpy\s*\([^)]+\)/,
+            `strncpy(${dest}, ${src}, sizeof(${dest}) - 1)`,
+          );
+          return fixed !== line ? fixed : null;
+        }
+      }
+
+      // Direct mechanical replacement for strcat → strncat
+      if (/\bstrcat\s*\(/.test(line)) {
+        const m = line.match(/\bstrcat\s*\(\s*([^,]+),\s*([^)]+)\)/);
+        if (m) {
+          const dest = m[1]!.trim();
+          const src = m[2]!.trim();
+          const fixed = line.replace(
+            /\bstrcat\s*\([^)]+\)/,
+            `strncat(${dest}, ${src}, sizeof(${dest}) - strlen(${dest}) - 1)`,
+          );
+          return fixed !== line ? fixed : null;
+        }
+      }
+
+      return null;
+    },
+  },
+
+  // ── FORMAT_STRING (C/C++): printf(userInput) → printf("%s", userInput) ────────
+  {
+    types: ['FORMAT_STRING'],
+    description: 'Add format string literal to printf to prevent format string injection in C/C++',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (!['.c', '.cpp', '.h', '.hpp'].includes(ext)) return null;
+      // Match printf(variable) or printf(expr) but NOT printf("literal...")
+      const m = line.match(/\b(printf|fprintf|sprintf|snprintf)\s*\(\s*(?!["'])([^,)]+)\s*\)/);
+      if (!m) return null;
+      const fn = m[1]!;
+      const arg = m[2]!.trim();
+      const fixed = line.replace(
+        /\b(?:printf|fprintf|sprintf|snprintf)\s*\(\s*(?!["'])([^,)]+)\s*\)/,
+        `${fn}("%s", ${arg})`,
+      );
+      return fixed !== line ? fixed : null;
+    },
+  },
+
+  // ── COMMAND_INJECTION_C (C/C++): system() → execv() array args note ──────────
+  {
+    types: ['COMMAND_INJECTION_C', 'COMMAND_INJECTION'],
+    description: 'Note: replace system() with execv() with separate args array in C/C++',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (!['.c', '.cpp', '.h', '.hpp'].includes(ext)) return null;
+      if (!/\bsystem\s*\(/.test(line)) return null;
+      if (/TODO.*COMMAND_INJECTION_C/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(COMMAND_INJECTION_C): replace system() with execv() — char *args[] = {"cmd", arg, NULL}; execv("/usr/bin/cmd", args);\n` +
+        line
+      );
+    },
+  },
+
+  // ── INSECURE_RANDOM (C/C++): rand() → getrandom()/arc4random() note ─────────
+  {
+    types: ['INSECURE_RANDOM'],
+    description: 'Note: replace rand() with getrandom() or arc4random() for secure random in C/C++',
+    transform(line: string, finding: Finding): string | null {
+      const ext = path.extname(finding.file ?? '').toLowerCase();
+      if (!['.c', '.cpp', '.h', '.hpp'].includes(ext)) return null;
+      if (!/\brand\s*\(\s*\)/.test(line)) return null;
+      if (/getrandom|arc4random|RAND_bytes/.test(line)) return null;
+      const indent = line.match(/^(\s*)/)?.[1] ?? '';
+      return (
+        `${indent}// TODO(INSECURE_RANDOM): replace rand() with getrandom(buf, size, 0) or arc4random() for cryptographically secure random values\n` +
+        line
+      );
+    },
+  },
 ];
 
 // ── File extension guard ───────────────────────────────────────────────────────
 
-const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb', '.php', '.rs']);
+const FIXABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.kt', '.kts', '.rb', '.php', '.rs', '.go', '.java', '.swift', '.c', '.cpp', '.h', '.hpp']);
 
 function isFixableFile(filePath: string): boolean {
   return FIXABLE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
