@@ -61,6 +61,27 @@ const SUPPORTED_EXTENSIONS = new Set([
   '.php',
 ]);
 
+// ── Binary file detection & size limits ──────────────────────────────────────
+
+/** Maximum file size to scan (2 MB by default). */
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Returns true if the first `sampleBytes` of a buffer contain a null byte,
+ * which is a reliable heuristic for binary (non-text) files.
+ */
+function isBinaryFile(filePath: string, sampleBytes = 8192): boolean {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(Math.min(sampleBytes, fs.statSync(filePath).size));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    return buf.includes(0x00);
+  } catch {
+    return false;
+  }
+}
+
 // ── .aiscanner ignore file ────────────────────────────────────────────────────
 
 /**
@@ -127,6 +148,24 @@ function collectFiles(targetPath: string, ignorePatterns: string[] = []): string
 }
 
 function scanFile(filePath: string): Finding[] {
+  // Skip files that exceed the size limit.
+  try {
+    const fileSize = fs.statSync(filePath).size;
+    if (fileSize > MAX_FILE_SIZE_BYTES) {
+      const sizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+      console.error(`  [skip] ${filePath}: file too large (${sizeMB} MB > ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB limit)`);
+      return [];
+    }
+  } catch {
+    return [];
+  }
+
+  // Skip binary files (null-byte heuristic).
+  if (isBinaryFile(filePath)) {
+    console.error(`  [skip] ${filePath}: binary file detected`);
+    return [];
+  }
+
   // Cache check: skip re-scanning unchanged files.
   let fileContent: string;
   try {

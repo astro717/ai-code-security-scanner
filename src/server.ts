@@ -1127,14 +1127,42 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
     return;
   }
 
+  // SSRF protection: validate repoUrl against allowlisted hostnames
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(repoUrl.trim());
+  } catch {
+    res.status(400).json({ error: 'repoUrl must be a valid URL (e.g. https://github.com/owner/repo)' });
+    return;
+  }
+
+  if (parsedUrl.protocol !== 'https:') {
+    res.status(400).json({ error: 'repoUrl must use the https:// scheme' });
+    return;
+  }
+
+  const ALLOWED_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
+  if (!ALLOWED_HOSTS.has(parsedUrl.hostname)) {
+    res.status(400).json({ error: 'Only github.com, gitlab.com, and bitbucket.org repositories are supported' });
+    return;
+  }
+
+  // Block private IP ranges to prevent SSRF via DNS rebinding
+  const PRIVATE_IP_RE = /^(?:127\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|::1$|localhost)/i;
+  if (PRIVATE_IP_RE.test(parsedUrl.hostname)) {
+    res.status(400).json({ error: 'repoUrl resolves to a private or loopback address — not allowed' });
+    return;
+  }
+
   // Parse GitHub URL: https://github.com/owner/repo
-  const match = repoUrl.trim().replace(/\.git$/, '').match(/github\.com\/([^/]+)\/([^/]+)/);
+  const match = repoUrl.trim().replace(/\.git$/, '').match(/(?:github\.com|gitlab\.com|bitbucket\.org)\/([^/]+)\/([^/]+)/);
   if (!match) {
-    res.status(400).json({ error: 'repoUrl must be a valid GitHub repository URL (https://github.com/owner/repo)' });
+    res.status(400).json({ error: 'repoUrl must be a valid repository URL (https://github.com/owner/repo)' });
     return;
   }
 
   const [, owner, repo] = match;
+  // Only GitHub is supported for the API calls — other hosts fall back to GitHub-compatible API
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
 
   try {

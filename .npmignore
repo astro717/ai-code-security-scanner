@@ -7,11 +7,24 @@ web/
 
 # Tests
 tests/
+*.vitest.ts
+vitest.config.ts
+
+# VS Code extension (published separately via vsce)
+vscode-extension/
+
+# CI/CD and infra
+.github/
+Dockerfile
+docker-compose.yml
+.aiscanner
 
 # Config files
 tsconfig.json
-.github/
 .gitignore
+.eslintrc*
+.prettierrc*
+.claude/
 
 # Dev artifacts
 node_modules/

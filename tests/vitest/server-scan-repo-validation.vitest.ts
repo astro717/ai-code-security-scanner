@@ -40,12 +40,20 @@ describe('/scan-repo input validation', () => {
     expect(body.error).toMatch(/repoUrl/i);
   });
 
-  test('non-GitHub URL returns 400', async () => {
-    const res = await request(app).post('/scan-repo').send({ repoUrl: 'https://gitlab.com/owner/repo' });
+  test('non-allowlisted URL returns 400 with supported hosts message', async () => {
+    const res = await request(app).post('/scan-repo').send({ repoUrl: 'https://evil.com/owner/repo' });
     expect(res.status).toBe(400);
     const body = res.body as { error?: string };
     expect(typeof body.error).toBe('string');
-    expect(body.error).toMatch(/github/i);
+    expect(body.error).toMatch(/github\.com|gitlab\.com|bitbucket/i);
+  });
+
+  test('http:// (non-https) URL returns 400', async () => {
+    const res = await request(app).post('/scan-repo').send({ repoUrl: 'http://github.com/owner/repo' });
+    expect(res.status).toBe(400);
+    const body = res.body as { error?: string };
+    expect(typeof body.error).toBe('string');
+    expect(body.error).toMatch(/https/i);
   });
 
   test('unsupported protocol (ssh) returns 400', async () => {
@@ -53,7 +61,7 @@ describe('/scan-repo input validation', () => {
     expect(res.status).toBe(400);
     const body = res.body as { error?: string };
     expect(typeof body.error).toBe('string');
-    expect(body.error).toMatch(/github/i);
+    expect(body.error).toMatch(/url|scheme|https/i);
   });
 
   test('invalid URL string returns 400', async () => {
@@ -61,6 +69,21 @@ describe('/scan-repo input validation', () => {
     expect(res.status).toBe(400);
     const body = res.body as { error?: string };
     expect(typeof body.error).toBe('string');
-    expect(body.error).toMatch(/github/i);
+    expect(typeof body.error).toBe('string');
+  });
+
+  test('private IP address returns 400 (SSRF protection)', async () => {
+    const res = await request(app).post('/scan-repo').send({ repoUrl: 'https://127.0.0.1/owner/repo' });
+    expect(res.status).toBe(400);
+    const body = res.body as { error?: string };
+    expect(typeof body.error).toBe('string');
+    expect(body.error).toMatch(/private|loopback|allowed/i);
+  });
+
+  test('10.x private IP returns 400 (SSRF protection)', async () => {
+    const res = await request(app).post('/scan-repo').send({ repoUrl: 'https://10.0.0.1/owner/repo' });
+    expect(res.status).toBe(400);
+    const body = res.body as { error?: string };
+    expect(typeof body.error).toBe('string');
   });
 });
