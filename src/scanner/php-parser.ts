@@ -273,6 +273,35 @@ const PHP_PATTERNS: PHPPattern[] = [
     message: 'Server bound to 0.0.0.0. Use a specific interface or reverse proxy in production.',
     confidence: 0.6,
   },
+
+  // ── LDAP Injection ────────────────────────────────────────────────────────
+  {
+    type: 'LDAP_INJECTION',
+    severity: 'high',
+    pattern: /\b(?:ldap_search|ldap_list|ldap_read)\s*\([^)]*\$_(?:GET|POST|REQUEST)/,
+    message:
+      'LDAP query function called with user-controlled filter from superglobal. ' +
+      'Use ldap_escape() to sanitise the filter argument before passing it to the query.',
+    confidence: 0.92,
+  },
+  {
+    type: 'LDAP_INJECTION',
+    severity: 'high',
+    pattern: /\b(?:ldap_search|ldap_list|ldap_read)\s*\([^,]+,\s*[^,]+,\s*["'][^"']*\.\s*\$(?:_(?:GET|POST|REQUEST)|input|user|param)/,
+    message:
+      'LDAP filter built with string concatenation of user input. ' +
+      'Use ldap_escape($input, "", LDAP_ESCAPE_FILTER) to prevent LDAP injection.',
+    confidence: 0.9,
+  },
+  {
+    type: 'LDAP_INJECTION',
+    severity: 'high',
+    pattern: /\b(?:ldap_search|ldap_list|ldap_read)\s*\([^,]+,\s*[^,]+,\s*"\$[^"]*(?:\$_(?:GET|POST|REQUEST)|param|input|user)/i,
+    message:
+      'LDAP filter uses PHP string interpolation with user-controlled variable. ' +
+      'Sanitise with ldap_escape() before interpolating into the filter string.',
+    confidence: 0.88,
+  },
 ];
 
 // ── Stateful N+1 detector ─────────────────────────────────────────────────────

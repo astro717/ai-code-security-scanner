@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detector Coverage Matrix — AI Code Security Scanner</title>
+  <style>
+    :root {
+      --bg: #0a0e17; --surface: #111827; --border: #1e293b;
+      --text: #e2e8f0; --text-dim: #64748b; --text-faint: #334155;
+      --green: #22c55e; --green-bg: #052e16; --red: #ef4444; --red-bg: #1c0a0a;
+      --amber: #f59e0b; --amber-bg: #1c1505;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem; }
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .subtitle { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.5rem; }
+    .stats { display: flex; gap: 2rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .stat { text-align: center; }
+    .stat .val { font-size: 1.8rem; font-weight: 800; }
+    .stat .lbl { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat.green .val { color: var(--green); }
+    .stat.red .val { color: var(--red); }
+    .stat.amber .val { color: var(--amber); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+    table { border-collapse: collapse; width: 100%; min-width: 800px; font-size: 0.8rem; }
+    th, td { padding: 0.5rem 0.6rem; text-align: center; border-bottom: 1px solid var(--border); }
+    th { background: var(--surface); color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; position: sticky; top: 0; }
+    th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: var(--bg); z-index: 1; font-weight: 600; min-width: 200px; }
+    th:first-child { background: var(--surface); z-index: 2; }
+    td.yes { background: var(--green-bg); color: var(--green); font-weight: 600; }
+    td.no { background: var(--red-bg); color: var(--text-faint); }
+    td.partial { background: var(--amber-bg); color: var(--amber); }
+    tr:hover td { opacity: 0.9; }
+    .sev { font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 3px; font-weight: 600; }
+    .sev-critical { background: #7f1d1d; color: #fca5a5; }
+    .sev-high { background: #78350f; color: #fcd34d; }
+    .sev-medium { background: #1e3a5f; color: #93c5fd; }
+    .sev-low { background: #1a2e05; color: #86efac; }
+    .legend { margin-top: 1rem; font-size: 0.75rem; color: var(--text-dim); }
+    .legend span { margin-right: 1.5rem; }
+    .filter-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .filter-btn { font-size: 0.7rem; padding: 0.3rem 0.7rem; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); cursor: pointer; }
+    .filter-btn.active { border-color: var(--green); color: var(--green); background: var(--green-bg); }
+  </style>
+</head>
+<body>
+  <h1>Detector Coverage Matrix</h1>
+  <p class="subtitle">Which vulnerability types are detected for each supported language</p>
+  <div class="stats" id="stats"></div>
+  <div class="filter-row" id="filters"></div>
+  <div class="table-wrap"><table id="matrix"></table></div>
+  <div class="legend">
+    <span style="color:var(--green)">&#x2713; = detected</span>
+    <span style="color:var(--text-faint)">&mdash; = not covered</span>
+  </div>
+  <script>
+    const LANGUAGES = ['JS/TS', 'Python', 'Go', 'Java', 'C#', 'C/C++', 'Ruby', 'Kotlin', 'Swift', 'Rust', 'PHP'];
+    const DETECTORS = [
+      { type: 'SQL_INJECTION', severity: 'critical', langs: ['JS/TS','Python','Go','Java','C#','Ruby','PHP'] },
+      { type: 'COMMAND_INJECTION', severity: 'critical', langs: ['JS/TS','Python','Go','Java','C#','C/C++','Ruby','Kotlin','PHP'] },
+      { type: 'SHELL_INJECTION', severity: 'critical', langs: ['JS/TS','Python'] },
+      { type: 'EVAL_INJECTION', severity: 'high', langs: ['JS/TS','Python','Go','PHP'] },
+      { type: 'XSS', severity: 'high', langs: ['JS/TS','PHP'] },
+      { type: 'PATH_TRAVERSAL', severity: 'high', langs: ['JS/TS','Python','Go','Java','C#','Ruby','PHP'] },
+      { type: 'SSRF', severity: 'high', langs: ['JS/TS','Python','Go','Java','PHP'] },
+      { type: 'SECRET_HARDCODED', severity: 'high', langs: ['JS/TS','Python','Go','Java','C#','C/C++','Ruby','Kotlin','PHP'] },
+      { type: 'WEAK_CRYPTO', severity: 'medium', langs: ['JS/TS','Python','Go','Java','Ruby','PHP'] },
+      { type: 'INSECURE_RANDOM', severity: 'medium', langs: ['JS/TS','Python','Go','Java','C#','PHP'] },
+      { type: 'OPEN_REDIRECT', severity: 'medium', langs: ['JS/TS','PHP'] },
+      { type: 'UNSAFE_DESERIALIZATION', severity: 'critical', langs: ['Python','Java','PHP'] },
+      { type: 'SSTI', severity: 'critical', langs: ['Python','Ruby','Java','Go','PHP'] },
+      { type: 'CORS_MISCONFIGURATION', severity: 'medium', langs: ['JS/TS'] },
+      { type: 'PROTOTYPE_POLLUTION', severity: 'high', langs: ['JS/TS'] },
+      { type: 'REDOS', severity: 'medium', langs: ['JS/TS'] },
+      { type: 'JWT_HARDCODED_SECRET', severity: 'critical', langs: ['JS/TS'] },
+      { type: 'JWT_NONE_ALGORITHM', severity: 'high', langs: ['JS/TS'] },
+      { type: 'JWT_DECODE_NO_VERIFY', severity: 'high', langs: ['JS/TS'] },
+      { type: 'JWT_WEAK_SECRET', severity: 'medium', langs: ['JS/TS'] },
+      { type: 'XML_INJECTION', severity: 'high', langs: ['Python','Java','C#','PHP'] },
+      { type: 'LDAP_INJECTION', severity: 'high', langs: ['Python','Java','PHP'] },
+      { type: 'BUFFER_OVERFLOW', severity: 'high', langs: ['C/C++','Java','Rust'] },
+      { type: 'FORMAT_STRING', severity: 'high', langs: ['C/C++','Python'] },
+      { type: 'MASS_ASSIGNMENT', severity: 'high', langs: ['Ruby'] },
+      { type: 'INSECURE_BINDING', severity: 'low', langs: ['Python','Go','PHP'] },
+      { type: 'INSECURE_ASSERT', severity: 'medium', langs: ['Python','JS/TS'] },
+      { type: 'INSECURE_SHARED_PREFS', severity: 'medium', langs: ['Kotlin'] },
+      { type: 'WEBVIEW_LOAD_URL', severity: 'high', langs: ['Kotlin'] },
+      { type: 'UNSAFE_WEBVIEW', severity: 'high', langs: ['Kotlin'] },
+      { type: 'CSRF', severity: 'high', langs: ['JS/TS'] },
+      { type: 'PERFORMANCE_N_PLUS_ONE', severity: 'low', langs: ['Kotlin','Ruby','Go','Java','PHP'] },
+      { type: 'UNSAFE_DEPENDENCY', severity: 'low', langs: ['JS/TS'] },
+      { type: 'VULNERABLE_DEPENDENCY', severity: 'high', langs: ['JS/TS'] },
+    ];
+
+    // Stats
+    const total = DETECTORS.length * LANGUAGES.length;
+    const covered = DETECTORS.reduce((n, d) => n + d.langs.length, 0);
+    const gaps = total - covered;
+    const pct = Math.round((covered / total) * 100);
+    document.getElementById('stats').innerHTML = `
+      <div class="stat green"><div class="val">${covered}</div><div class="lbl">Covered</div></div>
+      <div class="stat red"><div class="val">${gaps}</div><div class="lbl">Gaps</div></div>
+      <div class="stat amber"><div class="val">${pct}%</div><div class="lbl">Coverage</div></div>
+      <div class="stat"><div class="val">${DETECTORS.length}</div><div class="lbl">Detector Types</div></div>
+      <div class="stat"><div class="val">${LANGUAGES.length}</div><div class="lbl">Languages</div></div>
+    `;
+
+    // Filters
+    const severities = ['all', 'critical', 'high', 'medium', 'low'];
+    const filtersEl = document.getElementById('filters');
+    severities.forEach((s) => {
+      const btn = document.createElement('button');
+      btn.className = 'filter-btn' + (s === 'all' ? ' active' : '');
+      btn.textContent = s;
+      btn.onclick = () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        renderTable(s === 'all' ? null : s);
+      };
+      filtersEl.appendChild(btn);
+    });
+
+    function sevClass(s) { return 'sev sev-' + s; }
+
+    function renderTable(filterSev) {
+      const filtered = filterSev ? DETECTORS.filter(d => d.severity === filterSev) : DETECTORS;
+      const rows = filtered.map(d => {
+        const cells = LANGUAGES.map(l =>
+          d.langs.includes(l)
+            ? '<td class="yes">&#x2713;</td>'
+            : '<td class="no">&mdash;</td>'
+        ).join('');
+        return `<tr><td>${d.type} <span class="${sevClass(d.severity)}">${d.severity}</span></td>${cells}</tr>`;
+      }).join('');
+      document.getElementById('matrix').innerHTML = `
+        <thead><tr><th>Detector</th>${LANGUAGES.map(l => '<th>' + l + '</th>').join('')}</tr></thead>
+        <tbody>${rows}</tbody>
+      `;
+    }
+    renderTable(null);
+  </script>
+</body>
+</html>
