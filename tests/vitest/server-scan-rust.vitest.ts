@@ -19,7 +19,7 @@ const VULNERABLE_RUST = `
 use std::process::Command;
 
 // Hardcoded API key — should be read from env
-let api_key = "sk_live_abcdef1234567890abcdef1234";
+let api_key = "sk_live_FAKE_TEST_FIXTURE_NOT_REAL";
 
 // Insecure random for session token generation
 let token: u64 = rand::random();

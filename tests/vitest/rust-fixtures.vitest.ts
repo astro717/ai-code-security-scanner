@@ -120,7 +120,7 @@ describe('PATH_TRAVERSAL', () => {
 
 describe('SECRET_HARDCODED', () => {
   it('fires on hardcoded api_key', () => {
-    const code = `let api_key = "sk_live_abcdef1234567890abcdef1234";`;
+    const code = `let api_key = "sk_live_FAKE_TEST_FIXTURE_NOT_REAL";`;
     expect(scan(code)).toContain('SECRET_HARDCODED');
   });
 

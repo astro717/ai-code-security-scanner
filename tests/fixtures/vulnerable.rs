@@ -22,7 +22,7 @@ fn main() {
     std::mem::forget(s);
 
     // SECRET_HARDCODED: hardcoded API key
-    let api_key = "sk_live_abcdef1234567890abcdef1234";
+    let api_key = "sk_live_FAKE_TEST_FIXTURE_NOT_REAL";
 
     // SECRET_HARDCODED: hardcoded token assignment
     let token = "secret_token_abc123456789xyz";
