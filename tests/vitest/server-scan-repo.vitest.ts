@@ -15,6 +15,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../../src/server';
 import https from 'https';
+import { buildSARIF } from '../../src/scanner/sarif';
 
 // ── Vulnerable code fixture ───────────────────────────────────────────────────
 
@@ -231,7 +232,6 @@ describe('POST /scan-repo — detector coverage', () => {
 
 describe('POST /scan-repo — SARIF output format', () => {
   test('SARIF builder produces valid output from scan findings', () => {
-    const { buildSARIF } = require('../../src/scanner/sarif');
     const findings = scanResult?.body?.findings ?? [];
     const sarif = buildSARIF(findings, 'test-scan');
     expect(sarif.version).toBe('2.1.0');
@@ -241,7 +241,6 @@ describe('POST /scan-repo — SARIF output format', () => {
   });
 
   test('SARIF output contains results matching finding count', () => {
-    const { buildSARIF } = require('../../src/scanner/sarif');
     const findings = scanResult?.body?.findings ?? [];
     const sarif = buildSARIF(findings, 'test-scan');
     const results = sarif.runs[0]?.results ?? [];
@@ -249,7 +248,6 @@ describe('POST /scan-repo — SARIF output format', () => {
   });
 
   test('each SARIF result has ruleId, message, and location', () => {
-    const { buildSARIF } = require('../../src/scanner/sarif');
     const findings = scanResult?.body?.findings ?? [];
     const sarif = buildSARIF(findings, 'test-scan');
     for (const result of sarif.runs[0]?.results ?? []) {
