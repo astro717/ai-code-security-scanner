@@ -1,14 +1,68 @@
 # AI Code Security Scanner
 
+[![npm version](https://img.shields.io/npm/v/ai-code-security-scanner)](https://www.npmjs.com/package/ai-code-security-scanner)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/astro717/ai-code-security-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/astro717/ai-code-security-scanner/actions/workflows/ci.yml)
 
-AST-based security scanner for AI-generated code. Detects 32 vulnerability types across 8 languages: TypeScript, JavaScript, Python, Go, Java, C/C++, C#, Kotlin, and Ruby.
+AST-based security scanner for AI-generated code. Detects 43+ vulnerability types across 14 languages with auto-fix, 7 output formats, VS Code integration, and CI/CD support.
 
-## Quick Start
+## Try it instantly
 
 ```bash
-npm install
-npm run build      # compile TypeScript → dist/
+npx ai-sec-scan ./src
+```
+
+## Quickstart
+
+```bash
+# Install
+npm install -g ai-code-security-scanner
+
+# Scan a directory
+ai-sec-scan ./src
+
+# Scan and output JSON
+ai-sec-scan ./src --format json
+
+# Apply safe auto-fixes
+ai-sec-scan ./src --fix
+```
+
+## Supported Languages
+
+| Language | Detection | Auto-fix |
+|----------|-----------|----------|
+| TypeScript / JavaScript | ✓ | ✓ |
+| Python | ✓ | ✓ |
+| Go | ✓ | ✓ |
+| Java | ✓ | ✓ |
+| C# | ✓ | ✓ |
+| Ruby | ✓ | ✓ |
+| PHP | ✓ | ✓ |
+| Rust | ✓ | ✓ |
+| Swift | ✓ | ✓ |
+| Kotlin | ✓ | ✓ |
+| C / C++ | ✓ | ✓ |
+
+## CI Integration
+
+```yaml
+# .github/workflows/security-scan.yml
+name: Security Scan
+on: [push, pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npx ai-sec-scan ./src --format sarif --min-severity high
+        continue-on-error: true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: output.sarif
 ```
 
 ## Usage
