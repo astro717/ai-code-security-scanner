@@ -3,7 +3,7 @@
  *
  * Verifies that submitting PHP code with filename ending in .php is correctly
  * routed through the PHP scanner (php-parser.ts) and returns PHP-specific
- * findings (SQL_INJECTION, XSS, COMMAND_INJECTION, etc.).
+ * findings.
  *
  * Run with: npm run test:vitest
  */
@@ -12,62 +12,59 @@ import { describe, test, expect } from 'vitest';
 import request from 'supertest';
 import { app } from '../../src/server';
 
-// ── Vulnerable PHP fixture ──────────────────────────────────────────────────
-
+// ── Vulnerable PHP fixture ───────────────────────────────────────────────────
 const VULNERABLE_PHP = `<?php
-// SQL injection via string concatenation with superglobal
+// SQL injection via concatenation
 $result = mysqli_query($conn, "SELECT * FROM users WHERE id=" . $_GET['id']);
 
-// XSS via direct echo of user input
-echo $_POST['name'];
+// XSS via direct echo
+echo $_GET['name'];
 
-// Command injection via shell_exec with user input
-$output = shell_exec("ping -c 1 " . $_GET['host']);
+// Command injection via shell_exec
+shell_exec("ls " . $_GET['dir']);
 
-// Path traversal via file_get_contents with user input
-$data = file_get_contents($_REQUEST['file']);
+// Path traversal via file_get_contents
+$data = file_get_contents($_GET['file']);
 
 // Eval injection
 eval($_POST['code']);
 
 // Hardcoded secret
-$api_key = "sk-proj-abc123xyz456def789ghi012jkl345mno678";
+$password = "s3cretP@ss123!";
+
+// Insecure random
+$token = rand(100000, 999999);
 
 // Weak crypto
 $hash = md5($password);
+`;
 
-// Open redirect
-header("Location: " . $_GET['url']);
-?>`;
-
+// Clean PHP code — no findings expected
 const CLEAN_PHP = `<?php
-class UserService {
-    private PDO $db;
+// Safe SQL via prepared statement
+$stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+$stmt->execute([$id]);
 
-    public function __construct(PDO $db) {
-        $this->db = $db;
-    }
+// Safe output with escaping
+echo htmlspecialchars($name, ENT_QUOTES, 'UTF-8');
 
-    public function findById(int $id): ?array {
-        $stmt = $this->db->prepare("SELECT * FROM users WHERE id = :id");
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->execute();
-        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
-    }
+// Safe random
+$token = random_int(100000, 999999);
 
-    public function greet(string $name): string {
-        return "Hello, " . htmlspecialchars($name, ENT_QUOTES, 'UTF-8');
-    }
-}
-?>`;
+// Safe password hashing
+$hash = password_hash($password, PASSWORD_BCRYPT);
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// Static shell command
+shell_exec("ls -la /tmp");
+`;
+
+// ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('/scan with PHP files', () => {
   test('vulnerable PHP code returns findings with filename ending in .php', async () => {
     const res = await request(app).post('/scan').send({
       code: VULNERABLE_PHP,
-      filename: 'input.php',
+      filename: 'vulnerable.php',
     });
 
     expect(res.status).toBe(200);
@@ -77,17 +74,18 @@ describe('/scan with PHP files', () => {
 
     const types = new Set(body.findings.map((f) => f.type));
 
-    // The vulnerable fixture should trigger at least these PHP-detected types
     expect(types.has('SQL_INJECTION')).toBe(true);
     expect(types.has('XSS')).toBe(true);
     expect(types.has('COMMAND_INJECTION')).toBe(true);
+    expect(types.has('SECRET_HARDCODED')).toBe(true);
+    expect(types.has('INSECURE_RANDOM')).toBe(true);
     expect(types.has('WEAK_CRYPTO')).toBe(true);
   });
 
   test('clean PHP code returns zero findings', async () => {
     const res = await request(app).post('/scan').send({
       code: CLEAN_PHP,
-      filename: 'safe_service.php',
+      filename: 'safe.php',
     });
 
     expect(res.status).toBe(200);
@@ -120,5 +118,40 @@ describe('/scan with PHP files', () => {
     const body = res.body as { findings: unknown[]; summary: { total: number } };
     expect(typeof body.summary).toBe('object');
     expect(body.summary.total).toBeGreaterThan(0);
+  });
+
+  test('PHP eval injection is detected', async () => {
+    const evalCode = `<?php\neval($_POST['code']);`;
+    const res = await request(app).post('/scan').send({
+      code: evalCode,
+      filename: 'dynamic.php',
+    });
+
+    expect(res.status).toBe(200);
+    const body = res.body as { findings: Array<{ type: string }> };
+    const types = new Set(body.findings.map((f) => f.type));
+    expect(types.has('EVAL_INJECTION')).toBe(true);
+  });
+});
+
+// ── SSTI detection test ──────────────────────────────────────────────────────
+
+const SSTI_PHP = `<?php
+$twig->render($twig->createTemplate($_GET['tpl']));
+`;
+
+describe('/scan with PHP — SSTI detection', () => {
+  test('Twig createTemplate with user input is detected as SSTI', async () => {
+    const res = await request(app).post('/scan').send({
+      code: SSTI_PHP,
+      filename: 'template.php',
+    });
+
+    expect(res.status).toBe(200);
+    const body = res.body as { findings: Array<{ type: string; severity: string }> };
+    expect(Array.isArray(body.findings)).toBe(true);
+
+    const types = new Set(body.findings.map((f) => f.type));
+    expect(types.has('SSTI')).toBe(true);
   });
 });
