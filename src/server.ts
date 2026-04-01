@@ -721,6 +721,13 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
     return originalJson(body);
   }) as typeof res.json;
 
+  // Content-Type validation: only accept application/json
+  const contentType = req.headers['content-type'] ?? '';
+  if (!contentType.includes('application/json')) {
+    res.status(415).json({ error: 'Unsupported Media Type: Content-Type must be application/json' });
+    return;
+  }
+
   // ?sarif=true returns a SARIF 2.1.0 document instead of the default JSON shape.
   const sarifMode = req.query['sarif'] === 'true';
   // Explicit payload size guard (belt-and-suspenders on top of express.json limit)
@@ -843,6 +850,25 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
       res.status(400).json({
         error: `Unknown ignoreTypes: ${unknown.join(', ')}. Valid types: ${[...KNOWN_TYPES].sort().join(', ')}`,
       });
+      return;
+    }
+  }
+
+  // Validate webhookUrl: must be a valid https URL if provided
+  if (webhookUrl !== undefined) {
+    if (typeof webhookUrl !== 'string') {
+      res.status(400).json({ error: 'Invalid field: webhookUrl must be a string' });
+      return;
+    }
+    let parsedWebhookUrl: URL;
+    try {
+      parsedWebhookUrl = new URL(webhookUrl);
+    } catch {
+      res.status(400).json({ error: 'Invalid webhookUrl: must be a valid URL' });
+      return;
+    }
+    if (parsedWebhookUrl.protocol !== 'https:') {
+      res.status(400).json({ error: 'Invalid webhookUrl: only https:// URLs are accepted' });
       return;
     }
   }
@@ -1371,6 +1397,13 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
 // Returns: { fixes: FixResult[], diff: string, applied: number }
 
 app.post('/fix', scanLimiter, async (req, res): Promise<void> => {
+  // Content-Type validation: only accept application/json
+  const fixContentType = req.headers['content-type'] ?? '';
+  if (!fixContentType.includes('application/json')) {
+    res.status(415).json({ error: 'Unsupported Media Type: Content-Type must be application/json' });
+    return;
+  }
+
   const body = req.body as Record<string, unknown>;
 
   const code = body['code'];

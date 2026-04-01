@@ -1,6 +1,6 @@
 {
   "name": "ai-code-security-scanner",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "description": "AST-based security scanner for AI-generated code",
   "main": "dist/cli.js",
   "bin": {

@@ -80,18 +80,34 @@ export interface ScanSummary {
 }
 
 /**
- * Removes duplicate findings based on a stable key of (type, file, line, column).
- * When multiple detectors independently flag the same code location with the same
- * finding type, only the first occurrence is kept. Preserves original order.
+ * Deduplicates findings by composite key: file + line + type.
+ *
+ * When multiple detectors independently flag the same code location with the
+ * same vulnerability type, only the finding with the highest confidence score
+ * is kept (or the first one encountered when confidence is equal).
+ *
+ * This deliberately allows different types on the same line — a single line can
+ * legitimately have both SQL_INJECTION and XSS findings.
  */
 export function deduplicateFindings(findings: Finding[]): Finding[] {
-  const seen = new Set<string>();
-  return findings.filter((f) => {
-    const key = `${f.type}|${f.file ?? ''}|${f.line}|${f.column}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const bestByKey = new Map<string, Finding>();
+  for (const f of findings) {
+    const key = `${f.type}|${f.file ?? ''}|${f.line}`;
+    const existing = bestByKey.get(key);
+    if (!existing) {
+      bestByKey.set(key, f);
+    } else {
+      // Keep the finding with the higher confidence; ties go to the incumbent.
+      const existingConf = existing.confidence ?? 0;
+      const candidateConf = f.confidence ?? 0;
+      if (candidateConf > existingConf) {
+        bestByKey.set(key, f);
+      }
+    }
+  }
+  // Preserve the original relative order of surviving findings.
+  const survivors = new Set(bestByKey.values());
+  return findings.filter((f) => survivors.has(f));
 }
 
 export function summarize(findings: Finding[]): ScanSummary {
