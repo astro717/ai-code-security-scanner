@@ -1089,7 +1089,7 @@ async function collectFiles(
     if (isIgnoredByPatterns(item.path, ignorePatterns)) continue;
     if (item.type === 'file') {
       const ext = item.name.split('.').pop() ?? '';
-      if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'java', 'cs', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'rb'].includes(ext) && item.size <= 200 * 1024) {
+      if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'java', 'cs', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'rb', 'php', 'kt', 'kts', 'swift', 'rs'].includes(ext) && item.size <= 200 * 1024) {
         collected.push(item);
       }
     } else if (item.type === 'dir') {

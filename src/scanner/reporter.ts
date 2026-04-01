@@ -50,6 +50,7 @@ export const KNOWN_TYPES = new Set([
   'FORCE_UNWRAP',
   'UNSAFE_BLOCK',
   'MISSING_AUTH',
+  'CSRF',
 ]);
 
 export interface Finding {
