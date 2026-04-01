@@ -97,4 +97,14 @@ class VulnerableNetworkService {
             print(results as Any)
         }
     }
+
+    // FORCE_TRY — force-try will crash the app if the expression throws
+    func parseJSON(data: Data) -> Any {
+        let json = try! JSONSerialization.jsonObject(with: data, options: [])
+        return json
+    }
+
+    // FORCE_UNWRAP — implicitly unwrapped optional will crash if nil at access
+    var dataManager: DataManager!
+    var networkService: URLSession!
 }
