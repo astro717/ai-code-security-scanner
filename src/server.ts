@@ -494,7 +494,10 @@ const cacheFlushTimer = setInterval(() => {
 // Prevent the timer from keeping the process alive when tests shut down
 if (cacheFlushTimer.unref) cacheFlushTimer.unref();
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.CORS_ALLOWED_ORIGINS?.split(',') ?? ['http://localhost:5173', 'http://localhost:3001'],
+  credentials: true,
+}));
 
 // Limit request body to 500 KB. Express will automatically respond with 413
 // for bodies larger than this limit — but we also enforce it explicitly inside
@@ -1036,7 +1039,7 @@ app.post('/scan', scanLimiter, async (req, res): Promise<void> => {
 });
 
 // Helper: fetch JSON from GitHub Contents API
-const GITHUB_REQUEST_TIMEOUT_MS = 15000;
+const GITHUB_REQUEST_TIMEOUT_MS = 30000;
 
 function githubGet(url: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -1418,10 +1421,17 @@ app.post('/fix', scanLimiter, async (req, res): Promise<void> => {
     return;
   }
 
+  // Payload size guard: prevent DoS via large code strings
+  if (typeof code === 'string' && code.length > 500_000) {
+    res.status(413).json({ error: 'Payload too large' });
+    return;
+  }
+
+  // Write code to a temp file so applyFixes can read it
+  const os = await import('os');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-fix-'));
+
   try {
-    // Write code to a temp file so applyFixes can read it
-    const os = await import('os');
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-sec-fix-'));
     const tmpFile = path.join(tmpDir, path.basename(filename));
     fs.writeFileSync(tmpFile, code, 'utf-8');
 
@@ -1491,9 +1501,6 @@ app.post('/fix', scanLimiter, async (req, res): Promise<void> => {
       }
     }
 
-    // Clean up temp file
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
-
     res.json({
       fixes: fixResults.map((r) => ({
         type: r.finding.type,
@@ -1511,6 +1518,13 @@ app.post('/fix', scanLimiter, async (req, res): Promise<void> => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: `Fix preview failed: ${msg}` });
+  } finally {
+    // Guaranteed cleanup of temp directory on all code paths
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore cleanup errors */
+    }
   }
 });
 
