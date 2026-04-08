@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import crypto from 'crypto';
 import fs from 'fs';
 import http from 'http';
@@ -494,6 +495,10 @@ const cacheFlushTimer = setInterval(() => {
 }, CACHE_FLUSH_INTERVAL_MS);
 // Prevent the timer from keeping the process alive when tests shut down
 if (cacheFlushTimer.unref) cacheFlushTimer.unref();
+
+// Security response headers: Content-Security-Policy, X-Frame-Options,
+// X-Content-Type-Options, Strict-Transport-Security, Referrer-Policy, etc.
+app.use(helmet());
 
 app.use(cors({
   origin: process.env.CORS_ALLOWED_ORIGINS?.split(',') ?? ['http://localhost:5173', 'http://localhost:3001'],
