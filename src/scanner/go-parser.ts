@@ -228,6 +228,97 @@ const GO_PATTERNS: GoPattern[] = [
   },
 ];
 
+// ── Stateful MISSING_AUTH detector for Go (net/http) ─────────────────────────
+//
+// Strategy: track http.HandleFunc / http.Handle / mux.HandleFunc registrations,
+// then scan the handler function body for auth guard calls. If the handler
+// accesses r.Body / r.FormValue / r.URL.Query and has no auth check, flag it.
+
+const GO_HANDLE_FUNC = /\b(?:http\.HandleFunc|mux\.HandleFunc|router\.HandleFunc|r\.HandleFunc|http\.Handle)\s*\(/;
+const GO_AUTH_GUARD = /\b(?:verifyToken|checkAuth|requireAuth|authMiddleware|ValidateJWT|validateToken|getUser|authenticate|isAuthenticated|jwtMiddleware|bearerAuth|GetUserFromContext|userFromContext|UserFromContext|r\.Context\(\)\.Value\s*\(\s*(?:userKey|authKey|tokenKey))\b/;
+const GO_REQUEST_DATA = /\b(?:r\.(?:Body|FormValue|PostFormValue|URL\.Query|Header\.Get|Cookie)|json\.NewDecoder\s*\(\s*r\.Body|ioutil\.ReadAll\s*\(\s*r\.Body|io\.ReadAll\s*\(\s*r\.Body)\b/;
+// Matches a Go func literal: `func(w http.ResponseWriter, r *http.Request)` or `func(w, r ...)`
+const GO_HANDLER_FUNC_LITERAL = /\bfunc\s*\(\s*\w+\s+http\.ResponseWriter\s*,\s*\w+\s+\*http\.Request\s*\)/;
+const GO_NAMED_FUNC_DEF = /^func\s+(\w+)\s*\(\s*\w+\s+http\.ResponseWriter\s*,\s*\w+\s+\*http\.Request\s*\)/;
+
+function detectMissingAuthGo(lines: string[], filePath: string): Finding[] {
+  const findings: Finding[] = [];
+
+  let inHandlerBody = false;
+  let handlerBraceDepth = 0;
+  let handlerStartLine = 0;
+  let handlerHasAuth = false;
+  let handlerHasRequestData = false;
+  let firstRequestDataLine = 0;
+
+  function flushHandler(lineNum: number): void {
+    if (!inHandlerBody) return;
+    if (!handlerHasAuth && handlerHasRequestData) {
+      findings.push({
+        type: 'MISSING_AUTH',
+        severity: 'high',
+        line: firstRequestDataLine,
+        column: 0,
+        snippet: (lines[firstRequestDataLine - 1] ?? '').trim().slice(0, 100),
+        message:
+          'http.HandleFunc handler accesses request data (r.Body, r.FormValue, r.URL.Query, etc.) ' +
+          'without an authentication guard. Add token validation or a middleware that checks credentials ' +
+          'before reaching this handler.',
+        confidence: 0.80,
+        file: filePath,
+      });
+    }
+    inHandlerBody = false;
+    handlerBraceDepth = 0;
+    handlerStartLine = 0;
+    handlerHasAuth = false;
+    handlerHasRequestData = false;
+    firstRequestDataLine = 0;
+    void lineNum;
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    if (trimmed.startsWith('//')) continue;
+
+    const openBraces = (line.match(/\{/g) ?? []).length;
+    const closeBraces = (line.match(/\}/g) ?? []).length;
+
+    if (inHandlerBody) {
+      handlerBraceDepth += openBraces - closeBraces;
+      if (handlerBraceDepth <= 0) {
+        flushHandler(i + 1);
+      } else {
+        if (GO_AUTH_GUARD.test(line)) handlerHasAuth = true;
+        if (GO_REQUEST_DATA.test(line) && !handlerHasRequestData) {
+          handlerHasRequestData = true;
+          firstRequestDataLine = i + 1;
+        }
+      }
+    }
+
+    // Detect entry into a handler: inline func literal after HandleFunc(...)
+    if (GO_HANDLE_FUNC.test(line) && GO_HANDLER_FUNC_LITERAL.test(line)) {
+      flushHandler(i + 1);
+      inHandlerBody = true;
+      handlerBraceDepth = openBraces - closeBraces;
+      handlerStartLine = i + 1;
+    }
+    // Detect top-level named handler function matching the http.HandlerFunc signature
+    else if (!inHandlerBody && GO_NAMED_FUNC_DEF.test(line)) {
+      flushHandler(i + 1);
+      inHandlerBody = true;
+      handlerBraceDepth = openBraces - closeBraces;
+      handlerStartLine = i + 1;
+    }
+  }
+
+  flushHandler(lines.length);
+
+  return findings;
+}
+
 /**
  * Scans a parsed Go source for security vulnerabilities using pattern matching.
  * Returns findings in the same Finding format as JS/TS and Python detectors.
@@ -296,6 +387,9 @@ export function scanGo(result: GoParseResult): Finding[] {
       }
     }
   });
+
+  // ── Stateful MISSING_AUTH detection ────────────────────────────────────────
+  findings.push(...detectMissingAuthGo(result.lines, result.filePath));
 
   return findings;
 }
