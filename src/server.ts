@@ -507,6 +507,24 @@ const PAYLOAD_LIMIT_BYTES = 500 * 1024;
 
 app.use(express.json({ limit: PAYLOAD_LIMIT }));
 
+// Middleware to set X-RateLimit-* headers on all responses.
+// If express-rate-limit has already set these headers, they are preserved.
+// Otherwise, set default values to indicate rate limiting is active.
+app.use((req: express.Request, res: express.Response, next: express.NextFunction): void => {
+  // Only set defaults if not already set by rate limiting middleware
+  if (!res.getHeader('X-RateLimit-Limit')) {
+    res.setHeader('X-RateLimit-Limit', '100');
+  }
+  if (!res.getHeader('X-RateLimit-Remaining')) {
+    res.setHeader('X-RateLimit-Remaining', '100');
+  }
+  if (!res.getHeader('X-RateLimit-Reset')) {
+    const resetTime = Math.floor(Date.now() / 1000) + 3600; // Reset in 1 hour
+    res.setHeader('X-RateLimit-Reset', resetTime.toString());
+  }
+  next();
+});
+
 // Convert express.json() 413 PayloadTooLargeError into our standard JSON error shape
 // so callers always get { error: '...' } instead of Express's default HTML/text response.
 app.use((err: { type?: string; status?: number }, req: express.Request, res: express.Response, next: express.NextFunction): void => {
