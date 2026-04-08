@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-04-08
+
+### Added
+
+- **MISSING_AUTH detector** for Python (Flask/FastAPI) and Go (`http.HandleFunc`) — stateful multi-decorator analysis
+- **Confidence scores** on all 17 JS/TS detectors (`confidence` field [0.0–1.0])
+- **Helmet.js** security response headers on API server (`X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security`, etc.)
+- **`MAX_CACHE_ENTRIES` env var** — configurable scan cache size limit (default: `10000`)
+- **Atomic writes** in `scan-cache.ts` — prevents partial cache corruption on process exit
+- **Rate-limit headers** (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`) on all API responses
+- **867 tests** across 57 test files
+
+### Changed
+
+- `package.json` version bumped to `1.0.0` — first stable public release
+
 ## [0.9.0] — 2026-04-01
 
 ### Added
@@ -42,5 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nothing — this is the first versioned release
 
-[Unreleased]: https://github.com/astro717/ai-code-security-scanner/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/astro717/ai-code-security-scanner/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/astro717/ai-code-security-scanner/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/astro717/ai-code-security-scanner/releases/tag/v0.9.0

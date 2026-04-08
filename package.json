@@ -1,7 +1,33 @@
 {
   "name": "ai-code-security-scanner",
   "version": "1.0.0",
-  "description": "AST-based security scanner for AI-generated code",
+  "description": "Static security scanner for 14 languages — OWASP Top 10, 43+ vulnerability types, zero config. CLI + API + VS Code.",
+  "author": "astro717",
+  "homepage": "https://github.com/astro717/ai-code-security-scanner#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/astro717/ai-code-security-scanner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/astro717/ai-code-security-scanner/issues"
+  },
+  "keywords": [
+    "security",
+    "static-analysis",
+    "owasp",
+    "vulnerability",
+    "scanner",
+    "cli",
+    "typescript",
+    "javascript",
+    "python",
+    "go",
+    "java",
+    "sarif",
+    "sast",
+    "code-security",
+    "devsecops"
+  ],
   "main": "dist/cli.js",
   "bin": {
     "ai-sec-scan": "dist/cli.js"

@@ -1,10 +1,25 @@
 # AI Code Security Scanner
 
 [![npm version](https://img.shields.io/npm/v/ai-code-security-scanner)](https://www.npmjs.com/package/ai-code-security-scanner)
+[![npm downloads](https://img.shields.io/npm/dm/ai-code-security-scanner)](https://www.npmjs.com/package/ai-code-security-scanner)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/astro717/ai-code-security-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/astro717/ai-code-security-scanner/actions/workflows/ci.yml)
 
-AST-based security scanner for AI-generated code. Detects 43+ vulnerability types across 14 languages with auto-fix, 7 output formats, VS Code integration, and CI/CD support.
+**Static security analysis for 14 languages — OWASP Top 10, 43+ vulnerability types, zero config.**
+
+Point it at any codebase and get findings in seconds. No accounts, no setup, no configuration files required.
+
+```bash
+npx ai-code-security-scanner ./src
+```
+
+---
+
+## Why
+
+AI-generated code ships fast — but it reproduces the same security mistakes at scale: SQL injection via f-strings, hardcoded secrets, path traversal from unsanitized inputs. This scanner catches them across every language your stack touches, before they reach production.
+
+---
 
 ## Try it instantly
 
@@ -12,21 +27,16 @@ AST-based security scanner for AI-generated code. Detects 43+ vulnerability type
 npx ai-code-security-scanner ./src
 ```
 
-## Quickstart
+## Install
 
 ```bash
-# Install
 npm install -g ai-code-security-scanner
 
-# Scan a directory
+# Then use the shorter alias:
 ai-sec-scan ./src
-
-# Scan and output JSON
-ai-sec-scan ./src --format json
-
-# Apply safe auto-fixes
-ai-sec-scan ./src --fix
 ```
+
+---
 
 ## Supported Languages
 
@@ -44,58 +54,45 @@ ai-sec-scan ./src --fix
 | Kotlin | ✓ | ✓ |
 | C / C++ | ✓ | ✓ |
 
-## CI Integration
-
-```yaml
-# .github/workflows/security-scan.yml
-name: Security Scan
-on: [push, pull_request]
-jobs:
-  scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - run: npx ai-code-security-scanner ./src --format sarif --min-severity high
-        continue-on-error: true
-      - uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: output.sarif
-```
+---
 
 ## Usage
 
 ### CLI
 
 ```bash
-# Scan a file
-npx ai-code-security-scanner src/app.ts
-
 # Scan a directory
-npx ai-code-security-scanner ./src
+ai-sec-scan ./src
+
+# Scan a single file
+ai-sec-scan src/app.ts
 
 # JSON output
-npx ai-code-security-scanner ./src --json
+ai-sec-scan ./src --format json
 
-# SARIF 2.1.0 output (for GitHub Security tab / CI artifacts)
-npx ai-code-security-scanner ./src --sarif
+# SARIF 2.1.0 (GitHub Security tab / CI artifacts)
+ai-sec-scan ./src --format sarif
 
-# Filter by minimum severity to report
-npx ai-code-security-scanner ./src --severity high
+# HTML report (open in browser)
+ai-sec-scan ./src --format html --output report.html
 
-# Set minimum severity that triggers a non-zero exit code
-npx ai-code-security-scanner ./src --min-severity critical
+# Filter by minimum severity
+ai-sec-scan ./src --severity high
 
-# Exclude paths matching a glob (repeatable)
-npx ai-code-security-scanner . --ignore '**/node_modules/**' --ignore 'dist/**' --ignore '**/*.test.ts'
+# Set the severity that triggers a non-zero exit code
+ai-sec-scan ./src --min-severity critical
+
+# Apply auto-fixes
+ai-sec-scan ./src --fix
+
+# Exclude paths (repeatable)
+ai-sec-scan . --ignore '**/node_modules/**' --ignore 'dist/**'
+
+# Watch mode — re-scans on file changes
+ai-sec-scan ./src --watch
 
 # Use a config file
-npx ai-code-security-scanner ./src --config .ai-sec-scan.json
-
-# Watch mode — re-scans on file changes, prints a diff of new/resolved findings
-npx ai-code-security-scanner ./src --watch
+ai-sec-scan ./src --config .ai-sec-scan.json
 ```
 
 #### CLI flags
@@ -103,11 +100,13 @@ npx ai-code-security-scanner ./src --watch
 | Flag | Description |
 |------|-------------|
 | `[path]` | File or directory to scan. Defaults to `.` |
-| `--json` | Output as JSON |
-| `--sarif` | Output as SARIF 2.1.0 |
-| `--format <text\|json\|sarif>` | Explicit format selector (overrides `--json` / `--sarif`) |
-| `--severity <level>` | Minimum severity to include in output (`critical\|high\|medium\|low`). Default: `low` |
+| `--json` | Output as JSON (shorthand for `--format json`) |
+| `--sarif` | Output as SARIF 2.1.0 (shorthand for `--format sarif`) |
+| `--format <fmt>` | `text` \| `json` \| `sarif` \| `html` \| `junit` \| `markdown` \| `sonarqube` |
+| `--severity <level>` | Minimum severity to include (`critical\|high\|medium\|low`). Default: `low` |
 | `--min-severity <level>` | Severity that triggers a non-zero exit code. Default: `high` |
+| `--fix` | Apply safe auto-fixes for supported finding types |
+| `--output <path>` | Write output to a file instead of stdout |
 | `--ignore <glob>` | Exclude matching paths (repeatable) |
 | `--config <path>` | Path to a `.ai-sec-scan.json` config file |
 | `--watch` | Watch for file changes and print a live diff of findings |
@@ -128,15 +127,15 @@ Place a `.ai-sec-scan.json` in your project root (or pass `--config`):
 | Key | Type | Description |
 |-----|------|-------------|
 | `severity` | `string` | Minimum severity to include (`critical` \| `high` \| `medium` \| `low`). Default: `low` |
-| `format` | `string` | Default output format (`text` \| `json` \| `sarif` \| `html` \| `junit`). Default: `text` |
-| `fix` | `boolean` | Apply auto-fixes for supported finding types (equivalent to `--fix` on every run). Default: `false` |
-| `ignore` | `string[]` | Glob patterns to exclude from scanning (merged with `--ignore` flags). |
+| `format` | `string` | Output format. Default: `text` |
+| `fix` | `boolean` | Apply auto-fixes on every run. Default: `false` |
+| `ignore` | `string[]` | Glob patterns to exclude (merged with `--ignore` flags) |
 
 CLI flags override config file values.
 
 #### Ignore file (`.aiscanner`)
 
-Create a `.aiscanner` file in your project root (gitignore-style). Each non-comment, non-empty line is a glob pattern:
+Create a `.aiscanner` file in your project root (gitignore-style):
 
 ```
 # ignore generated files
@@ -145,19 +144,18 @@ coverage/**
 **/*.min.js
 ```
 
-Patterns from `.aiscanner` are merged with `--ignore` flags (CLI takes precedence).
+---
 
 ### API Server
 
 ```bash
-npm run dev:server   # starts on http://localhost:3001
-```
+# Start the server
+ai-sec-scan server
 
-```bash
 # Health check
 curl http://localhost:3001/health
 
-# Scan code snippet
+# Scan a code snippet
 curl -X POST http://localhost:3001/scan \
   -H "Content-Type: application/json" \
   -d '{"code": "const password = \"hunter2\""}'
@@ -168,13 +166,9 @@ curl -X POST http://localhost:3001/scan \
   -d '{"code": "eval(userInput);", "aiExplain": true}'
 ```
 
-#### API authentication
+#### Authentication
 
-When `SERVER_API_KEY` is set, every request (except `GET /health`) must include:
-
-```
-Authorization: Bearer <your-server-api-key>
-```
+Set `SERVER_API_KEY` to require a Bearer token on all requests (except `/health`):
 
 ```bash
 export SERVER_API_KEY=my-secret-key
@@ -185,124 +179,136 @@ curl -X POST http://localhost:3001/scan \
   -d '{"code": "const pw = \"hunter2\""}'
 ```
 
-Requests without a valid token receive `401 Unauthorized`.
+---
 
-### Web UI
+### CI Integration
 
-```bash
-cd web && npm install && npm run dev
+Add to any GitHub Actions workflow:
+
+```yaml
+# .github/workflows/security-scan.yml
+name: Security Scan
+on: [push, pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npx ai-code-security-scanner ./src --format sarif --min-severity high
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: output.sarif
+        if: always()
 ```
 
-Open http://localhost:5173 — paste code in the editor, click **Scan Code**.
-
-Set `VITE_SCANNER_URL` to point to a remote server (defaults to `http://localhost:3001`):
-
-```bash
-VITE_SCANNER_URL=https://my-scanner.example.com npm run dev
-```
-
-### VS Code Extension
-
-The extension in `vscode-extension/` scans on every file save and shows inline diagnostics.
-
-**Configuration** (`File → Preferences → Settings → AI Code Security Scanner`):
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `aiSecScan.serverUrl` | `http://localhost:3001` | Scanner server URL |
-| `aiSecScan.apiKey` | `""` | Bearer token — required when `SERVER_API_KEY` is set on the server |
-| `aiSecScan.autoScanOnSave` | `true` | Scan active file on save |
-
-## Tests
-
-```bash
-npx ts-node tests/scanner.test.ts
-```
-
-## Detectors
-
-The scanner ships 32 finding types across 8 languages (TypeScript/JavaScript, Python, Go, Java, C/C++, C#, Kotlin, Ruby):
-
-| # | Finding type | Severity | Languages | Description |
-|---|-------------|----------|-----------|-------------|
-| 1 | `SECRET_HARDCODED` | critical | all | API keys, tokens, and passwords assigned to variables |
-| 2 | `SQL_INJECTION` | critical | JS/TS, Python, Go, Java, Ruby | String concatenation or template literals inside SQL queries |
-| 3 | `SQL_INJECTION_CS` | critical | C# | SqlCommand built with string concatenation from user input |
-| 4 | `XSS` | critical | JS/TS | Unsanitised user input in `innerHTML`, `dangerouslySetInnerHTML`, or `document.write` |
-| 5 | `SHELL_INJECTION` | high | JS/TS | `exec()` / `execSync()` with template literals or concatenated user input |
-| 6 | `EVAL_INJECTION` | high | JS/TS, Python | `eval()` or `new Function()` with dynamic arguments |
-| 7 | `PATH_TRAVERSAL` | high | JS/TS, Python, Go | `fs` calls combined with `path.join` using unsanitised user input |
-| 8 | `PATH_TRAVERSAL_CS` | high | C# | `File.*` or `Path.Combine` with user-controlled path components |
-| 9 | `PROTOTYPE_POLLUTION` | high | JS/TS | `Object.assign`, `_.merge`, or bracket notation writes that can pollute `__proto__` |
-| 10 | `INSECURE_RANDOM` | medium | JS/TS | `Math.random()` used in security-sensitive contexts (tokens, IDs, passwords) |
-| 11 | `OPEN_REDIRECT` | medium | JS/TS | `res.redirect()` with dynamic, unvalidated destination |
-| 12 | `SSRF` | high | JS/TS, Python, Go | `fetch()`, `axios`, or `http.get()` with dynamic, user-controlled URLs |
-| 13 | `COMMAND_INJECTION` | high | JS/TS | `spawn()` / `spawnSync()` with a dynamic, user-controlled command string |
-| 14 | `COMMAND_INJECTION_C` | critical | C/C++ | `system()` / `popen()` with user-controlled command string |
-| 15 | `COMMAND_INJECTION_CS` | critical | C# | `Process.Start()` / `ProcessStartInfo` with user-controlled command |
-| 16 | `CORS_MISCONFIGURATION` | high | JS/TS | Wildcard origin with `credentials: true`, or reflected `req.headers.origin` |
-| 17 | `JWT_HARDCODED_SECRET` | critical | JS/TS | `jwt.sign()` with a hardcoded string secret |
-| 18 | `JWT_WEAK_SECRET` | high | JS/TS | `jwt.sign()` with a short (< 32 char) secret |
-| 19 | `JWT_NONE_ALGORITHM` | high | JS/TS | `jwt.verify()` without an algorithms whitelist, or with `algorithms: ['none']` |
-| 20 | `JWT_DECODE_NO_VERIFY` | high | JS/TS | `jwt.decode()` used instead of `jwt.verify()` — signature not checked |
-| 21 | `REDOS` | medium | JS/TS | `new RegExp()` constructed from dynamic (user-controlled) input |
-| 22 | `WEAK_CRYPTO` | medium | JS/TS, Python | `crypto.createHash()` using MD5, SHA-1, MD4, or other weak algorithms |
-| 23 | `UNSAFE_DESERIALIZATION` | critical | Python | `pickle.loads()` or equivalent with untrusted data |
-| 24 | `INSECURE_ASSERT` | medium | Python | Security check implemented with `assert`, which is stripped in optimised mode |
-| 25 | `INSECURE_BINDING` | medium | Python, Go | Server bound to `0.0.0.0`, exposing the service on all interfaces |
-| 26 | `XML_INJECTION` | high | Python, Java | XML parser configured without disabling external entities (XXE) |
-| 27 | `LDAP_INJECTION` | high | Python, Java | LDAP query built with string concatenation from user-controlled input |
-| 28 | `BUFFER_OVERFLOW` | critical | C/C++ | Unsafe buffer operations (`gets`, `strcpy`, `sprintf`) without bounds checking |
-| 29 | `FORMAT_STRING` | critical | C/C++ | Non-literal format string passed to `printf`/`fprintf` family |
-| 30 | `MASS_ASSIGNMENT` | high | Ruby | `permit(:all)` or unrestricted parameter binding in Rails controllers |
-| 31 | `SSTI` | critical | Python | Template string rendered from user-controlled input (Jinja2, Mako) |
-| 32 | `INSECURE_SHARED_PREFS` | medium | Kotlin/Android | Sensitive data written to `SharedPreferences` without encryption |
-| 33 | `WEBVIEW_LOAD_URL` | high | Kotlin/Android | `WebView.loadUrl()` called with user-controlled input |
-| 34 | `PERFORMANCE_N_PLUS_ONE` | medium | Kotlin | ORM or DB query executed inside a loop — N+1 query pattern |
-| — | `UNSAFE_DEPENDENCY` | medium | JS/TS | `package.json` dependency pinned to `*`, `latest`, or `x`; or missing lockfile |
-| — | `VULNERABLE_DEPENDENCY` | critical/high/medium | JS/TS | Known-vulnerable package version (CVE checked against a built-in list) |
-
-## Use in CI
-
-The scanner ships a reusable GitHub Actions workflow. Call it from any workflow:
+Or use the reusable workflow:
 
 ```yaml
 jobs:
   security:
-    uses: ./.github/workflows/security-scan.yml
+    uses: astro717/ai-code-security-scanner/.github/workflows/security-scan.yml@v1
     with:
-      path: src/          # directory or file to scan (default: .)
-      fail-on: high       # critical | high | any (default: high)
+      path: src/
+      fail-on: high
 ```
 
-After the job completes:
-- **SARIF report** is uploaded to GitHub Security tab (Code Scanning) and as a downloadable artifact
-- **JSON report** is saved as a downloadable artifact
-- Outputs `findings-count` and `critical-count` for downstream steps
+---
 
-### Inputs
+### VS Code Extension
 
-| Input | Default | Description |
-|-------|---------|-------------|
-| `path` | `.` | File or directory to scan |
-| `fail-on` | `high` | Minimum severity that causes the job to fail |
+Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=rouco-industries.ai-code-security-scanner) — scans on every file save and shows inline diagnostics.
 
-### Environment variables
+**Settings** (`File → Preferences → Settings → AI Code Security Scanner`):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `aiSecScan.serverUrl` | `http://localhost:3001` | Scanner server URL |
+| `aiSecScan.apiKey` | `""` | Bearer token for authenticated servers |
+| `aiSecScan.autoScanOnSave` | `true` | Scan active file on save |
+
+---
+
+## Detectors
+
+43+ finding types covering the full [OWASP Top 10 2021](https://owasp.org/Top10/):
+
+| Finding type | Severity | Languages |
+|-------------|----------|-----------|
+| `SECRET_HARDCODED` | critical | all |
+| `SQL_INJECTION` | critical | JS/TS, Python, Go, Java, Ruby, PHP |
+| `SQL_INJECTION_CS` | critical | C# |
+| `XSS` | critical | JS/TS, PHP |
+| `SSTI` | critical | Python |
+| `COMMAND_INJECTION` | high | JS/TS |
+| `COMMAND_INJECTION_C` | critical | C/C++ |
+| `COMMAND_INJECTION_CS` | critical | C# |
+| `COMMAND_INJECTION_GO` | high | Go |
+| `SHELL_INJECTION` | high | JS/TS |
+| `EVAL_INJECTION` | high | JS/TS, Python |
+| `PATH_TRAVERSAL` | high | JS/TS, Python, Go |
+| `PATH_TRAVERSAL_CS` | high | C# |
+| `PROTOTYPE_POLLUTION` | high | JS/TS |
+| `SSRF` | high | JS/TS, Python, Go, C# |
+| `OPEN_REDIRECT` | medium | JS/TS, C# |
+| `CORS_MISCONFIGURATION` | high | JS/TS |
+| `JWT_HARDCODED_SECRET` | critical | JS/TS |
+| `JWT_WEAK_SECRET` | high | JS/TS |
+| `JWT_NONE_ALGORITHM` | high | JS/TS |
+| `JWT_DECODE_NO_VERIFY` | high | JS/TS |
+| `CSRF` | high | JS/TS |
+| `MISSING_AUTH` | high | Python, Go, C# |
+| `INSECURE_RANDOM` | medium | JS/TS, Python, C# |
+| `WEAK_CRYPTO` | medium | JS/TS, Python, C#, Rust |
+| `UNSAFE_DESERIALIZATION` | critical | Python, C#, Rust |
+| `INSECURE_ASSERT` | medium | Python |
+| `INSECURE_BINDING` | medium | Python, Go |
+| `XML_INJECTION` | high | Python, Java |
+| `LDAP_INJECTION` | high | Python, Java |
+| `BUFFER_OVERFLOW` | critical | C/C++, Rust |
+| `FORMAT_STRING` | critical | C/C++ |
+| `UNSAFE_BLOCK` | medium | C#, Rust |
+| `MASS_ASSIGNMENT` | high | Ruby |
+| `REDOS` | medium | JS/TS |
+| `INSECURE_SHARED_PREFS` | medium | Kotlin |
+| `WEBVIEW_LOAD_URL` | high | Kotlin |
+| `FORCE_UNWRAP` | medium | Swift |
+| `FORCE_TRY` | medium | Swift |
+| `PERFORMANCE_N_PLUS_ONE` | medium | C#, Kotlin |
+| `UNSAFE_DEPENDENCY` | medium | JS/TS |
+| `VULNERABLE_DEPENDENCY` | critical–medium | JS/TS |
+
+---
+
+## Environment variables
 
 | Variable | Description |
 |----------|-------------|
-| `GITHUB_TOKEN` | Used for GitHub Contents API when scanning repos (auto-provided by Actions) |
-| `ANTHROPIC_API_KEY` | Optional — enables AI explanations and fix suggestions via `aiExplain` flag |
-| `SERVER_API_KEY` | **Required in production** — Bearer token that callers must include in `Authorization: Bearer <key>`. If unset, server runs in open-access dev mode. |
-| `VITE_SCANNER_URL` | Web UI only — overrides the default scanner server URL (`http://localhost:3001`) |
+| `SERVER_API_KEY` | Bearer token for API server auth. If unset, server runs in open-access mode. |
+| `ANTHROPIC_API_KEY` | Enables AI-powered explanations and fix suggestions via `aiExplain: true`. |
+| `VITE_SCANNER_URL` | Web UI only — overrides the default scanner server URL (`http://localhost:3001`). |
+| `MAX_CACHE_ENTRIES` | Max number of files to keep in the scan cache. Default: `10000`. |
 
-## Publish to npm
+---
+
+## Tests
 
 ```bash
-npm publish          # runs tsc automatically via prepublishOnly
-npm publish --tag beta
+npm run test:vitest          # Run all 867 tests
+npm run test:vitest:server   # Server integration tests only
+npm run test:coverage        # Run with coverage report
 ```
 
-The `.npmignore` excludes `src/`, `web/`, `tests/`, and `*.map` files — only `dist/` is published.
+---
 
-Automated publishing via GitHub Actions is configured in `.github/workflows/publish.yml` — it triggers on GitHub releases and runs `npm publish` automatically.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, project structure, and guidelines for adding new detectors or languages.
+
+---
+
+## License
+
+[MIT](LICENSE)
