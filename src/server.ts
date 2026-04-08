@@ -40,6 +40,7 @@ import { parseSwiftCode, scanSwift } from './scanner/swift-parser';
 import { parseRustCode, scanRust } from './scanner/rust-parser';
 import { parsePHPCode, scanPHP } from './scanner/php-parser';
 import { initCache, getCachedFindings, setCachedFindings, persistCache } from './scanner/scan-cache';
+import { applyFixes, FixResult } from './scanner/fixer.js';
 
 // ── Request body schema validation ───────────────────────────────────────────
 
