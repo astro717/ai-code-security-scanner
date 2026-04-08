@@ -53,3 +53,12 @@ api_key = "sk-abcdef1234567890abcdef1234567890"
 import xml.etree.ElementTree as ET
 def parse_xml(data):
     tree = ET.fromstring(data)
+
+# MISSING_AUTH: Flask route accessing request.json without @login_required
+from flask import Flask, request as flask_request
+app = Flask(__name__)
+
+@app.route('/api/update', methods=['POST'])
+def update_profile():
+    payload = flask_request.json
+    return payload

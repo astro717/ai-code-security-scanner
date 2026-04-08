@@ -59,6 +59,13 @@ describe('Go scanner — vulnerable.go fixture', () => {
     expect(types.has('OPEN_REDIRECT')).toBe(true);
   });
 
+  test('detects MISSING_AUTH — http.HandleFunc handler with no auth guard', () => {
+    expect(types.has('MISSING_AUTH')).toBe(true);
+    const hits = findings.filter((f) => f.type === 'MISSING_AUTH');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('high');
+  });
+
   test('every finding has a line number, severity, and message', () => {
     for (const f of findings) {
       expect(typeof f.line).toBe('number');
