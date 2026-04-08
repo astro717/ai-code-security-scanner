@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 function runFix(filePath: string): ReturnType<typeof spawnSync> {
-  return spawnSync(process.execPath, [DIST_CLI, filePath, '--fix'], {
+  return spawnSync(process.execPath, [DIST_CLI, filePath, '--fix', '--yes'], {
     cwd: PROJECT_ROOT,
     encoding: 'utf-8',
     timeout: 30_000,

@@ -79,6 +79,17 @@ const PHP_PATTERNS: PHPPattern[] = [
       'SQL statement concatenated with user-controlled superglobal. Use prepared statements.',
     confidence: 0.9,
   },
+  {
+    type: 'SQL_INJECTION',
+    severity: 'critical',
+    // Matches mysqli_query with string concatenation of any variable (broader heuristic)
+    // e.g. mysqli_query($conn, "SELECT ... WHERE id=" . $id)
+    pattern: /(?:mysqli_query|->query)\s*\(\s*\$\w+\s*,\s*["'].*[^=!<>]\.\s*\$/,
+    message:
+      'SQL query built with string concatenation — variable may contain user input. ' +
+      'Use prepared statements with parameterised queries (mysqli_prepare or PDO::prepare).',
+    confidence: 0.75,
+  },
 
   // ── XSS ─────────────────────────────────────────────────────────────────────
   {
@@ -93,7 +104,8 @@ const PHP_PATTERNS: PHPPattern[] = [
   {
     type: 'XSS',
     severity: 'high',
-    pattern: /\b(?:echo|print)\s+.*\$_(?:GET|POST|REQUEST|COOKIE)/,
+    // Negative lookahead: skip lines where the superglobal is wrapped in htmlspecialchars/htmlentities/strip_tags
+    pattern: /\b(?:echo|print)\s+(?!.*htmlspecialchars|.*htmlentities|.*strip_tags).*\$_(?:GET|POST|REQUEST|COOKIE)/,
     message:
       'User input from superglobal included in echo/print output. ' +
       'Escape with htmlspecialchars() before rendering to prevent XSS.',
@@ -366,6 +378,129 @@ function detectN1(lines: string[], filePath: string): Finding[] {
   return findings;
 }
 
+// ── Stateful MISSING_AUTH detector for PHP ───────────────────────────────────
+//
+// Detects two patterns:
+//  1. function body that accesses $_POST/$_GET without session_start or auth guard
+//  2. REQUEST_METHOD check block that writes to DB/executes without auth guard
+
+const AUTH_GUARD_PATTERN = /\b(?:session_start|isAuthenticated|checkAuth|requireLogin|auth_check|is_logged_in|verify_token|authenticate|authorize)\s*\(|\$_SESSION\s*\[(?:['"])?(?:user|uid|user_id|logged_in|auth)/;
+const SENSITIVE_ACCESS_PATTERN = /\$_(?:POST|GET|REQUEST|COOKIE)\s*\[/;
+const DB_WRITE_PATTERN = /\b(?:mysqli_query|->query|->execute|->save|->delete|->update)\s*\(/;
+const REQUEST_METHOD_CHECK_PATTERN = /\$_SERVER\s*\[['"]REQUEST_METHOD['"]\]/;
+
+function detectMissingAuthPHP(lines: string[], filePath: string): Finding[] {
+  const findings: Finding[] = [];
+
+  // Pattern 1: function block accessing sensitive data without auth guard
+  let inFunction = false;
+  let funcBraceDepth = 0;
+  let funcStartLine = 0;
+  let funcHasAuthGuard = false;
+  let funcHasSensitiveAccess = false;
+  let firstSensitiveLine = 0;
+
+  // Pattern 2: REQUEST_METHOD check block without auth guard
+  let inReqMethodBlock = false;
+  let reqMethodBraceDepth = 0;
+  let reqMethodStartLine = 0;
+  let reqMethodHasAuth = false;
+  let reqMethodHasWrite = false;
+  let reqMethodFirstWriteLine = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+
+    // Skip comments
+    if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+
+    // Track function boundaries
+    if (!inFunction && /\bfunction\s+\w+\s*\(/.test(line)) {
+      inFunction = true;
+      funcStartLine = i + 1;
+      funcBraceDepth = 0;
+      funcHasAuthGuard = false;
+      funcHasSensitiveAccess = false;
+      firstSensitiveLine = 0;
+    }
+
+    // Track REQUEST_METHOD check blocks
+    if (!inReqMethodBlock && REQUEST_METHOD_CHECK_PATTERN.test(line)) {
+      inReqMethodBlock = true;
+      reqMethodStartLine = i + 1;
+      reqMethodBraceDepth = 0;
+      reqMethodHasAuth = false;
+      reqMethodHasWrite = false;
+      reqMethodFirstWriteLine = 0;
+    }
+
+    // Count braces for function scope
+    if (inFunction) {
+      for (const char of line) {
+        if (char === '{') funcBraceDepth++;
+        if (char === '}') funcBraceDepth--;
+      }
+      if (AUTH_GUARD_PATTERN.test(line)) funcHasAuthGuard = true;
+      if (SENSITIVE_ACCESS_PATTERN.test(line) && !funcHasSensitiveAccess) {
+        funcHasSensitiveAccess = true;
+        firstSensitiveLine = i + 1;
+      }
+      if (funcBraceDepth <= 0 && funcStartLine > 0) {
+        if (funcHasSensitiveAccess && !funcHasAuthGuard) {
+          findings.push({
+            type: 'MISSING_AUTH',
+            severity: 'high',
+            line: firstSensitiveLine,
+            column: 0,
+            snippet: (lines[firstSensitiveLine - 1] ?? '').trim().slice(0, 100),
+            message:
+              'Function accesses user-controlled input ($_POST/$_GET) without a prior authentication ' +
+              'guard (session_start() + session check, or equivalent). Add an auth check before processing user data.',
+            confidence: 0.8,
+            file: filePath,
+          });
+        }
+        inFunction = false;
+        funcStartLine = 0;
+      }
+    }
+
+    // Count braces for REQUEST_METHOD block
+    if (inReqMethodBlock) {
+      for (const char of line) {
+        if (char === '{') reqMethodBraceDepth++;
+        if (char === '}') reqMethodBraceDepth--;
+      }
+      if (AUTH_GUARD_PATTERN.test(line)) reqMethodHasAuth = true;
+      if (DB_WRITE_PATTERN.test(line) && !reqMethodHasWrite) {
+        reqMethodHasWrite = true;
+        reqMethodFirstWriteLine = i + 1;
+      }
+      if (reqMethodBraceDepth <= 0 && reqMethodStartLine > 0) {
+        if (reqMethodHasWrite && !reqMethodHasAuth) {
+          findings.push({
+            type: 'MISSING_AUTH',
+            severity: 'high',
+            line: reqMethodFirstWriteLine,
+            column: 0,
+            snippet: (lines[reqMethodFirstWriteLine - 1] ?? '').trim().slice(0, 100),
+            message:
+              'REQUEST_METHOD check triggers a database write without an authentication guard. ' +
+              'Verify the user is authenticated before processing state-changing requests.',
+            confidence: 0.8,
+            file: filePath,
+          });
+        }
+        inReqMethodBlock = false;
+        reqMethodStartLine = 0;
+      }
+    }
+  }
+
+  return findings;
+}
+
 /**
  * Scans a parsed PHP source for security vulnerabilities using pattern matching.
  * Returns findings in the same Finding format as other language detectors.
@@ -404,6 +539,9 @@ export function scanPHP(result: PHPParseResult): Finding[] {
 
   // Stateful N+1 detection
   findings.push(...detectN1(result.lines, result.filePath));
+
+  // Stateful MISSING_AUTH detection
+  findings.push(...detectMissingAuthPHP(result.lines, result.filePath));
 
   return findings;
 }

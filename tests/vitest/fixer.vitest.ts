@@ -440,12 +440,12 @@ describe('applyFixes — .kt and .rb extension support', () => {
     expect(results).toHaveLength(1);
   });
 
-  test('returns applied=false for an unsupported extension such as .go', () => {
-    const code = 'token := rand.Float64()\n';
-    const filePath = writeTempFile('util.go', code);
+  test('returns applied=false for an unsupported extension such as .lua', () => {
+    const code = 'local token = math.random()\n';
+    const filePath = writeTempFile('util.lua', code);
     const finding = makeFinding({ type: 'INSECURE_RANDOM', line: 1, file: filePath });
 
-    // .go is not in FIXABLE_EXTENSIONS — applyFixes returns a result with applied=false
+    // .lua is not in FIXABLE_EXTENSIONS — applyFixes returns a result with applied=false
     const results = applyFixes([finding], false);
     expect(results).toHaveLength(1);
     expect(results[0]!.applied).toBe(false);
@@ -858,7 +858,7 @@ describe('applyFixes — SQL_INJECTION (Go)', () => {
 
 // ── Go COMMAND_INJECTION fixes ────────────────────────────────────────────────
 
-describe('applyFixes — COMMAND_INJECTION (Go)', () => {
+describe('applyFixes — COMMAND_INJECTION_GO (Go)', () => {
   test('adds TODO comment for exec.Command("sh", "-c", ...) in .go file', () => {
     const code = [
       'func runCmd(input string) {',
@@ -867,21 +867,21 @@ describe('applyFixes — COMMAND_INJECTION (Go)', () => {
       '}',
     ].join('\n');
     const filePath = writeTempFile('runner.go', code);
-    const finding = makeFinding({ type: 'COMMAND_INJECTION', line: 2, file: filePath });
+    const finding = makeFinding({ type: 'COMMAND_INJECTION_GO', line: 2, file: filePath });
 
     const results = applyFixes([finding], false);
     expect(results).toHaveLength(1);
     expect(results[0]!.applied).toBe(true);
 
     const updated = fs.readFileSync(filePath, 'utf-8');
-    expect(updated).toContain('TODO(COMMAND_INJECTION)');
+    expect(updated).toContain('TODO(COMMAND_INJECTION_GO)');
     expect(updated).toContain('exec.Command');
   });
 
   test('adds TODO comment for exec.Command("bash", "-c", ...) in .go file', () => {
     const code = '  cmd := exec.Command("bash", "-c", userArg)\n';
     const filePath = writeTempFile('bash.go', code);
-    const finding = makeFinding({ type: 'COMMAND_INJECTION', line: 1, file: filePath });
+    const finding = makeFinding({ type: 'COMMAND_INJECTION_GO', line: 1, file: filePath });
 
     const results = applyFixes([finding], false);
     expect(results[0]!.applied).toBe(true);
@@ -890,28 +890,28 @@ describe('applyFixes — COMMAND_INJECTION (Go)', () => {
   test('returns applied=false for exec.Command with explicit args (already safe form)', () => {
     const code = '  cmd := exec.Command("ls", "-la", "/tmp")\n';
     const filePath = writeTempFile('safe.go', code);
-    const finding = makeFinding({ type: 'COMMAND_INJECTION', line: 1, file: filePath });
+    const finding = makeFinding({ type: 'COMMAND_INJECTION_GO', line: 1, file: filePath });
 
     const results = applyFixes([finding], false);
-    // No "sh -c" or "bash -c" pattern → transform returns null
+    // exec.Command without "sh -c" or "bash -c" does not trigger the fixer pattern
     expect(results[0]!.applied).toBe(false);
   });
 
-  test('isFixable returns true for COMMAND_INJECTION (Go rule is registered)', () => {
-    expect(isFixable('COMMAND_INJECTION')).toBe(true);
+  test('isFixable returns true for COMMAND_INJECTION_GO (Go rule is registered)', () => {
+    expect(isFixable('COMMAND_INJECTION_GO')).toBe(true);
   });
 
   test('dry-run does NOT write the .go file', () => {
     const code = '  cmd := exec.Command("sh", "-c", userInput)\n';
     const filePath = writeTempFile('dryrun.go', code);
-    const finding = makeFinding({ type: 'COMMAND_INJECTION', line: 1, file: filePath });
+    const finding = makeFinding({ type: 'COMMAND_INJECTION_GO', line: 1, file: filePath });
 
     const results = applyFixes([finding], true /* dry run */);
     expect(results[0]!.applied).toBe(true);
 
     // File content must remain unchanged in dry-run mode
     const updated = fs.readFileSync(filePath, 'utf-8');
-    expect(updated).not.toContain('TODO(COMMAND_INJECTION)');
+    expect(updated).not.toContain('TODO(COMMAND_INJECTION_GO)');
     expect(updated).toBe(code);
   });
 });

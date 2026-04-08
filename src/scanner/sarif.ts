@@ -48,6 +48,10 @@ export const SARIF_RULE_DESCRIPTIONS: Record<string, string> = {
   PERFORMANCE_N_PLUS_ONE: 'ORM or database query executed inside a loop — N+1 query pattern degrades performance under load.',
   MISSING_AUTH:           'Sensitive endpoint or action reached without an authentication or authorisation check.',
   CSRF:                   'State-mutating route is accessible without CSRF protection middleware.',
+  UNSAFE_WEBVIEW:         'WKWebView or UIWebView configured to allow arbitrary navigation or JavaScript from untrusted origins.',
+  FORCE_TRY:              'try! used in Swift — a runtime exception will crash the app if the throwing expression fails.',
+  FORCE_UNWRAP:           'Force-unwrap (!) on an Optional in Swift — crashes at runtime when the value is nil.',
+  UNSAFE_BLOCK:           'Swift unsafe pointer or memory block used without bounds checking or proper lifecycle management.',
 };
 
 const DOCS_BASE_URL = 'https://github.com/rouco-industries/ai-code-security-scanner#';

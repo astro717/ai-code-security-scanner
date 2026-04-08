@@ -132,11 +132,10 @@ describe('E2E CLI — --format sonarqube', () => {
   });
 });
 
-describe('E2E CLI — --min-severity flag', () => {
-  test('--min-severity critical only exits 1 for critical findings', () => {
-    // Run against vulnerable.ts — may or may not have critical findings
-    // The key assertion is that the output is valid JSON when format=json
-    const result = runCLI([VULNERABLE_TS, '--format', 'json', '--min-severity', 'critical']);
+describe('E2E CLI — --severity flag (reporting filter)', () => {
+  test('--severity critical only reports critical findings in JSON output', () => {
+    // --severity controls which findings appear in the output (not exit code threshold)
+    const result = runCLI([VULNERABLE_TS, '--format', 'json', '--severity', 'critical']);
     // status is 0 (no criticals) or 1 (has criticals) — both are valid outcomes
     expect([0, 1]).toContain(result.status);
     const parsed = JSON.parse(result.stdout) as { findings: unknown[] };
@@ -147,8 +146,8 @@ describe('E2E CLI — --min-severity flag', () => {
     }
   });
 
-  test('--min-severity high filters out low/medium findings', () => {
-    const result = runCLI([VULNERABLE_TS, '--format', 'json', '--min-severity', 'high']);
+  test('--severity high filters out low/medium findings from output', () => {
+    const result = runCLI([VULNERABLE_TS, '--format', 'json', '--severity', 'high']);
     expect([0, 1]).toContain(result.status);
     const parsed = JSON.parse(result.stdout) as { findings: Array<{ severity: string }> };
     for (const f of parsed.findings) {
