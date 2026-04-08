@@ -124,6 +124,7 @@ function analyseDepMap(
         snippet: `"${name}": "${version}"`,
         message: `Dependency "${name}" pinned to "${version}" — unpinned versions can introduce breaking changes or malicious updates.`,
         file: fileRef,
+                confidence: 0.80,
       });
     }
 
@@ -138,6 +139,7 @@ function analyseDepMap(
         snippet: `"${name}": "${version}"`,
         message: `"${name}@${version}" is vulnerable (${vuln.cve}). Upgrade to >=${vuln.below}.`,
         file: fileRef,
+                confidence: 0.80,
       });
     }
   }
@@ -206,6 +208,7 @@ export function detectUnsafeDeps(projectDir: string): Finding[] {
       snippet: 'No lockfile found',
       message: 'No package lockfile found (package-lock.json / yarn.lock / pnpm-lock.yaml). Dependency versions are not reproducible.',
       file: pkgPath,
+                confidence: 0.80,
     });
   }
 

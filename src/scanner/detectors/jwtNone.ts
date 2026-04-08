@@ -83,6 +83,7 @@ export function detectJWTNoneAlgorithm(result: ParseResult): Finding[] {
             'In vulnerable versions of jsonwebtoken this allows the "none" algorithm, ' +
             'letting attackers forge tokens without a signature. ' +
             'Always pass { algorithms: [\'RS256\'] } or your expected algorithm.',
+                confidence: 0.85,
         });
         return;
       }
@@ -101,6 +102,7 @@ export function detectJWTNoneAlgorithm(result: ParseResult): Finding[] {
             'jwt.verify() called with algorithm set to "none". ' +
             'The "none" algorithm disables signature verification entirely, ' +
             'allowing any unsigned token to be accepted. Remove "none" from the algorithms list.',
+                confidence: 0.85,
         });
       }
     }
@@ -118,6 +120,7 @@ export function detectJWTNoneAlgorithm(result: ParseResult): Finding[] {
           'jwt.decode() does not verify the token signature. ' +
           'Use jwt.verify() with an explicit algorithms whitelist to authenticate tokens. ' +
           'Only use jwt.decode() for reading claims from already-verified tokens.',
+                confidence: 0.85,
       });
     }
   });

@@ -82,6 +82,7 @@ export function detectCommandInjection(result: ParseResult): Finding[] {
             `${fnName}() called with a dynamic command. If the command name originates from ` +
             `user input, an attacker can execute arbitrary programs. Use a hardcoded command ` +
             `string and pass only sanitized arguments in the args array.`,
+                confidence: 0.88,
         });
       }
     }

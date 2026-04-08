@@ -253,6 +253,7 @@ export function detectSSRF(result: ParseResult): Finding[] {
             : `${fnLabel} called with a dynamic URL. If the URL originates from user input, ` +
               `an attacker can force the server to make requests to internal services (SSRF). ` +
               `Validate and whitelist allowed URL origins before making outbound requests.`,
+                confidence: 0.80,
         });
       }
     }

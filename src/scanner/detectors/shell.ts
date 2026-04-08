@@ -66,6 +66,7 @@ export function detectShellInjection(result: ParseResult): Finding[] {
         column: node.loc!.start.column,
         snippet,
         message: `${fnName}() called with a non-literal argument. Unsanitized input may lead to shell injection.`,
+                confidence: 0.85,
       });
     }
   });
