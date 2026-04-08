@@ -332,6 +332,117 @@ const PYTHON_PATTERNS: PythonPattern[] = [
   },
 ];
 
+// ── Stateful MISSING_AUTH detector for Python (Flask / FastAPI) ──────────────
+//
+// Strategy: track Flask/FastAPI route decorator lines (@app.route, @router.get,
+// etc.) then scan the subsequent indented function body for any auth-guard call.
+// If the function body contains a mutating HTTP method (POST/PUT/DELETE/PATCH)
+// or explicitly accesses request data, and no auth guard is found, flag it.
+
+const PY_ROUTE_DECORATOR = /@(?:app|router|blueprint|bp)\s*\.\s*(?:route|get|post|put|delete|patch)\s*\(/;
+const PY_MUTATING_METHODS = /methods\s*=\s*\[['"][^'"]*(?:POST|DELETE|PUT|PATCH)['"]/;
+const PY_AUTH_GUARD = /\b(?:login_required|require_auth|token_required|jwt_required|current_user|get_current_user|verify_token|check_auth|is_authenticated|permission_required|has_permission|Depends\s*\(\s*(?:get_current_user|verify_token|authenticate|oauth2_scheme|get_user|require_auth))\b/;
+const PY_REQUEST_DATA = /\brequest\.(?:json|form|data|get_json|args|values)\b/;
+const PY_FUNC_DEF = /^(\s*)(?:async\s+)?def\s+\w+/;
+
+function detectMissingAuthPython(lines: string[], filePath: string): Finding[] {
+  const findings: Finding[] = [];
+
+  let pendingRoute = false;          // we saw a route decorator, awaiting def
+  let pendingIsMutating = false;     // the route is POST/PUT/DELETE/PATCH
+  let pendingHasAuthDecorator = false; // an auth decorator (@login_required etc.) seen before def
+  let inRouteFn = false;             // currently inside the route function body
+  let routeFnIndent = -1;            // indentation level of the def line
+  let routeFnStartLine = 0;
+  let routeFnHasAuth = false;
+  let routeFnHasRequestData = false;
+  let firstRequestDataLine = 0;
+
+  function flushRoute(upToLine: number): void {
+    if (!inRouteFn) return;
+    // Flag if no auth guard found AND function accessed request data (or was declared mutating)
+    if (!routeFnHasAuth && (routeFnHasRequestData || pendingIsMutating)) {
+      findings.push({
+        type: 'MISSING_AUTH',
+        severity: 'high',
+        line: routeFnHasRequestData ? firstRequestDataLine : routeFnStartLine,
+        column: 0,
+        snippet: (lines[(routeFnHasRequestData ? firstRequestDataLine : routeFnStartLine) - 1] ?? '').trim().slice(0, 100),
+        message:
+          'Flask/FastAPI route handler accesses request data or declares mutating HTTP methods ' +
+          'without an authentication guard (login_required, jwt_required, Depends(get_current_user), etc.). ' +
+          'Unauthenticated users can call this endpoint.',
+        confidence: 0.80,
+        file: filePath,
+      });
+    }
+    inRouteFn = false;
+    routeFnIndent = -1;
+    routeFnStartLine = 0;
+    routeFnHasAuth = false;
+    routeFnHasRequestData = false;
+    firstRequestDataLine = 0;
+    void upToLine; // suppress unused warning
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+
+    const indent = line.search(/\S/);
+
+    // If inside a route function body, check if we exited (dedented past def indent)
+    if (inRouteFn && indent <= routeFnIndent && trimmed !== '') {
+      flushRoute(i + 1);
+      // Don't continue — fall through to process this line normally
+    }
+
+    // Track decorator for route
+    if (PY_ROUTE_DECORATOR.test(line)) {
+      pendingRoute = true;
+      pendingIsMutating = PY_MUTATING_METHODS.test(line);
+      pendingHasAuthDecorator = false;
+    } else if (pendingRoute && trimmed.startsWith('@') && PY_AUTH_GUARD.test(line)) {
+      // Auth decorator stacked between route decorator and def (e.g. @login_required)
+      pendingHasAuthDecorator = true;
+    } else if (pendingRoute && PY_FUNC_DEF.test(line)) {
+      // Entering the route function
+      flushRoute(i + 1); // flush any previous open route
+      inRouteFn = true;
+      routeFnIndent = indent;
+      routeFnStartLine = i + 1;
+      // Carry over any auth decorator seen before the def
+      routeFnHasAuth = pendingHasAuthDecorator;
+      routeFnHasRequestData = false;
+      firstRequestDataLine = 0;
+      pendingRoute = false;
+      pendingHasAuthDecorator = false;
+    } else if (!PY_ROUTE_DECORATOR.test(line)) {
+      // Reset pending if non-decorator, non-def line seen (e.g. blank lines are skipped above)
+      if (pendingRoute && !trimmed.startsWith('@')) {
+        pendingRoute = false;
+        pendingIsMutating = false;
+        pendingHasAuthDecorator = false;
+      }
+    }
+
+    // While inside a route body, check for auth guards and request data access
+    if (inRouteFn && indent > routeFnIndent) {
+      if (PY_AUTH_GUARD.test(line)) routeFnHasAuth = true;
+      if (PY_REQUEST_DATA.test(line) && !routeFnHasRequestData) {
+        routeFnHasRequestData = true;
+        firstRequestDataLine = i + 1;
+      }
+    }
+  }
+
+  // Flush if file ends while still inside a route function
+  flushRoute(lines.length);
+
+  return findings;
+}
+
 /**
  * Scans a parsed Python source for security vulnerabilities using pattern matching.
  * Returns findings in the same Finding format as JS/TS detectors.
@@ -406,6 +517,9 @@ export function scanPython(result: PythonParseResult): Finding[] {
       }
     }
   });
+
+  // ── Stateful MISSING_AUTH detection ────────────────────────────────────────
+  findings.push(...detectMissingAuthPython(result.lines, result.filePath));
 
   return findings;
 }
