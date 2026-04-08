@@ -25,7 +25,10 @@ tsconfig.json
 .eslintrc*
 .prettierrc*
 .claude/
+.worktrees/
 
 # Dev artifacts
 node_modules/
+coverage/
+scripts/
 *.log
