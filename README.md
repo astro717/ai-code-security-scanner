@@ -9,7 +9,7 @@ AST-based security scanner for AI-generated code. Detects 43+ vulnerability type
 ## Try it instantly
 
 ```bash
-npx ai-sec-scan ./src
+npx ai-code-security-scanner ./src
 ```
 
 ## Quickstart
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npx ai-sec-scan ./src --format sarif --min-severity high
+      - run: npx ai-code-security-scanner ./src --format sarif --min-severity high
         continue-on-error: true
       - uses: github/codeql-action/upload-sarif@v3
         with:
@@ -71,31 +71,31 @@ jobs:
 
 ```bash
 # Scan a file
-npx ai-sec-scan src/app.ts
+npx ai-code-security-scanner src/app.ts
 
 # Scan a directory
-npx ai-sec-scan ./src
+npx ai-code-security-scanner ./src
 
 # JSON output
-npx ai-sec-scan ./src --json
+npx ai-code-security-scanner ./src --json
 
 # SARIF 2.1.0 output (for GitHub Security tab / CI artifacts)
-npx ai-sec-scan ./src --sarif
+npx ai-code-security-scanner ./src --sarif
 
 # Filter by minimum severity to report
-npx ai-sec-scan ./src --severity high
+npx ai-code-security-scanner ./src --severity high
 
 # Set minimum severity that triggers a non-zero exit code
-npx ai-sec-scan ./src --min-severity critical
+npx ai-code-security-scanner ./src --min-severity critical
 
 # Exclude paths matching a glob (repeatable)
-npx ai-sec-scan . --ignore '**/node_modules/**' --ignore 'dist/**' --ignore '**/*.test.ts'
+npx ai-code-security-scanner . --ignore '**/node_modules/**' --ignore 'dist/**' --ignore '**/*.test.ts'
 
 # Use a config file
-npx ai-sec-scan ./src --config .ai-sec-scan.json
+npx ai-code-security-scanner ./src --config .ai-sec-scan.json
 
 # Watch mode — re-scans on file changes, prints a diff of new/resolved findings
-npx ai-sec-scan ./src --watch
+npx ai-code-security-scanner ./src --watch
 ```
 
 #### CLI flags
