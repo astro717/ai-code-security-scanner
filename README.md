@@ -1,5 +1,7 @@
 # AI Code Security Scanner
 
+![AI Code Security Scanner](.github/social-preview-clean.jpg)
+
 [![npm version](https://img.shields.io/npm/v/ai-code-security-scanner)](https://www.npmjs.com/package/ai-code-security-scanner)
 [![npm downloads](https://img.shields.io/npm/dm/ai-code-security-scanner)](https://www.npmjs.com/package/ai-code-security-scanner)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
