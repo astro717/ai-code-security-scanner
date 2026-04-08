@@ -46,6 +46,7 @@ function detectReDoS(result) {
                     message: 'new RegExp() called with a dynamic pattern. If the pattern originates from user input, ' +
                         'an attacker can craft a catastrophically backtracking regex causing denial of service (ReDoS). ' +
                         'Validate and sanitize the pattern, or use a safe regex library before constructing RegExp dynamically.',
+                    confidence: 0.70,
                 });
             }
         }

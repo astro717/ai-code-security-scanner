@@ -85,6 +85,7 @@ function detectSQLInjection(result) {
                         column: node.loc.start.column,
                         snippet: result.lines[line - 1]?.trim() ?? '',
                         message: 'Dynamic value passed directly to SQL query function. Use parameterized queries.',
+                        confidence: 0.9,
                     });
                 }
             }

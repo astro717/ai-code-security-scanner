@@ -7,6 +7,7 @@
  *
  * Covered vulnerability classes:
  *   - SQL_INJECTION (string interpolation in ActiveRecord queries)
+ *   - PERFORMANCE_N_PLUS_ONE (N+1 query anti-patterns in loops)
  *   - XSS (html_safe, raw with user input)
  *   - COMMAND_INJECTION (backtick execution, system(), exec(), Open3 with interpolation)
  *   - SECRET_HARDCODED (hardcoded credentials)
@@ -16,6 +17,7 @@
  *   - WEAK_CRYPTO (MD5, SHA1 via Digest library)
  *   - OPEN_REDIRECT (redirect_to with user input)
  *   - EVAL_INJECTION (eval with user input)
+ *   - LDAP_INJECTION (Net::LDAP search with string interpolation)
  */
 import type { Finding } from './reporter';
 export interface RubyParseResult {

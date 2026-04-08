@@ -62,6 +62,7 @@ function detectJWTSecrets(result) {
                     column: node.loc.start.column,
                     snippet: result.lines[line - 1]?.trim() ?? '',
                     message: `jwt.sign() called with a short hardcoded secret ("${redacted}", ${secretValue.length} chars). JWT secrets must be ≥32 chars and stored in environment variables, not source code.`,
+                    confidence: 0.80,
                 });
             }
             else {
@@ -72,6 +73,7 @@ function detectJWTSecrets(result) {
                     column: node.loc.start.column,
                     snippet: result.lines[line - 1]?.trim() ?? '',
                     message: `jwt.sign() called with a hardcoded string secret ("${redacted}"). Store JWT secrets in environment variables (e.g. process.env.JWT_SECRET) and never commit them to source.`,
+                    confidence: 0.80,
                 });
             }
             return;
@@ -110,6 +112,7 @@ function detectJWTSecrets(result) {
                             column: node.loc.start.column,
                             snippet: result.lines[line - 1]?.trim() ?? '',
                             message: `jwt.sign() config object has hardcoded "${keyName}" value ("${redacted}"${isShort ? `, only ${valStr.length} chars` : ''}). Use process.env for secrets.`,
+                            confidence: 0.80,
                         });
                     }
                     break;

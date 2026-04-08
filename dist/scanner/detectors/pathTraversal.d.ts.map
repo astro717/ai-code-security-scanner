@@ -1,1 +1,1 @@
-{"version":3,"file":"pathTraversal.d.ts","sourceRoot":"","sources":["../../../src/scanner/detectors/pathTraversal.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,WAAW,EAAE,MAAM,WAAW,CAAC;AACxC,OAAO,EAAE,OAAO,EAAE,MAAM,aAAa,CAAC;AAwCtC,wBAAgB,mBAAmB,CAAC,MAAM,EAAE,WAAW,GAAG,OAAO,EAAE,CA8FlE"}
+{"version":3,"file":"pathTraversal.d.ts","sourceRoot":"","sources":["../../../src/scanner/detectors/pathTraversal.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,WAAW,EAAE,MAAM,WAAW,CAAC;AACxC,OAAO,EAAE,OAAO,EAAE,MAAM,aAAa,CAAC;AAwCtC,wBAAgB,mBAAmB,CAAC,MAAM,EAAE,WAAW,GAAG,OAAO,EAAE,CAgGlE"}

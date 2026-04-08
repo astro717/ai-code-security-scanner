@@ -61,6 +61,7 @@ function detectWildcardWithCredentials(result) {
                     message: 'cors() is configured with origin: \'*\' and credentials: true. ' +
                         'Browsers block this combination per the CORS spec, but some older libraries or non-browser clients may still send credentials. ' +
                         'Use an explicit allowlist of trusted origins instead of wildcard when credentials are required.',
+                    confidence: 0.78,
                 });
             }
         }
@@ -139,6 +140,7 @@ function detectReflectedOriginHeader(result) {
                     message: 'Access-Control-Allow-Origin is set to the reflected value of req.headers.origin. ' +
                         'This unconditionally trusts any origin and bypasses CORS restrictions. ' +
                         'Validate the origin against an explicit allowlist before reflecting it.',
+                    confidence: 0.78,
                 });
             }
         }

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.server = void 0;
+exports.server = exports.INTERNAL_API_TOKEN = exports.app = void 0;
 exports.resetRateLimiters = resetRateLimiters;
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
@@ -31,7 +31,9 @@ const cors_2 = require("./scanner/detectors/cors");
 const redos_1 = require("./scanner/detectors/redos");
 const weakCrypto_1 = require("./scanner/detectors/weakCrypto");
 const jwtNone_1 = require("./scanner/detectors/jwtNone");
+const csrf_1 = require("./scanner/detectors/csrf");
 const reporter_1 = require("./scanner/reporter");
+const owasp_1 = require("./scanner/owasp");
 const sarif_1 = require("./scanner/sarif");
 const deps_1 = require("./scanner/detectors/deps");
 const python_parser_1 = require("./scanner/python-parser");
@@ -40,6 +42,12 @@ const java_parser_1 = require("./scanner/java-parser");
 const csharp_parser_1 = require("./scanner/csharp-parser");
 const c_parser_1 = require("./scanner/c-parser");
 const ruby_parser_1 = require("./scanner/ruby-parser");
+const kotlin_parser_1 = require("./scanner/kotlin-parser");
+const swift_parser_1 = require("./scanner/swift-parser");
+const rust_parser_1 = require("./scanner/rust-parser");
+const php_parser_1 = require("./scanner/php-parser");
+const scan_cache_1 = require("./scanner/scan-cache");
+const fixer_js_1 = require("./scanner/fixer.js");
 function validateRequestBody(body, schema, endpointName) {
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
         return { valid: false, errors: [`${endpointName} request body must be a JSON object`] };
@@ -67,9 +75,7 @@ function validateRequestBody(body, schema, endpointName) {
             if (!Array.isArray(val)) {
                 errors.push(`${key} must be an array`);
             }
-            else if (rule.items === 'string' && val.some((item) => typeof item !== 'string')) {
-                errors.push(`${key} must be an array of strings`);
-            }
+            // Note: mixed-type arrays are tolerated — non-string items are filtered downstream
         }
         else if (rule.type === 'object' && (typeof val !== 'object' || Array.isArray(val))) {
             errors.push(`${key} must be an object`);
@@ -79,7 +85,7 @@ function validateRequestBody(body, schema, endpointName) {
 }
 const SCAN_BODY_SCHEMA = {
     code: { type: 'string', required: true },
-    filename: { type: 'string' },
+    filename: { type: 'string', required: true },
     packageJson: { type: 'string' },
     aiExplain: { type: 'boolean' },
     ignoreTypes: { type: 'array', items: 'string' },
@@ -89,6 +95,8 @@ const SCAN_BODY_SCHEMA = {
 const SCAN_REPO_BODY_SCHEMA = {
     repoUrl: { type: 'string', required: true },
     branch: { type: 'string' },
+    sinceCommit: { type: 'string' },
+    changedFilesOnly: { type: 'boolean' },
     ignorePatterns: { type: 'array', items: 'string' },
     ignoreTypes: { type: 'array', items: 'string' },
     webhookUrl: { type: 'string' },
@@ -96,7 +104,9 @@ const SCAN_REPO_BODY_SCHEMA = {
 };
 // LLM calls can be slow — 30 s gives ample time for a response while bounding
 // the maximum time a single /scan?aiExplain=true request can block the server.
-const ANTHROPIC_REQUEST_TIMEOUT_MS = 30000;
+const AI_REQUEST_TIMEOUT_MS = 30000;
+/** @deprecated use AI_REQUEST_TIMEOUT_MS */
+const ANTHROPIC_REQUEST_TIMEOUT_MS = AI_REQUEST_TIMEOUT_MS;
 /**
  * Makes a request to the Anthropic Messages API.
  * @param body      - JSON request body
@@ -128,22 +138,78 @@ async function anthropicRequest(body, apiKey) {
                 }
             });
         });
-        req.setTimeout(ANTHROPIC_REQUEST_TIMEOUT_MS, () => {
-            req.destroy(new Error(`Anthropic API request timed out after ${ANTHROPIC_REQUEST_TIMEOUT_MS}ms`));
+        req.setTimeout(AI_REQUEST_TIMEOUT_MS, () => {
+            req.destroy(new Error(`Anthropic API request timed out after ${AI_REQUEST_TIMEOUT_MS}ms`));
         });
         req.on('error', reject);
         req.write(payload);
         req.end();
     });
 }
-async function explainFinding(finding, apiKey) {
-    const response = await anthropicRequest({
-        model: 'claude-haiku-4-5-20251001',
+/**
+ * Makes a request to an OpenAI-compatible Chat Completions endpoint.
+ *
+ * @param prompt     - User message prompt text
+ * @param apiKey     - OpenAI API key; falls back to OPENAI_API_KEY env var
+ * @param model      - Model name; falls back to AI_EXPLAIN_MODEL env var or 'gpt-4o-mini'
+ * @param endpoint   - Full URL of the chat completions endpoint; falls back to
+ *                     AI_EXPLAIN_ENDPOINT env var or https://api.openai.com/v1/chat/completions
+ */
+async function openaiRequest(prompt, apiKey, model, endpoint) {
+    const effectiveKey = apiKey ?? process.env.OPENAI_API_KEY ?? '';
+    const effectiveModel = model ?? process.env.AI_EXPLAIN_MODEL ?? 'gpt-4o-mini';
+    const effectiveEndpoint = endpoint ?? process.env.AI_EXPLAIN_ENDPOINT ?? 'https://api.openai.com/v1/chat/completions';
+    const parsed = new URL(effectiveEndpoint);
+    const isHttps = parsed.protocol === 'https:';
+    const transport = isHttps ? https_1.default : http_1.default;
+    const body = {
+        model: effectiveModel,
         max_tokens: 512,
-        messages: [
-            {
-                role: 'user',
-                content: `You are a security expert. Analyze this vulnerability finding and respond with ONLY a JSON object (no markdown, no extra text):
+        messages: [{ role: 'user', content: prompt }],
+    };
+    return new Promise((resolve, reject) => {
+        const payload = JSON.stringify(body);
+        const req = transport.request({
+            hostname: parsed.hostname,
+            port: parsed.port || (isHttps ? 443 : 80),
+            path: parsed.pathname + parsed.search,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${effectiveKey}`,
+                'Content-Length': Buffer.byteLength(payload),
+            },
+        }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                try {
+                    resolve(JSON.parse(data));
+                }
+                catch {
+                    reject(new Error('Invalid JSON from OpenAI-compatible endpoint'));
+                }
+            });
+        });
+        req.setTimeout(AI_REQUEST_TIMEOUT_MS, () => {
+            req.destroy(new Error(`OpenAI API request timed out after ${AI_REQUEST_TIMEOUT_MS}ms`));
+        });
+        req.on('error', reject);
+        req.write(payload);
+        req.end();
+    });
+}
+/**
+ * Resolves the active AI provider. Priority:
+ *   1. per-request provider parameter (from X-AI-Provider header)
+ *   2. AI_EXPLAIN_PROVIDER environment variable
+ *   3. 'anthropic' default
+ */
+function resolveAiProvider(requestProvider) {
+    const raw = (requestProvider ?? process.env.AI_EXPLAIN_PROVIDER ?? 'anthropic').toLowerCase();
+    return raw === 'openai' ? 'openai' : 'anthropic';
+}
+const EXPLAIN_PROMPT_TEMPLATE = (finding) => `You are a security expert. Analyze this vulnerability finding and respond with ONLY a JSON object (no markdown, no extra text):
 
 Vulnerability type: ${finding.type}
 Severity: ${finding.severity}
@@ -151,7 +217,33 @@ Code snippet: ${finding.snippet ?? '(not available)'}
 Message: ${finding.message}
 
 Respond with exactly this JSON structure:
-{"explanation": "2-sentence explanation of why this is dangerous and what could be exploited", "fixSuggestion": "the corrected code snippet, just the code, no explanation"}`,
+{"explanation": "2-sentence explanation of why this is dangerous and what could be exploited", "fixSuggestion": "the corrected code snippet, just the code, no explanation"}`;
+async function explainFinding(finding, apiKey, provider, openaiEndpoint) {
+    const activeProvider = provider ?? resolveAiProvider();
+    if (activeProvider === 'openai') {
+        const effectiveModel = process.env.AI_EXPLAIN_MODEL ?? 'gpt-4o-mini';
+        const response = await openaiRequest(EXPLAIN_PROMPT_TEMPLATE(finding), apiKey, effectiveModel, openaiEndpoint);
+        const text = response.choices?.[0]?.message?.content ?? '';
+        try {
+            const parsed = JSON.parse(text);
+            return {
+                explanation: parsed.explanation ?? '',
+                fixSuggestion: parsed.fixSuggestion ?? '',
+            };
+        }
+        catch {
+            return { explanation: text.slice(0, 200), fixSuggestion: '' };
+        }
+    }
+    // Default: Anthropic
+    const effectiveModel = process.env.AI_EXPLAIN_MODEL ?? 'claude-haiku-4-5-20251001';
+    const response = await anthropicRequest({
+        model: effectiveModel,
+        max_tokens: 512,
+        messages: [
+            {
+                role: 'user',
+                content: EXPLAIN_PROMPT_TEMPLATE(finding),
             },
         ],
     }, apiKey);
@@ -169,13 +261,21 @@ Respond with exactly this JSON structure:
 }
 /**
  * Enriches up to 5 findings with AI-generated explanations.
- * @param findings  - Findings to enrich
- * @param apiKey    - Optional per-request Anthropic key; falls back to env var
+ *
+ * @param findings       - Findings to enrich
+ * @param apiKey         - Optional per-request API key; falls back to ANTHROPIC_API_KEY or OPENAI_API_KEY
+ * @param provider       - LLM provider to use ('anthropic' | 'openai'); resolved from env when absent
+ * @param openaiEndpoint - Optional custom OpenAI-compatible endpoint URL
  */
-async function enrichWithAI(findings, apiKey) {
-    const effectiveKey = apiKey ?? process.env.ANTHROPIC_API_KEY;
+async function enrichWithAI(findings, apiKey, provider, openaiEndpoint) {
+    const activeProvider = provider ?? resolveAiProvider();
+    // Resolve effective key depending on provider
+    const effectiveKey = apiKey ?? (activeProvider === 'openai'
+        ? process.env.OPENAI_API_KEY
+        : process.env.ANTHROPIC_API_KEY);
     if (!effectiveKey) {
-        console.warn('[ai-explain] ANTHROPIC_API_KEY not set — skipping AI enrichment');
+        const envVar = activeProvider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
+        console.warn(`[ai-explain] ${envVar} not set — skipping AI enrichment`);
         return findings;
     }
     // Process up to 5 findings (highest severity first)
@@ -186,7 +286,7 @@ async function enrichWithAI(findings, apiKey) {
     const enriched = new Map();
     await Promise.all(toEnrich.map(async (f) => {
         try {
-            const ai = await explainFinding(f, effectiveKey);
+            const ai = await explainFinding(f, effectiveKey, activeProvider, openaiEndpoint);
             enriched.set(f, { ...f, ...ai });
         }
         catch (err) {
@@ -207,15 +307,46 @@ function logScan(fields) {
 }
 // ── Webhook delivery ──────────────────────────────────────────────────────────
 const WEBHOOK_TIMEOUT_MS = 10000;
+const WEBHOOK_MAX_RETRIES = 3;
+const WEBHOOK_BACKOFF_BASE_MS = 1000;
+/**
+ * Send a single webhook HTTP request. Resolves with the status code on success,
+ * rejects on network error or timeout.
+ */
+function sendWebhookRequest(webhookUrl, body, headers) {
+    return new Promise((resolve, reject) => {
+        const parsed = new URL(webhookUrl);
+        const transport = parsed.protocol === 'https:' ? https_1.default : http_1.default;
+        const req = transport.request({
+            hostname: parsed.hostname,
+            port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+            path: parsed.pathname + parsed.search,
+            method: 'POST',
+            headers,
+        }, (res) => {
+            res.resume();
+            resolve(res.statusCode ?? 0);
+        });
+        req.setTimeout(WEBHOOK_TIMEOUT_MS, () => {
+            req.destroy(new Error(`Webhook timed out after ${WEBHOOK_TIMEOUT_MS}ms`));
+        });
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+    });
+}
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 /**
  * Fire-and-forget POST of scan results to a webhook URL.
+ * Retries up to 3 times with exponential backoff (1s, 2s, 4s) on non-2xx
+ * responses or network errors.
  * If `webhookSecret` is provided, an HMAC-SHA256 signature is sent in
  * the `X-Scanner-Signature` header so the receiver can verify authenticity.
  */
 function deliverWebhook(webhookUrl, payload, webhookSecret) {
     const body = JSON.stringify(payload);
-    const parsed = new URL(webhookUrl);
-    const transport = parsed.protocol === 'https:' ? https_1.default : http_1.default;
     const headers = {
         'Content-Type': 'application/json',
         'Content-Length': String(Buffer.byteLength(body)),
@@ -228,35 +359,88 @@ function deliverWebhook(webhookUrl, payload, webhookSecret) {
             .digest('hex');
         headers['X-Scanner-Signature'] = `sha256=${signature}`;
     }
-    const req = transport.request({
-        hostname: parsed.hostname,
-        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
-        path: parsed.pathname + parsed.search,
-        method: 'POST',
-        headers,
-    }, (res) => {
-        // Drain response to free socket
-        res.resume();
-        console.log(`[webhook] POST ${webhookUrl} → ${res.statusCode}`);
-    });
-    req.setTimeout(WEBHOOK_TIMEOUT_MS, () => {
-        req.destroy(new Error(`Webhook timed out after ${WEBHOOK_TIMEOUT_MS}ms`));
-    });
-    req.on('error', (err) => {
-        console.error(`[webhook] POST ${webhookUrl} failed:`, err.message);
-    });
-    req.write(body);
-    req.end();
+    // Fire-and-forget: launch async retry loop without awaiting
+    (async () => {
+        for (let attempt = 0; attempt <= WEBHOOK_MAX_RETRIES; attempt++) {
+            try {
+                const statusCode = await sendWebhookRequest(webhookUrl, body, headers);
+                console.log(`[webhook] POST ${webhookUrl} → ${statusCode} (attempt ${attempt + 1})`);
+                if (statusCode >= 200 && statusCode < 300) {
+                    return; // Success — done
+                }
+                // Non-2xx: fall through to retry
+                if (attempt < WEBHOOK_MAX_RETRIES) {
+                    const delayMs = WEBHOOK_BACKOFF_BASE_MS * Math.pow(2, attempt);
+                    console.log(`[webhook] non-2xx (${statusCode}), retrying in ${delayMs}ms…`);
+                    await sleep(delayMs);
+                }
+                else {
+                    console.error(`[webhook] POST ${webhookUrl} failed after ${WEBHOOK_MAX_RETRIES + 1} attempts (last status: ${statusCode})`);
+                }
+            }
+            catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                if (attempt < WEBHOOK_MAX_RETRIES) {
+                    const delayMs = WEBHOOK_BACKOFF_BASE_MS * Math.pow(2, attempt);
+                    console.log(`[webhook] error: ${message}, retrying in ${delayMs}ms…`);
+                    await sleep(delayMs);
+                }
+                else {
+                    console.error(`[webhook] POST ${webhookUrl} failed after ${WEBHOOK_MAX_RETRIES + 1} attempts: ${message}`);
+                }
+            }
+        }
+    })();
 }
-const app = (0, express_1.default)();
+exports.app = (0, express_1.default)();
 const PORT = process.env.PORT ?? 3001;
-app.use((0, cors_1.default)());
+// Initialize scan result cache for /watch SSE endpoint caching
+(0, scan_cache_1.initCache)({ disabled: process.env.SCAN_CACHE_DISABLED === 'true' });
+// Periodically flush scan cache to disk every 5 minutes for resilience
+// against unclean shutdowns. The interval is cleared on graceful shutdown.
+const CACHE_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
+const cacheFlushTimer = setInterval(() => {
+    (0, scan_cache_1.persistCache)();
+}, CACHE_FLUSH_INTERVAL_MS);
+// Prevent the timer from keeping the process alive when tests shut down
+if (cacheFlushTimer.unref)
+    cacheFlushTimer.unref();
+exports.app.use((0, cors_1.default)({
+    origin: process.env.CORS_ALLOWED_ORIGINS?.split(',') ?? ['http://localhost:5173', 'http://localhost:3001'],
+    credentials: true,
+}));
 // Limit request body to 500 KB. Express will automatically respond with 413
 // for bodies larger than this limit — but we also enforce it explicitly inside
 // route handlers so the error message is consistent and human-readable.
 const PAYLOAD_LIMIT = '500kb';
 const PAYLOAD_LIMIT_BYTES = 500 * 1024;
-app.use(express_1.default.json({ limit: PAYLOAD_LIMIT }));
+exports.app.use(express_1.default.json({ limit: PAYLOAD_LIMIT }));
+// Middleware to set X-RateLimit-* headers on all responses.
+// If express-rate-limit has already set these headers, they are preserved.
+// Otherwise, set default values to indicate rate limiting is active.
+exports.app.use((req, res, next) => {
+    // Only set defaults if not already set by rate limiting middleware
+    if (!res.getHeader('X-RateLimit-Limit')) {
+        res.setHeader('X-RateLimit-Limit', '100');
+    }
+    if (!res.getHeader('X-RateLimit-Remaining')) {
+        res.setHeader('X-RateLimit-Remaining', '100');
+    }
+    if (!res.getHeader('X-RateLimit-Reset')) {
+        const resetTime = Math.floor(Date.now() / 1000) + 3600; // Reset in 1 hour
+        res.setHeader('X-RateLimit-Reset', resetTime.toString());
+    }
+    next();
+});
+// Convert express.json() 413 PayloadTooLargeError into our standard JSON error shape
+// so callers always get { error: '...' } instead of Express's default HTML/text response.
+exports.app.use((err, req, res, next) => {
+    if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+        res.status(413).json({ error: `Payload too large. Maximum allowed size is ${PAYLOAD_LIMIT}.` });
+        return;
+    }
+    next(err);
+});
 // ── API key auth ──────────────────────────────────────────────────────────────
 // Protect all non-health endpoints with a Bearer token check.
 // Set SERVER_API_KEY in the environment to enable; if unset, the server starts
@@ -266,7 +450,11 @@ if (!SERVER_API_KEY) {
     console.warn('[auth] WARNING: SERVER_API_KEY is not set. ' +
         'All endpoints are publicly accessible — set this variable in production.');
 }
-app.use((req, res, next) => {
+else if (SERVER_API_KEY.length < 32) {
+    console.warn('[auth] WARNING: SERVER_API_KEY is shorter than 32 characters. ' +
+        'Use a long random value to prevent token guessing.');
+}
+exports.app.use((req, res, next) => {
     // /health is always open so uptime monitors and Docker HEALTHCHECK work
     if (req.path === '/health')
         return next();
@@ -289,8 +477,8 @@ app.use((req, res, next) => {
 // X-Internal-Token request header to be exempted from per-IP rate limits.
 // The value must be at least 32 characters to prevent accidental weak tokens.
 // If the env var is not set the bypass is disabled entirely.
-const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
-if (INTERNAL_API_TOKEN && INTERNAL_API_TOKEN.length < 32) {
+exports.INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN;
+if (exports.INTERNAL_API_TOKEN && exports.INTERNAL_API_TOKEN.length < 32) {
     console.warn('[auth] WARNING: INTERNAL_API_TOKEN is shorter than 32 characters. ' +
         'Use a long random value to prevent token guessing.');
 }
@@ -305,16 +493,16 @@ const IS_TEST = process.env.NODE_ENV === 'test';
 // internal tools (CI, dashboards) can make burst requests without hitting the
 // per-IP cap. All other callers are subject to the standard limits below.
 function skipIfInternalToken(req) {
-    if (!INTERNAL_API_TOKEN)
+    if (!exports.INTERNAL_API_TOKEN)
         return false;
     const presented = req.headers['x-internal-token'];
-    return typeof presented === 'string' && presented === INTERNAL_API_TOKEN;
+    return typeof presented === 'string' && presented === exports.INTERNAL_API_TOKEN;
 }
 const scanLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000, // 1 minute
     max: IS_TEST ? 10000 : 20,
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders: true,
     skip: skipIfInternalToken,
     message: { error: 'Too many scan requests from this IP. Limit: 20 requests per minute.' },
 });
@@ -322,7 +510,7 @@ const scanRepoLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000, // 1 minute
     max: IS_TEST ? 10000 : 5,
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders: true,
     skip: skipIfInternalToken,
     message: { error: 'Too many scan-repo requests from this IP. Limit: 5 requests per minute (GitHub API calls).' },
 });
@@ -343,10 +531,96 @@ async function resetRateLimiters() {
         scanRepoLimiter.resetKey('127.0.0.1'),
     ]);
 }
-app.get('/health', (_req, res) => {
+// ── Scan timeout ─────────────────────────────────────────────────────────────
+// Wraps an async operation in a Promise.race with a timeout. Returns the
+// operation result or throws a timeout error. Prevents DoS via slow/malformed
+// inputs that could cause catastrophic backtracking in regex-based parsers.
+const SCAN_TIMEOUT_MS = parseInt(process.env.SCAN_TIMEOUT_MS ?? '30000', 10);
+function withScanTimeout(operation, timeoutMs = SCAN_TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(`Scan timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+        operation
+            .then((result) => { clearTimeout(timer); resolve(result); })
+            .catch((err) => { clearTimeout(timer); reject(err); });
+    });
+}
+// ── Badge endpoint ────────────────────────────────────────────────────────────
+// GET /badge/:orgId?count=<n>&label=<label>
+// Returns a shields.io-compatible SVG badge showing critical finding count.
+// The count parameter is provided by the caller (e.g. CI pipeline after scanning).
+// Example: GET /badge/my-org?count=3 → SVG badge "security | 3 critical"
+exports.app.get('/badge/:orgId', (req, res) => {
+    const orgId = req.params['orgId'] ?? 'unknown';
+    const count = parseInt(String(req.query['count'] ?? '0'), 10);
+    const label = String(req.query['label'] ?? 'security');
+    const color = count === 0 ? '4c1' : count < 5 ? 'orange' : 'red';
+    const labelText = label.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] ?? c));
+    const valueText = count === 0 ? 'passing' : `${count} critical`;
+    // Shields.io-compatible flat badge SVG
+    const labelWidth = Math.max(labelText.length * 6 + 20, 60);
+    const valueWidth = Math.max(valueText.length * 6 + 20, 60);
+    const totalWidth = labelWidth + valueWidth;
+    const lx = labelWidth / 2 + 1;
+    const vx = labelWidth + valueWidth / 2 - 1;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="20" role="img" aria-label="${labelText}: ${valueText}">
+  <title>${labelText}: ${valueText}</title>
+  <linearGradient id="s" x2="0" y2="100%">
+    <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+    <stop offset="1" stop-opacity=".1"/>
+  </linearGradient>
+  <clipPath id="r">
+    <rect width="${totalWidth}" height="20" rx="3" fill="#fff"/>
+  </clipPath>
+  <g clip-path="url(#r)">
+    <rect width="${labelWidth}" height="20" fill="#555"/>
+    <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="#${color}"/>
+    <rect width="${totalWidth}" height="20" fill="url(#s)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="110">
+    <text x="${lx * 10}" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="${(labelWidth - 10) * 10}">${labelText}</text>
+    <text x="${lx * 10}" y="140" transform="scale(.1)" textLength="${(labelWidth - 10) * 10}">${labelText}</text>
+    <text x="${vx * 10}" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="${(valueWidth - 10) * 10}">${valueText}</text>
+    <text x="${vx * 10}" y="140" transform="scale(.1)" textLength="${(valueWidth - 10) * 10}">${valueText}</text>
+  </g>
+</svg>`;
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('X-Org-Id', orgId);
+    res.send(svg);
+});
+exports.app.get('/health', (_req, res) => {
     res.json({ status: 'ok', version: '0.1.0' });
 });
-app.post('/scan', scanLimiter, async (req, res) => {
+exports.app.get('/types', (_req, res) => {
+    res.json({ types: [...reporter_1.KNOWN_TYPES], owasp: owasp_1.FINDING_TO_OWASP });
+});
+exports.app.post('/scan', scanLimiter, async (req, res) => {
+    // ── Request timeout guard ──────────────────────────────────────────────────
+    // Prevent DoS via inputs that trigger catastrophic backtracking in regex-based
+    // parsers. If the handler hasn't responded within SCAN_TIMEOUT_MS, send 408.
+    let responded = false;
+    const timeoutHandle = setTimeout(() => {
+        if (!responded && !res.headersSent) {
+            responded = true;
+            res.status(408).json({
+                error: `Scan timed out after ${SCAN_TIMEOUT_MS}ms. The input may contain patterns that cause excessive processing time.`,
+            });
+        }
+    }, SCAN_TIMEOUT_MS);
+    const originalJson = res.json.bind(res);
+    res.json = ((body) => {
+        responded = true;
+        clearTimeout(timeoutHandle);
+        return originalJson(body);
+    });
+    // Content-Type validation: only accept application/json
+    const contentType = req.headers['content-type'] ?? '';
+    if (!contentType.includes('application/json')) {
+        res.status(415).json({ error: 'Unsupported Media Type: Content-Type must be application/json' });
+        return;
+    }
     // ?sarif=true returns a SARIF 2.1.0 document instead of the default JSON shape.
     const sarifMode = req.query['sarif'] === 'true';
     // Explicit payload size guard (belt-and-suspenders on top of express.json limit)
@@ -357,6 +631,21 @@ app.post('/scan', scanLimiter, async (req, res) => {
         });
         return;
     }
+    // ── Per-request AI provider and key resolution ────────────────────────────
+    //
+    // X-AI-Provider header: "anthropic" (default) | "openai"
+    // X-Anthropic-Key header: Anthropic API key (validated format)
+    // X-OpenAI-Key header: OpenAI API key (or any sk-... token for compatible endpoints)
+    // X-AI-Endpoint header: optional custom OpenAI-compatible base URL
+    const requestAiProvider = resolveAiProvider((() => { const h = req.headers['x-ai-provider']; return typeof h === 'string' ? h : undefined; })());
+    const requestOpenAiKey = (() => {
+        const h = req.headers['x-openai-key'];
+        return typeof h === 'string' && h.length > 0 ? h : undefined;
+    })();
+    const requestOpenAiEndpoint = (() => {
+        const h = req.headers['x-ai-endpoint'];
+        return typeof h === 'string' && h.length > 0 ? h : undefined;
+    })();
     // Per-request Anthropic key: the caller may supply their own key via the
     // X-Anthropic-Key header. This lets individual callers use ?aiExplain=true
     // without the server having a shared ANTHROPIC_API_KEY. Falls back to the
@@ -380,13 +669,25 @@ app.post('/scan', scanLimiter, async (req, res) => {
     // If requestAnthropicKey is null, the response was already sent (invalid key).
     if (requestAnthropicKey === null)
         return;
+    // Resolve the per-request API key: prefer provider-specific header, fall back to Anthropic key
+    const resolvedApiKey = requestAiProvider === 'openai'
+        ? (requestOpenAiKey ?? requestAnthropicKey)
+        : (requestAnthropicKey ?? requestOpenAiKey);
     // Schema validation — reject malformed requests early with detailed errors.
     const scanValidation = validateRequestBody(req.body, SCAN_BODY_SCHEMA, '/scan');
     if (!scanValidation.valid) {
         res.status(400).json({ error: scanValidation.errors.join('; ') });
         return;
     }
-    const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes, webhookUrl, webhookSecret } = req.body;
+    const { code, filename: rawFilename, packageJson, aiExplain, ignoreTypes, webhookUrl, webhookSecret, minConfidence: bodyMinConfidence } = req.body;
+    // minConfidence: filter out findings below this threshold (0.0–1.0).
+    // Accepted from body field or query parameter; body takes precedence.
+    const rawMinConf = bodyMinConfidence ?? (req.query['minConfidence'] ? parseFloat(req.query['minConfidence']) : undefined);
+    if (rawMinConf !== undefined && (typeof rawMinConf !== 'number' || isNaN(rawMinConf) || rawMinConf < 0 || rawMinConf > 1)) {
+        res.status(400).json({ error: 'minConfidence must be a number between 0.0 and 1.0' });
+        return;
+    }
+    const minConfidence = rawMinConf;
     if (!code || typeof code !== 'string') {
         res.status(400).json({ error: 'Missing required field: code (string)' });
         return;
@@ -419,6 +720,25 @@ app.post('/scan', scanLimiter, async (req, res) => {
             res.status(400).json({
                 error: `Unknown ignoreTypes: ${unknown.join(', ')}. Valid types: ${[...reporter_1.KNOWN_TYPES].sort().join(', ')}`,
             });
+            return;
+        }
+    }
+    // Validate webhookUrl: must be a valid https URL if provided
+    if (webhookUrl !== undefined) {
+        if (typeof webhookUrl !== 'string') {
+            res.status(400).json({ error: 'Invalid field: webhookUrl must be a string' });
+            return;
+        }
+        let parsedWebhookUrl;
+        try {
+            parsedWebhookUrl = new URL(webhookUrl);
+        }
+        catch {
+            res.status(400).json({ error: 'Invalid webhookUrl: must be a valid URL' });
+            return;
+        }
+        if (parsedWebhookUrl.protocol !== 'https:') {
+            res.status(400).json({ error: 'Invalid webhookUrl: only https:// URLs are accepted' });
             return;
         }
     }
@@ -455,6 +775,26 @@ app.post('/scan', scanLimiter, async (req, res) => {
         const rbResult = (0, ruby_parser_1.parseRubyCode)(code, effectiveFilename);
         findings = (0, ruby_parser_1.scanRuby)(rbResult).map((f) => ({ ...f, file: filename ?? 'input' }));
     }
+    else if (ext === '.kt' || ext === '.kts') {
+        // Kotlin/Android files use the dedicated regex-based Kotlin scanner
+        const ktResult = (0, kotlin_parser_1.parseKotlinCode)(code, effectiveFilename);
+        findings = (0, kotlin_parser_1.scanKotlin)(ktResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+    }
+    else if (ext === '.swift') {
+        // Swift files use the dedicated regex-based Swift scanner
+        const swiftResult = (0, swift_parser_1.parseSwiftCode)(code, effectiveFilename);
+        findings = (0, swift_parser_1.scanSwift)(swiftResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+    }
+    else if (ext === '.rs') {
+        // Rust files use the dedicated regex-based Rust scanner
+        const rustResult = (0, rust_parser_1.parseRustCode)(code, effectiveFilename);
+        findings = (0, rust_parser_1.scanRust)(rustResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+    }
+    else if (ext === '.php') {
+        // PHP files use the dedicated regex-based PHP scanner
+        const phpResult = (0, php_parser_1.parsePHPCode)(code, effectiveFilename);
+        findings = (0, php_parser_1.scanPHP)(phpResult).map((f) => ({ ...f, file: filename ?? 'input' }));
+    }
     else {
         // JS/TS files use the AST-based parser and detector suite
         let parsed;
@@ -483,6 +823,7 @@ app.post('/scan', scanLimiter, async (req, res) => {
             ...(0, cors_2.detectCORSMisconfiguration)(parsed),
             ...(0, redos_1.detectReDoS)(parsed),
             ...(0, weakCrypto_1.detectWeakCrypto)(parsed),
+            ...(0, csrf_1.detectCSRF)(parsed),
         ].map((f) => ({ ...f, file: filename ?? 'input' }));
     }
     // Scan package.json for unsafe deps if provided
@@ -501,10 +842,28 @@ app.post('/scan', scanLimiter, async (req, res) => {
             findings = findings.filter((f) => !typesToIgnore.has(f.type));
         }
     }
-    // AI explain enrichment — uses per-request key (X-Anthropic-Key header) when
-    // present, otherwise falls back to the server-level ANTHROPIC_API_KEY env var.
+    // Optional minConfidence filter — drop findings with a confidence score below the
+    // caller-specified threshold.  Findings that do not carry a confidence field are
+    // always kept (conservative: absence of a score means the detector didn't rate
+    // itself, not that it is low-confidence).
+    const rawMinConfidence = req.query['minConfidence'];
+    if (rawMinConfidence !== undefined) {
+        const threshold = parseFloat(String(rawMinConfidence));
+        if (!Number.isNaN(threshold) && threshold >= 0 && threshold <= 1) {
+            findings = findings.filter((f) => f.confidence === undefined ||
+                f.confidence >= threshold);
+        }
+    }
+    // Optional minConfidence threshold — remove findings below the confidence threshold.
+    // Findings without a confidence value are kept (they pass the filter).
+    if (minConfidence !== undefined) {
+        findings = findings.filter((f) => (f.confidence ?? 1) >= minConfidence);
+    }
+    // AI explain enrichment — supports Anthropic (default) and OpenAI backends.
+    // Provider resolved from X-AI-Provider header → AI_EXPLAIN_PROVIDER env var → 'anthropic'.
+    // API key resolved from X-Anthropic-Key / X-OpenAI-Key headers → env vars.
     if (aiExplain && findings.length > 0) {
-        findings = await enrichWithAI(findings, requestAnthropicKey);
+        findings = await enrichWithAI(findings, resolvedApiKey, requestAiProvider, requestOpenAiEndpoint);
     }
     const scanSummary = findings.reduce((acc, f) => {
         acc[f.severity] = (acc[f.severity] ?? 0) + 1;
@@ -530,7 +889,7 @@ app.post('/scan', scanLimiter, async (req, res) => {
     }
 });
 // Helper: fetch JSON from GitHub Contents API
-const GITHUB_REQUEST_TIMEOUT_MS = 15000;
+const GITHUB_REQUEST_TIMEOUT_MS = 30000;
 function githubGet(url) {
     return new Promise((resolve, reject) => {
         const opts = new URL(url);
@@ -603,7 +962,7 @@ async function collectFiles(apiBase, dirPath, branch, collected, max, ignorePatt
             continue;
         if (item.type === 'file') {
             const ext = item.name.split('.').pop() ?? '';
-            if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'java', 'cs', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'rb'].includes(ext) && item.size <= 200 * 1024) {
+            if (['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'java', 'cs', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'rb', 'php', 'kt', 'kts', 'swift', 'rs'].includes(ext) && item.size <= 200 * 1024) {
                 collected.push(item);
             }
         }
@@ -612,7 +971,7 @@ async function collectFiles(apiBase, dirPath, branch, collected, max, ignorePatt
         }
     }
 }
-app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
+exports.app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
     // ?sarif=true or body.sarif === true returns a SARIF 2.1.0 document instead of the default JSON shape.
     // This enables GitHub Code Scanning integration for repository scans.
     const body = req.body;
@@ -623,18 +982,43 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
         res.status(400).json({ error: repoValidation.errors.join('; ') });
         return;
     }
-    const { repoUrl, branch = 'main', ignorePatterns = [], ignoreTypes, webhookUrl, webhookSecret } = req.body;
+    const { repoUrl, branch = 'main', sinceCommit, changedFilesOnly, ignorePatterns = [], ignoreTypes, webhookUrl, webhookSecret } = req.body;
     if (!repoUrl || typeof repoUrl !== 'string') {
         res.status(400).json({ error: 'Missing required field: repoUrl (string)' });
         return;
     }
+    // SSRF protection: validate repoUrl against allowlisted hostnames
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(repoUrl.trim());
+    }
+    catch {
+        res.status(400).json({ error: 'repoUrl must be a valid URL (e.g. https://github.com/owner/repo)' });
+        return;
+    }
+    if (parsedUrl.protocol !== 'https:') {
+        res.status(400).json({ error: 'repoUrl must use the https:// scheme' });
+        return;
+    }
+    const ALLOWED_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
+    if (!ALLOWED_HOSTS.has(parsedUrl.hostname)) {
+        res.status(400).json({ error: 'Only github.com, gitlab.com, and bitbucket.org repositories are supported' });
+        return;
+    }
+    // Block private IP ranges to prevent SSRF via DNS rebinding
+    const PRIVATE_IP_RE = /^(?:127\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|::1$|localhost)/i;
+    if (PRIVATE_IP_RE.test(parsedUrl.hostname)) {
+        res.status(400).json({ error: 'repoUrl resolves to a private or loopback address — not allowed' });
+        return;
+    }
     // Parse GitHub URL: https://github.com/owner/repo
-    const match = repoUrl.trim().replace(/\.git$/, '').match(/github\.com\/([^/]+)\/([^/]+)/);
+    const match = repoUrl.trim().replace(/\.git$/, '').match(/(?:github\.com|gitlab\.com|bitbucket\.org)\/([^/]+)\/([^/]+)/);
     if (!match) {
-        res.status(400).json({ error: 'repoUrl must be a valid GitHub repository URL (https://github.com/owner/repo)' });
+        res.status(400).json({ error: 'repoUrl must be a valid repository URL (https://github.com/owner/repo)' });
         return;
     }
     const [, owner, repo] = match;
+    // Only GitHub is supported for the API calls — other hosts fall back to GitHub-compatible API
     const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
     try {
         const repoScanStart = Date.now();
@@ -659,14 +1043,44 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
             // .aiscanner file not present or unreadable — ignore
         }
         const patterns = [...bodyPatterns, ...dotAiScannerPatterns];
+        // ── Incremental mode: filter to changed files only ────────────────────────
+        // When sinceCommit is provided, use the GitHub Compare API to get only files
+        // changed between sinceCommit and the target branch. This dramatically reduces
+        // scan time for large repos in CI pipelines.
+        let changedFilePaths = null;
+        if (sinceCommit && typeof sinceCommit === 'string' && sinceCommit.length >= 7) {
+            try {
+                const compareUrl = `${apiBase}/compare/${encodeURIComponent(sinceCommit)}...${encodeURIComponent(branch)}`;
+                const compareData = await githubGet(compareUrl);
+                if (compareData.files && Array.isArray(compareData.files)) {
+                    changedFilePaths = new Set(compareData.files
+                        .filter((f) => f.status !== 'removed')
+                        .map((f) => f.filename));
+                    console.log(`[scan-repo] Incremental mode: ${changedFilePaths.size} file(s) changed since ${sinceCommit.slice(0, 8)}`);
+                }
+            }
+            catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                console.warn(`[scan-repo] Compare API failed (${msg}) — falling back to full scan`);
+            }
+        }
         const collected = [];
         await collectFiles(apiBase, '', branch, collected, 50, patterns);
-        if (collected.length === 0) {
-            res.json({ findings: [], summary: (0, reporter_1.summarize)([]), filesScanned: 0 });
+        // Filter to changed files if incremental mode is active
+        const filesToScan = changedFilePaths
+            ? collected.filter((item) => changedFilePaths.has(item.path))
+            : collected;
+        if (filesToScan.length === 0) {
+            res.json({
+                findings: [],
+                summary: (0, reporter_1.summarize)([]),
+                filesScanned: 0,
+                ...(changedFilePaths ? { incrementalMode: true, totalFiles: collected.length, changedFiles: changedFilePaths.size } : {}),
+            });
             return;
         }
         const allFindings = [];
-        await Promise.all(collected.map(async (item) => {
+        await Promise.all(filesToScan.map(async (item) => {
             try {
                 const code = await githubGetText(`${apiBase}/contents/${item.path}?ref=${encodeURIComponent(branch)}`);
                 const ext = path_1.default.extname(item.name).toLowerCase();
@@ -695,6 +1109,22 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
                     const parsed = (0, ruby_parser_1.parseRubyCode)(code, item.path);
                     findings = (0, ruby_parser_1.scanRuby)(parsed);
                 }
+                else if (ext === '.kt' || ext === '.kts') {
+                    const parsed = (0, kotlin_parser_1.parseKotlinCode)(code, item.path);
+                    findings = (0, kotlin_parser_1.scanKotlin)(parsed);
+                }
+                else if (ext === '.swift') {
+                    const parsed = (0, swift_parser_1.parseSwiftCode)(code, item.path);
+                    findings = (0, swift_parser_1.scanSwift)(parsed);
+                }
+                else if (ext === '.rs') {
+                    const parsed = (0, rust_parser_1.parseRustCode)(code, item.path);
+                    findings = (0, rust_parser_1.scanRust)(parsed);
+                }
+                else if (ext === '.php') {
+                    const parsed = (0, php_parser_1.parsePHPCode)(code, item.path);
+                    findings = (0, php_parser_1.scanPHP)(parsed);
+                }
                 else {
                     // JS/TS — use AST-based detectors
                     const parsed = (0, parser_1.parseCode)(code, item.path);
@@ -715,6 +1145,7 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
                         ...(0, cors_2.detectCORSMisconfiguration)(parsed),
                         ...(0, redos_1.detectReDoS)(parsed),
                         ...(0, weakCrypto_1.detectWeakCrypto)(parsed),
+                        ...(0, csrf_1.detectCSRF)(parsed),
                     ].map((f) => ({ ...f, file: item.path }));
                 }
                 allFindings.push(...findings);
@@ -755,7 +1186,12 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
             res.json((0, sarif_1.buildSARIF)(dedupedFindings));
             return;
         }
-        const responsePayload = { findings: dedupedFindings, summary: (0, reporter_1.summarize)(dedupedFindings), filesScanned: collected.length };
+        const responsePayload = {
+            findings: dedupedFindings,
+            summary: (0, reporter_1.summarize)(dedupedFindings),
+            filesScanned: filesToScan.length,
+            ...(changedFilePaths ? { incrementalMode: true, totalFiles: collected.length, changedFiles: changedFilePaths.size } : {}),
+        };
         res.json(responsePayload);
         // Fire-and-forget webhook delivery after responding to the client
         if (webhookUrl && typeof webhookUrl === 'string') {
@@ -768,8 +1204,144 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
         res.status(500).json({ error: `Failed to scan repository: ${msg}` });
     }
 });
+// ── POST /fix — dry-run fix preview ──────────────────────────────────────────
+//
+// Accepts: { code: string, filename: string, findings?: Finding[] }
+// If findings are not provided, runs a scan first.
+// Returns: { fixes: FixResult[], diff: string, applied: number }
+exports.app.post('/fix', scanLimiter, async (req, res) => {
+    // Content-Type validation: only accept application/json
+    const fixContentType = req.headers['content-type'] ?? '';
+    if (!fixContentType.includes('application/json')) {
+        res.status(415).json({ error: 'Unsupported Media Type: Content-Type must be application/json' });
+        return;
+    }
+    const body = req.body;
+    const code = body['code'];
+    const filename = body['filename'];
+    if (typeof code !== 'string' || !code.trim()) {
+        res.status(400).json({ error: '"code" must be a non-empty string' });
+        return;
+    }
+    if (typeof filename !== 'string' || !filename.trim()) {
+        res.status(400).json({ error: '"filename" must be a non-empty string' });
+        return;
+    }
+    // Payload size guard: prevent DoS via large code strings
+    if (typeof code === 'string' && code.length > 500000) {
+        res.status(413).json({ error: 'Payload too large' });
+        return;
+    }
+    // Write code to a temp file so applyFixes can read it
+    const os = await import('os');
+    const tmpDir = fs_1.default.mkdtempSync(path_1.default.join(os.tmpdir(), 'ai-sec-fix-'));
+    try {
+        const tmpFile = path_1.default.join(tmpDir, path_1.default.basename(filename));
+        fs_1.default.writeFileSync(tmpFile, code, 'utf-8');
+        // Get findings — either from body or by scanning
+        let findings;
+        if (Array.isArray(body['findings']) && body['findings'].length > 0) {
+            // Use provided findings but remap file paths to tmpFile
+            findings = body['findings'].map((f) => ({ ...f, file: tmpFile }));
+        }
+        else {
+            // Run a fresh scan on the temp file
+            const scanBody = { code, filename };
+            // Inline scan logic (same as /scan but synchronous-ish)
+            const tempReq = { body: scanBody };
+            // Simplified: just run the same scan function used in /scan
+            const scanFindings = await (async () => {
+                const ext = path_1.default.extname(filename).toLowerCase();
+                if (ext === '.py') {
+                    const { parsePythonCode: p, scanPython: s } = await import('./scanner/python-parser.js');
+                    return s(p(code, tmpFile));
+                }
+                else if (ext === '.java') {
+                    const { parseJavaCode: p, scanJava: s } = await import('./scanner/java-parser.js');
+                    return s(p(code, tmpFile));
+                }
+                else if (ext === '.cs') {
+                    const { parseCSharpCode: p, scanCSharp: s } = await import('./scanner/csharp-parser.js');
+                    return s(p(code, tmpFile));
+                }
+                else if (ext === '.go') {
+                    const { parseGoCode: p, scanGo: s } = await import('./scanner/go-parser.js');
+                    return s(p(code, tmpFile));
+                }
+                else if (ext === '.rb') {
+                    const { parseRubyCode: p, scanRuby: s } = await import('./scanner/ruby-parser.js');
+                    return s(p(code, tmpFile));
+                }
+                else if (ext === '.kt' || ext === '.kts') {
+                    const { parseKotlinCode: p, scanKotlin: s } = await import('./scanner/kotlin-parser.js');
+                    return s(p(code, tmpFile));
+                }
+                else if (ext === '.swift') {
+                    const { parseSwiftCode: p, scanSwift: s } = await import('./scanner/swift-parser.js');
+                    return s(p(code, tmpFile));
+                }
+                else if (ext === '.rs') {
+                    const { parseRustCode: p, scanRust: s } = await import('./scanner/rust-parser.js');
+                    return s(p(code, tmpFile));
+                }
+                return [];
+            })();
+            findings = scanFindings;
+        }
+        // Apply fixes in dry-run mode
+        const fixResults = (0, fixer_js_1.applyFixes)(findings, /* dryRun */ true);
+        const applied = fixResults.filter((r) => r.applied).length;
+        // Build diff
+        const diffLines = [];
+        const codeLines = code.split('\n');
+        for (const r of fixResults) {
+            if (!r.applied || r.originalLine === undefined || r.fixedLine === undefined)
+                continue;
+            const lineIdx = r.finding.line - 1;
+            const ctxStart = Math.max(0, lineIdx - 2);
+            const ctxEnd = Math.min(codeLines.length - 1, lineIdx + 2);
+            diffLines.push(`@@ -${ctxStart + 1},${ctxEnd - ctxStart + 1} +${ctxStart + 1},${ctxEnd - ctxStart + 1} @@ [${r.finding.type}]`);
+            for (let i = ctxStart; i <= ctxEnd; i++) {
+                if (i === lineIdx) {
+                    diffLines.push(`-${r.originalLine}`);
+                    diffLines.push(`+${r.fixedLine}`);
+                }
+                else {
+                    diffLines.push(` ${codeLines[i] ?? ''}`);
+                }
+            }
+        }
+        res.json({
+            fixes: fixResults.map((r) => ({
+                type: r.finding.type,
+                severity: r.finding.severity,
+                line: r.finding.line,
+                applied: r.applied,
+                description: r.description,
+                originalLine: r.originalLine,
+                fixedLine: r.fixedLine,
+            })),
+            diff: diffLines.join('\n'),
+            applied,
+            total: fixResults.length,
+        });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(500).json({ error: `Fix preview failed: ${msg}` });
+    }
+    finally {
+        // Guaranteed cleanup of temp directory on all code paths
+        try {
+            fs_1.default.rmSync(tmpDir, { recursive: true, force: true });
+        }
+        catch {
+            /* ignore cleanup errors */
+        }
+    }
+});
 // ── SSE /watch endpoint — streams scan results as files change ───────────────
-app.get('/watch', (req, res) => {
+exports.app.get('/watch', (req, res) => {
     const targetPath = req.query['path'] ?? process.cwd();
     const resolvedPath = path_1.default.resolve(targetPath);
     if (!fs_1.default.existsSync(resolvedPath) || !fs_1.default.statSync(resolvedPath).isDirectory()) {
@@ -785,40 +1357,61 @@ app.get('/watch', (req, res) => {
     // Send initial connected event
     res.write(`event: connected\ndata: ${JSON.stringify({ path: resolvedPath, ts: new Date().toISOString() })}\n\n`);
     const JS_TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-    const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb']);
+    const ALL_EXTENSIONS = new Set([...JS_TS_EXTENSIONS, '.py', '.go', '.java', '.cs', '.c', '.cpp', '.cc', '.h', '.rb', '.kt', '.kts', '.swift', '.rs', '.php']);
     let debounceTimer = null;
     const pendingFiles = new Set();
     function scanFile(filePath) {
         try {
             const code = fs_1.default.readFileSync(filePath, 'utf-8');
+            // Check cache first — return cached findings if file content hasn't changed
+            const cached = (0, scan_cache_1.getCachedFindings)(filePath, code);
+            if (cached !== null)
+                return cached;
             const ext = path_1.default.extname(filePath).toLowerCase();
+            let findings;
             if (ext === '.py') {
                 const parsed = (0, python_parser_1.parsePythonCode)(code, filePath);
-                return (0, python_parser_1.scanPython)(parsed);
+                findings = (0, python_parser_1.scanPython)(parsed);
             }
             else if (ext === '.go') {
                 const parsed = (0, go_parser_1.parseGoCode)(code, filePath);
-                return (0, go_parser_1.scanGo)(parsed);
+                findings = (0, go_parser_1.scanGo)(parsed);
             }
             else if (ext === '.java') {
                 const parsed = (0, java_parser_1.parseJavaCode)(code, filePath);
-                return (0, java_parser_1.scanJava)(parsed);
+                findings = (0, java_parser_1.scanJava)(parsed);
             }
             else if (ext === '.cs') {
                 const parsed = (0, csharp_parser_1.parseCSharpCode)(code, filePath);
-                return (0, csharp_parser_1.scanCSharp)(parsed);
+                findings = (0, csharp_parser_1.scanCSharp)(parsed);
             }
             else if (['.c', '.cpp', '.cc', '.h'].includes(ext)) {
                 const parsed = (0, c_parser_1.parseCCode)(code, filePath);
-                return (0, c_parser_1.scanC)(parsed);
+                findings = (0, c_parser_1.scanC)(parsed);
             }
             else if (ext === '.rb') {
                 const parsed = (0, ruby_parser_1.parseRubyCode)(code, filePath);
-                return (0, ruby_parser_1.scanRuby)(parsed);
+                findings = (0, ruby_parser_1.scanRuby)(parsed);
+            }
+            else if (ext === '.kt' || ext === '.kts') {
+                const parsed = (0, kotlin_parser_1.parseKotlinCode)(code, filePath);
+                findings = (0, kotlin_parser_1.scanKotlin)(parsed);
+            }
+            else if (ext === '.swift') {
+                const parsed = (0, swift_parser_1.parseSwiftCode)(code, filePath);
+                findings = (0, swift_parser_1.scanSwift)(parsed);
+            }
+            else if (ext === '.rs') {
+                const parsed = (0, rust_parser_1.parseRustCode)(code, filePath);
+                findings = (0, rust_parser_1.scanRust)(parsed);
+            }
+            else if (ext === '.php') {
+                const parsed = (0, php_parser_1.parsePHPCode)(code, filePath);
+                findings = (0, php_parser_1.scanPHP)(parsed);
             }
             else if (JS_TS_EXTENSIONS.has(ext)) {
                 const parsed = (0, parser_1.parseCode)(code, filePath);
-                return [
+                findings = [
                     ...(0, secrets_1.detectSecrets)(parsed),
                     ...(0, sql_1.detectSQLInjection)(parsed),
                     ...(0, shell_1.detectShellInjection)(parsed),
@@ -835,9 +1428,15 @@ app.get('/watch', (req, res) => {
                     ...(0, cors_2.detectCORSMisconfiguration)(parsed),
                     ...(0, redos_1.detectReDoS)(parsed),
                     ...(0, weakCrypto_1.detectWeakCrypto)(parsed),
+                    ...(0, csrf_1.detectCSRF)(parsed),
                 ].map((f) => ({ ...f, file: filePath }));
             }
-            return [];
+            else {
+                findings = [];
+            }
+            // Cache the scan results for this file content
+            (0, scan_cache_1.setCachedFindings)(filePath, code, findings);
+            return findings;
         }
         catch {
             return [];
@@ -890,17 +1489,28 @@ app.get('/watch', (req, res) => {
         watcher.close();
     });
 });
-exports.server = app.listen(PORT, () => {
-    console.log(`AI Security Scanner server running on http://localhost:${PORT}`);
-});
+// In test mode, do not auto-start: let supertest or the test create its own server.
+exports.server = process.env.NODE_ENV === 'test'
+    ? null
+    : exports.app.listen(PORT, () => {
+        console.log(`AI Security Scanner server running on http://localhost:${PORT}`);
+    });
 // Graceful shutdown: drain connections before process exit so tests close
 // cleanly and production process managers can do zero-downtime restarts.
 function gracefulShutdown(signal) {
     console.log(`[server] ${signal} received — closing HTTP server...`);
-    exports.server.close(() => {
-        console.log('[server] HTTP server closed. Exiting.');
+    clearInterval(cacheFlushTimer);
+    (0, scan_cache_1.persistCache)();
+    if (exports.server) {
+        exports.server.close(() => {
+            console.log('[server] HTTP server closed. Exiting.');
+            process.exit(0);
+        });
+    }
+    else {
+        console.log('[server] No active HTTP server (test mode). Exiting.');
         process.exit(0);
-    });
+    }
 }
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));

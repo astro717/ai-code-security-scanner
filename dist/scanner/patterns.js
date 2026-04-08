@@ -198,5 +198,14 @@ exports.VULNERABILITY_PATTERNS = {
         description: 'Non-literal format string passed to printf/fprintf family — memory read/write risk.',
         remediation: 'Always use a string literal as the format argument to printf-family functions.',
     },
+    CSRF: {
+        id: 'CSRF',
+        name: 'Cross-Site Request Forgery',
+        severity: 'high',
+        description: 'CSRF protection is disabled or missing on a state-changing endpoint.',
+        remediation: 'For Express: use the csurf middleware on POST/PUT/DELETE routes. ' +
+            'For Django: remove @csrf_exempt and rely on the built-in CSRF middleware. ' +
+            'For Flask: enable CSRFProtect from Flask-WTF and set WTF_CSRF_ENABLED = True.',
+    },
 };
 //# sourceMappingURL=patterns.js.map

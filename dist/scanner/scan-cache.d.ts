@@ -46,6 +46,10 @@ export interface CacheOptions {
     cacheDir?: string;
     /** Disable the cache entirely (useful for --no-cache flag). */
     disabled?: boolean;
+    /** Cache entry TTL in milliseconds. Entries older than this are evicted. Default: 7 days. */
+    cacheTtlMs?: number;
+    /** Maximum number of in-memory cache entries. Oldest entries are evicted when exceeded. Default: 5000. */
+    maxEntries?: number;
 }
 /**
  * Initialise the cache. Must be called once before any get/set operations.
@@ -73,18 +77,40 @@ export declare function setCachedFindings(filePath: string, content: string, fin
 /**
  * Flush the in-memory cache to disk.
  * A no-op when the cache is disabled or nothing has changed since the last persist.
+ *
+ * Uses atomic write (write to temp file, then rename) to prevent corruption
+ * in concurrent process scenarios. This is safe even when multiple processes
+ * try to write simultaneously — the last rename wins, and intermediate files
+ * are cleaned up.
  */
 export declare function persistCache(): void;
-/**
- * Return basic cache statistics for diagnostic output.
- */
-export declare function getCacheStats(): {
+export interface CacheAgeDistribution {
+    /** Entries cached within the last hour. */
+    lastHour: number;
+    /** Entries cached between 1 hour and 1 day ago. */
+    lastDay: number;
+    /** Entries cached between 1 day and 7 days ago. */
+    lastWeek: number;
+    /** Entries older than 7 days. */
+    older: number;
+}
+export interface CacheStatsResult {
     entries: number;
     cachePath: string | null;
     disabled: boolean;
     hits: number;
     misses: number;
-};
+    cacheTtlMs: number;
+    /** Hit rate as a percentage string e.g. "72.4". Empty string when no lookups. */
+    hitRatePct: string;
+    /** Distribution of cache entry ages across four buckets. */
+    ageDistribution: CacheAgeDistribution;
+}
+/**
+ * Return cache statistics for diagnostic output, including hit rate percentage
+ * and a distribution of entry ages across four time buckets.
+ */
+export declare function getCacheStats(): CacheStatsResult;
 /**
  * Clear all in-memory entries and delete the on-disk cache file.
  * Primarily useful in tests and for a future --clear-cache flag.

@@ -55,6 +55,7 @@ function parseCode(code, filename = 'input.tsx') {
         ast,
         code,
         lines: code.split('\n'),
+        filePath: filename,
     };
 }
 //# sourceMappingURL=parser.js.map

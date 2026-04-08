@@ -1468,28 +1468,28 @@ app.post('/fix', scanLimiter, async (req, res): Promise<void> => {
       const scanFindings = await (async (): Promise<Finding[]> => {
         const ext = path.extname(filename).toLowerCase();
         if (ext === '.py') {
-          const { parsePythonCode: p, scanPython: s } = await import('./scanner/python-parser');
+          const { parsePythonCode: p, scanPython: s } = await import('./scanner/python-parser.js');
           return s(p(code, tmpFile));
         } else if (ext === '.java') {
-          const { parseJavaCode: p, scanJava: s } = await import('./scanner/java-parser');
+          const { parseJavaCode: p, scanJava: s } = await import('./scanner/java-parser.js');
           return s(p(code, tmpFile));
         } else if (ext === '.cs') {
-          const { parseCSharpCode: p, scanCSharp: s } = await import('./scanner/csharp-parser');
+          const { parseCSharpCode: p, scanCSharp: s } = await import('./scanner/csharp-parser.js');
           return s(p(code, tmpFile));
         } else if (ext === '.go') {
-          const { parseGoCode: p, scanGo: s } = await import('./scanner/go-parser');
+          const { parseGoCode: p, scanGo: s } = await import('./scanner/go-parser.js');
           return s(p(code, tmpFile));
         } else if (ext === '.rb') {
-          const { parseRubyCode: p, scanRuby: s } = await import('./scanner/ruby-parser');
+          const { parseRubyCode: p, scanRuby: s } = await import('./scanner/ruby-parser.js');
           return s(p(code, tmpFile));
         } else if (ext === '.kt' || ext === '.kts') {
-          const { parseKotlinCode: p, scanKotlin: s } = await import('./scanner/kotlin-parser');
+          const { parseKotlinCode: p, scanKotlin: s } = await import('./scanner/kotlin-parser.js');
           return s(p(code, tmpFile));
         } else if (ext === '.swift') {
-          const { parseSwiftCode: p, scanSwift: s } = await import('./scanner/swift-parser');
+          const { parseSwiftCode: p, scanSwift: s } = await import('./scanner/swift-parser.js');
           return s(p(code, tmpFile));
         } else if (ext === '.rs') {
-          const { parseRustCode: p, scanRust: s } = await import('./scanner/rust-parser');
+          const { parseRustCode: p, scanRust: s } = await import('./scanner/rust-parser.js');
           return s(p(code, tmpFile));
         }
         return [];

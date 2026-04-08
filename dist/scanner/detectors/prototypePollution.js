@@ -51,6 +51,7 @@ function detectPrototypePollution(result) {
                         column: node.loc.start.column,
                         snippet: result.lines[line - 1]?.trim() ?? '',
                         message: 'Direct assignment to __proto__ can pollute the Object prototype and affect all objects in the application.',
+                        confidence: 0.82,
                     });
                 }
                 // ── 2. obj.constructor.prototype = dynamicValue ───────────────────────
@@ -69,6 +70,7 @@ function detectPrototypePollution(result) {
                             column: node.loc.start.column,
                             snippet: result.lines[line - 1]?.trim() ?? '',
                             message: 'Assignment to constructor.prototype with a dynamic value can pollute the prototype chain.',
+                            confidence: 0.82,
                         });
                     }
                 }
@@ -102,6 +104,7 @@ function detectPrototypePollution(result) {
                         column: node.loc.start.column,
                         snippet: result.lines[line - 1]?.trim() ?? '',
                         message: `${obj}.${fn}() called with a dynamic source object. If the source is user-controlled it can introduce __proto__ or constructor keys and pollute the prototype.`,
+                        confidence: 0.82,
                     });
                 }
             }

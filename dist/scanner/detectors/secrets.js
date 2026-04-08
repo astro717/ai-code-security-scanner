@@ -49,6 +49,7 @@ function detectSecrets(result) {
                         column: node.loc.start.column,
                         snippet: `"${redact(node.value)}"`,
                         message: `Possible secret detected matching pattern ${pattern.source.slice(0, 20)}…`,
+                        confidence: 0.65,
                     });
                     break;
                 }
@@ -81,6 +82,7 @@ function detectSecrets(result) {
                         column: node.loc.start.column,
                         snippet: `${name} = "${redact(val)}"`,
                         message: `Sensitive variable "${name}" assigned a hardcoded string value.`,
+                        confidence: 0.65,
                     });
                 }
             }

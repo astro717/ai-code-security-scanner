@@ -287,6 +287,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
 `;
     expect(findingsOfType(code, 'MISSING_AUTH').length).toBeGreaterThan(0);
   });
+
+  test('does not flag REQUEST_METHOD block with auth guard', () => {
+    const code = `<?php
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  if (!isset($_SESSION['user_id'])) { header('Location: /login'); exit; }
+  $db->query("INSERT INTO items VALUES ('" . $_POST['name'] . "')");
+}
+`;
+    expect(findingsOfType(code, 'MISSING_AUTH').length).toBe(0);
+  });
 });
 
 // ── Cross-cutting tests ────────────────────────────────────────────────────────

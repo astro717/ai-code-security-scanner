@@ -52,6 +52,7 @@ function detectWeakCrypto(result) {
                             `MD5 and SHA-1 are cryptographically broken and must not be used for password hashing, ` +
                             `digital signatures, or token generation. Use SHA-256 or SHA-3 instead. ` +
                             `For passwords, use bcrypt, scrypt, or Argon2.`,
+                        confidence: 0.88,
                     });
                 }
             }

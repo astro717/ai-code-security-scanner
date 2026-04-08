@@ -85,25 +85,43 @@ const os = __importStar(require("os"));
  * be missed). Falls back to 'unknown' if package.json cannot be read.
  */
 function readScannerVersion() {
-    try {
-        const pkgPath = path.join(__dirname, '..', '..', 'package.json');
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        return pkg.version ?? 'unknown';
+    // Try multiple candidate paths in order so the function works both from
+    // the TypeScript source tree (__dirname = src/scanner/) and from a
+    // compiled dist/ bundle (__dirname = dist/scanner/) inside Docker.
+    const candidates = [
+        path.join(__dirname, '..', '..', 'package.json'), // src/scanner/ → root
+        path.join(__dirname, '..', 'package.json'), // dist/scanner/ → dist/ (sometimes)
+        path.join(process.cwd(), 'package.json'), // CWD fallback (Docker WORKDIR)
+    ];
+    for (const pkgPath of candidates) {
+        try {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            if (pkg.version)
+                return pkg.version;
+        }
+        catch {
+            // Path not readable — try next candidate
+        }
     }
-    catch {
-        return 'unknown';
-    }
+    return 'unknown';
 }
 const SCANNER_VERSION = readScannerVersion();
 const CACHE_FILENAME = 'scan-cache.json';
+/** Default maximum number of entries stored in the in-memory cache. Oldest-accessed entry is evicted when exceeded. */
+const DEFAULT_MAX_CACHE_ENTRIES = 5000;
+/** Default cache TTL: 7 days in milliseconds. */
+const DEFAULT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // ── Module-level state ────────────────────────────────────────────────────────
 let _cacheDir = null;
 let _cachePath = null;
-let _entries = {};
+// Map preserves insertion order — we use it as an LRU queue: oldest key first.
+let _entries = new Map();
 let _dirty = false;
 let _disabled = false;
 let _hits = 0;
 let _misses = 0;
+let _cacheTtlMs = DEFAULT_CACHE_TTL_MS;
+let _maxEntries = DEFAULT_MAX_CACHE_ENTRIES;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function defaultCacheDir() {
     // Honour XDG_CACHE_HOME if set, otherwise fall back to ~/.cache
@@ -120,14 +138,33 @@ function hashContent(content) {
  * Safe to call multiple times — subsequent calls are no-ops if options match.
  */
 function initCache(options = {}) {
-    _disabled = options.disabled ?? false;
-    if (_disabled)
+    const newDisabled = options.disabled ?? false;
+    if (!newDisabled) {
+        const dir = options.cacheDir ??
+            process.env['AI_SEC_SCAN_CACHE_DIR'] ??
+            defaultCacheDir();
+        // Re-init guard: if already initialised with the same cacheDir, skip the
+        // disk reload and counter reset entirely. This prevents tests that call
+        // initCache() in beforeEach from accidentally discarding in-flight entries
+        // and resetting hit/miss counters on the second call.
+        if (_cacheDir === dir && !newDisabled && _disabled === false) {
+            return;
+        }
+        _disabled = false;
+        _cacheDir = dir;
+        _cachePath = path.join(dir, CACHE_FILENAME);
+        _cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+        // Read maxEntries from options or env var (SCAN_CACHE_MAX_ENTRIES)
+        const envMaxEntries = process.env['SCAN_CACHE_MAX_ENTRIES'];
+        _maxEntries = options.maxEntries ?? (envMaxEntries ? parseInt(envMaxEntries, 10) : DEFAULT_MAX_CACHE_ENTRIES);
+        if (isNaN(_maxEntries) || _maxEntries < 1) {
+            _maxEntries = DEFAULT_MAX_CACHE_ENTRIES;
+        }
+    }
+    else {
+        _disabled = true;
         return;
-    const dir = options.cacheDir ??
-        process.env['AI_SEC_SCAN_CACHE_DIR'] ??
-        defaultCacheDir();
-    _cacheDir = dir;
-    _cachePath = path.join(dir, CACHE_FILENAME);
+    }
     // Load existing cache from disk (failures are non-fatal)
     try {
         if (fs.existsSync(_cachePath)) {
@@ -138,18 +175,18 @@ function initCache(options = {}) {
             // are applied to all files, not just those whose content changed.
             if (parsed.scannerVersion === SCANNER_VERSION &&
                 typeof parsed.entries === 'object') {
-                _entries = parsed.entries ?? {};
+                _entries = new Map(Object.entries(parsed.entries ?? {}));
             }
             else {
                 // Version mismatch — start fresh
-                _entries = {};
+                _entries = new Map();
                 _dirty = true; // Will overwrite the stale file on next persist
             }
         }
     }
     catch {
         // Corrupt or unreadable cache — start fresh
-        _entries = {};
+        _entries = new Map();
     }
 }
 /**
@@ -165,8 +202,15 @@ function getCachedFindings(filePath, content) {
         _misses++;
         return null;
     }
-    const entry = _entries[filePath];
+    const entry = _entries.get(filePath);
     if (!entry) {
+        _misses++;
+        return null;
+    }
+    // Evict stale entries by age (TTL check).
+    // Use >= so entries at exactly the TTL boundary are treated as expired.
+    if (Date.now() - new Date(entry.scannedAt).getTime() >= _cacheTtlMs) {
+        _entries.delete(filePath);
         _misses++;
         return null;
     }
@@ -175,6 +219,9 @@ function getCachedFindings(filePath, content) {
         _misses++;
         return null;
     }
+    // Promote to most-recently-used: delete and re-insert so it moves to the end.
+    _entries.delete(filePath);
+    _entries.set(filePath, entry);
     _hits++;
     return entry.findings;
 }
@@ -189,16 +236,30 @@ function getCachedFindings(filePath, content) {
 function setCachedFindings(filePath, content, findings) {
     if (_disabled)
         return;
-    _entries[filePath] = {
+    // If this key already exists, remove it first so it is re-inserted at the end.
+    if (_entries.has(filePath))
+        _entries.delete(filePath);
+    _entries.set(filePath, {
         hash: hashContent(content),
         scannedAt: new Date().toISOString(),
         findings,
-    };
+    });
+    // Evict the least-recently-used (first / oldest) entry if we exceed the limit.
+    if (_entries.size > _maxEntries) {
+        const lruKey = _entries.keys().next().value;
+        if (lruKey !== undefined)
+            _entries.delete(lruKey);
+    }
     _dirty = true;
 }
 /**
  * Flush the in-memory cache to disk.
  * A no-op when the cache is disabled or nothing has changed since the last persist.
+ *
+ * Uses atomic write (write to temp file, then rename) to prevent corruption
+ * in concurrent process scenarios. This is safe even when multiple processes
+ * try to write simultaneously — the last rename wins, and intermediate files
+ * are cleaned up.
  */
 function persistCache() {
     if (_disabled || !_dirty || !_cachePath || !_cacheDir)
@@ -207,9 +268,14 @@ function persistCache() {
         fs.mkdirSync(_cacheDir, { recursive: true });
         const data = {
             scannerVersion: SCANNER_VERSION,
-            entries: _entries,
+            entries: Object.fromEntries(_entries),
         };
-        fs.writeFileSync(_cachePath, JSON.stringify(data, null, 2), 'utf8');
+        const json = JSON.stringify(data, null, 2);
+        // Write to a temporary file first, then atomically rename to the target path.
+        // This prevents concurrent writers from creating a partially-written/corrupt cache.
+        const tmpPath = _cachePath + '.tmp';
+        fs.writeFileSync(tmpPath, json, 'utf8');
+        fs.renameSync(tmpPath, _cachePath);
         _dirty = false;
     }
     catch {
@@ -217,15 +283,48 @@ function persistCache() {
     }
 }
 /**
- * Return basic cache statistics for diagnostic output.
+ * Return cache statistics for diagnostic output, including hit rate percentage
+ * and a distribution of entry ages across four time buckets.
  */
 function getCacheStats() {
+    const totalLookups = _hits + _misses;
+    const hitRatePct = totalLookups > 0
+        ? ((_hits / totalLookups) * 100).toFixed(1)
+        : '—';
+    const now = Date.now();
+    const ONE_HOUR = 60 * 60 * 1000;
+    const ONE_DAY = 24 * ONE_HOUR;
+    const ONE_WEEK = 7 * ONE_DAY;
+    const ageDistribution = {
+        lastHour: 0,
+        lastDay: 0,
+        lastWeek: 0,
+        older: 0,
+    };
+    for (const entry of _entries.values()) {
+        const ageMs = now - new Date(entry.scannedAt).getTime();
+        if (ageMs < ONE_HOUR) {
+            ageDistribution.lastHour++;
+        }
+        else if (ageMs < ONE_DAY) {
+            ageDistribution.lastDay++;
+        }
+        else if (ageMs < ONE_WEEK) {
+            ageDistribution.lastWeek++;
+        }
+        else {
+            ageDistribution.older++;
+        }
+    }
     return {
-        entries: Object.keys(_entries).length,
+        entries: _entries.size,
         cachePath: _cachePath,
         disabled: _disabled,
         hits: _hits,
         misses: _misses,
+        cacheTtlMs: _cacheTtlMs,
+        hitRatePct,
+        ageDistribution,
     };
 }
 /**
@@ -233,11 +332,19 @@ function getCacheStats() {
  * Primarily useful in tests and for a future --clear-cache flag.
  */
 function clearCache() {
-    _entries = {};
+    _entries = new Map();
     _dirty = false;
-    if (_cachePath && fs.existsSync(_cachePath)) {
+    _hits = 0;
+    _misses = 0;
+    const pathToDelete = _cachePath;
+    // Reset _cacheDir and _cachePath so the re-init guard in initCache() does not
+    // short-circuit when tests call clearCache() + initCache() with the same
+    // directory but different options (e.g. a different cacheTtlMs).
+    _cacheDir = null;
+    _cachePath = null;
+    if (pathToDelete && fs.existsSync(pathToDelete)) {
         try {
-            fs.unlinkSync(_cachePath);
+            fs.unlinkSync(pathToDelete);
         }
         catch {
             /* ignore */

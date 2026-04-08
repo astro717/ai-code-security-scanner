@@ -52,3 +52,11 @@ $xml = simplexml_load_string($data);
 
 // ── SSTI ─────────────────────────────────────────────────────────────────────
 $twig->render($twig->createTemplate($_GET['tpl']));
+
+// ── MISSING_AUTH (vulnerable: accesses $_POST without auth guard) ─────────────
+function processUserData() {
+  $name = $_POST['name'];
+  $email = $_POST['email'];
+  // No authentication check — direct access to $_POST
+  mysqli_query($conn, "INSERT INTO users (name, email) VALUES ('$name', '$email')");
+}

@@ -51,6 +51,7 @@ function detectOpenRedirect(result) {
                 column: node.loc.start.column,
                 snippet: result.lines[line - 1]?.trim() ?? '',
                 message: 'res.redirect() called with a dynamic URL. Validate and whitelist redirect destinations to prevent open redirect attacks.',
+                confidence: 0.72,
             });
         }
     });

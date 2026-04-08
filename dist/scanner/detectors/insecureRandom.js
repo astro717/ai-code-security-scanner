@@ -52,6 +52,7 @@ function detectInsecureRandom(result) {
                             column: node.loc.start.column,
                             snippet: result.lines[line - 1]?.trim() ?? '',
                             message: `Math.random() used to generate "${idName}". Math.random() is not cryptographically secure — use crypto.randomBytes() or crypto.getRandomValues() instead.`,
+                            confidence: 0.75,
                         });
                     }
                 }
@@ -86,6 +87,7 @@ function detectInsecureRandom(result) {
                             column: node.loc.start.column,
                             snippet: result.lines[line - 1]?.trim() ?? '',
                             message: `Math.random() assigned to "${assignedName}". Math.random() is not cryptographically secure — use crypto.randomBytes() or crypto.getRandomValues() instead.`,
+                            confidence: 0.75,
                         });
                     }
                 }
@@ -121,6 +123,7 @@ function detectInsecureRandom(result) {
                                 column: node.loc.start.column,
                                 snippet: result.lines[line - 1]?.trim() ?? '',
                                 message: `Math.random() value encoded via ${fnName}(). This is not cryptographically secure. Use crypto.randomBytes() for tokens and credentials.`,
+                                confidence: 0.75,
                             });
                         }
                     }
@@ -129,6 +132,41 @@ function detectInsecureRandom(result) {
         }
         // 4. Math.random() concatenated in a string that's assigned to a security-sensitive var
         // (Covered by patterns 1 & 2 via the recursive walkNode on the right-hand side)
+        // 5. return Math.random() inside a security-sensitive function (e.g. generateToken)
+        if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression') {
+            const fnNode = node;
+            const fnName = 'id' in fnNode && fnNode.id ? fnNode.id.name : '';
+            if (fnName && isSecuritySensitiveName(fnName)) {
+                // Walk the body looking for a return with Math.random()
+                (0, utils_1.walkNode)(fnNode.body, (child) => {
+                    if (child.type === 'ReturnStatement') {
+                        const ret = child;
+                        if (ret.argument) {
+                            let foundRandom = false;
+                            (0, utils_1.walkNode)(ret.argument, (grandchild) => {
+                                if (isMathRandomCall(grandchild))
+                                    foundRandom = true;
+                            });
+                            if (foundRandom) {
+                                const line = child.loc.start.line;
+                                if (!reported.has(line)) {
+                                    reported.add(line);
+                                    findings.push({
+                                        type: 'INSECURE_RANDOM',
+                                        severity: 'medium',
+                                        line,
+                                        column: child.loc.start.column,
+                                        snippet: result.lines[line - 1]?.trim() ?? '',
+                                        message: `Math.random() returned from "${fnName}()". Math.random() is not cryptographically secure — use crypto.randomBytes() or crypto.getRandomValues() instead.`,
+                                        confidence: 0.75,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
     });
     return findings;
 }

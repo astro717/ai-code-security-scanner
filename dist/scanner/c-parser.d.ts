@@ -9,7 +9,7 @@
  * Covered vulnerability classes:
  *   - BUFFER_OVERFLOW (unsafe string/buffer functions: gets, strcpy, strcat, sprintf, scanf)
  *   - FORMAT_STRING (printf/fprintf family with non-literal format strings)
- *   - COMMAND_INJECTION (system() / popen() with string concatenation or user input)
+ *   - COMMAND_INJECTION_C (system() / popen() / exec*() family — user-controlled command execution)
  *   - SECRET_HARDCODED (hardcoded credentials in string literals)
  *   - PATH_TRAVERSAL (fopen/open with user-controlled paths)
  *   - INSECURE_RANDOM (rand() / srand(time()) for security use)

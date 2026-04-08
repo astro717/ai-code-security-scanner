@@ -53,6 +53,7 @@ function detectXSS(result) {
                                 column: node.loc.start.column,
                                 snippet: result.lines[line - 1]?.trim() ?? '',
                                 message: 'dangerouslySetInnerHTML with dynamic value. Unsanitized HTML leads to XSS.',
+                                confidence: 0.95,
                             });
                         }
                     }
@@ -76,6 +77,7 @@ function detectXSS(result) {
                             column: node.loc.start.column,
                             snippet: result.lines[line - 1]?.trim() ?? '',
                             message: `Assignment to .${propName} with dynamic value. Use textContent or sanitize the HTML first.`,
+                            confidence: 0.92,
                         });
                     }
                 }

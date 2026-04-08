@@ -100,6 +100,7 @@ function detectPathTraversal(result) {
                         column: node.loc.start.column,
                         snippet: result.lines[line - 1]?.trim() ?? '',
                         message: `${info.fn}() called with dynamic path derived from user input. Validate and sanitize paths to prevent directory traversal (../../../etc/passwd).`,
+                        confidence: 0.85,
                     });
                 }
             }
@@ -116,6 +117,7 @@ function detectPathTraversal(result) {
                     column: node.loc.start.column,
                     snippet: result.lines[line - 1]?.trim() ?? '',
                     message: `path.${info.fn}() called with dynamic argument. User-controlled path segments can escape the intended directory.`,
+                    confidence: 0.85,
                 });
             }
         }

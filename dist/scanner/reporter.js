@@ -14,6 +14,9 @@ const owasp_1 = require("./owasp");
  */
 exports.KNOWN_TYPES = new Set([
     'COMMAND_INJECTION',
+    'COMMAND_INJECTION_C',
+    'COMMAND_INJECTION_CS',
+    'COMMAND_INJECTION_GO',
     'CORS_MISCONFIGURATION',
     'EVAL_INJECTION',
     'INSECURE_RANDOM',
@@ -41,21 +44,49 @@ exports.KNOWN_TYPES = new Set([
     'BUFFER_OVERFLOW',
     'MASS_ASSIGNMENT',
     'FORMAT_STRING',
+    'SSTI',
+    'INSECURE_SHARED_PREFS',
+    'WEBVIEW_LOAD_URL',
+    'UNSAFE_WEBVIEW',
+    'SQL_INJECTION_CS',
+    'PATH_TRAVERSAL_CS',
+    'PERFORMANCE_N_PLUS_ONE',
+    'FORCE_TRY',
+    'FORCE_UNWRAP',
+    'UNSAFE_BLOCK',
+    'MISSING_AUTH',
+    'CSRF',
 ]);
 /**
- * Removes duplicate findings based on a stable key of (type, file, line, column).
- * When multiple detectors independently flag the same code location with the same
- * finding type, only the first occurrence is kept. Preserves original order.
+ * Deduplicates findings by composite key: file + line + type.
+ *
+ * When multiple detectors independently flag the same code location with the
+ * same vulnerability type, only the finding with the highest confidence score
+ * is kept (or the first one encountered when confidence is equal).
+ *
+ * This deliberately allows different types on the same line — a single line can
+ * legitimately have both SQL_INJECTION and XSS findings.
  */
 function deduplicateFindings(findings) {
-    const seen = new Set();
-    return findings.filter((f) => {
-        const key = `${f.type}|${f.file ?? ''}|${f.line}|${f.column}`;
-        if (seen.has(key))
-            return false;
-        seen.add(key);
-        return true;
-    });
+    const bestByKey = new Map();
+    for (const f of findings) {
+        const key = `${f.type}|${f.file ?? ''}|${f.line}`;
+        const existing = bestByKey.get(key);
+        if (!existing) {
+            bestByKey.set(key, f);
+        }
+        else {
+            // Keep the finding with the higher confidence; ties go to the incumbent.
+            const existingConf = existing.confidence ?? 0;
+            const candidateConf = f.confidence ?? 0;
+            if (candidateConf > existingConf) {
+                bestByKey.set(key, f);
+            }
+        }
+    }
+    // Preserve the original relative order of surviving findings.
+    const survivors = new Set(bestByKey.values());
+    return findings.filter((f) => survivors.has(f));
 }
 function summarize(findings) {
     return {

@@ -49,3 +49,15 @@ $data = json_decode($input);
 
 // ── SSTI (safe: static template name) ────────────────────────────────────────
 $twig->render('index.html', ['name' => $safeName]);
+
+// ── MISSING_AUTH (safe: session check before POST access) ──────────────────────
+function handleAuthenticatedRequest() {
+  session_start();
+  if (!isset($_SESSION['user_id'])) {
+    header('Location: /login');
+    exit;
+  }
+  $username = $_SESSION['user'];
+  // Safe to access $_POST after auth guard
+  $email = htmlspecialchars($_POST['email'], ENT_QUOTES, 'UTF-8');
+}

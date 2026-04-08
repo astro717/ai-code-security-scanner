@@ -7,7 +7,7 @@
  *
  * Covered vulnerability classes:
  *   - SQL_INJECTION (string interpolation / concatenation in ADO.NET / EF queries)
- *   - COMMAND_INJECTION (Process.Start with user input)
+ *   - COMMAND_INJECTION_CS (Process.Start with user input)
  *   - SECRET_HARDCODED (hardcoded credentials)
  *   - WEAK_CRYPTO (MD5, SHA1, DES, RC2)
  *   - PATH_TRAVERSAL (File/Directory access with user input)
@@ -16,6 +16,8 @@
  *   - XSS (Response.Write with unencoded user input in ASP.NET)
  *   - SSRF (HttpClient/WebClient/WebRequest with user input)
  *   - OPEN_REDIRECT (Response.Redirect with user input)
+ *   - UNSAFE_BLOCK (unsafe{} blocks with pointer manipulation)
+ *   - MISSING_AUTH (ASP.NET controller endpoints missing [Authorize])
  */
 import type { Finding } from './reporter';
 export interface CSharpParseResult {

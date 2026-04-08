@@ -8,6 +8,7 @@
  *
  * Covered vulnerability classes:
  *   - SQL_INJECTION (string interpolation in ActiveRecord queries)
+ *   - PERFORMANCE_N_PLUS_ONE (N+1 query anti-patterns in loops)
  *   - XSS (html_safe, raw with user input)
  *   - COMMAND_INJECTION (backtick execution, system(), exec(), Open3 with interpolation)
  *   - SECRET_HARDCODED (hardcoded credentials)
@@ -17,6 +18,7 @@
  *   - WEAK_CRYPTO (MD5, SHA1 via Digest library)
  *   - OPEN_REDIRECT (redirect_to with user input)
  *   - EVAL_INJECTION (eval with user input)
+ *   - LDAP_INJECTION (Net::LDAP search with string interpolation)
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -71,6 +73,7 @@ const RUBY_PATTERNS = [
         pattern: /\.where\s*\(\s*"[^"]*#\{/,
         message: 'ActiveRecord .where() called with string interpolation. User input in SQL strings leads ' +
             'to SQL injection. Use parameterised form: .where("column = ?", value) or a hash condition.',
+        confidence: 0.95,
     },
     {
         type: 'SQL_INJECTION',
@@ -78,6 +81,7 @@ const RUBY_PATTERNS = [
         pattern: /\.(?:find_by_sql|execute|select|joins)\s*\([^)]*#\{/,
         message: 'Raw SQL query built with Ruby string interpolation. Use ActiveRecord parameterised ' +
             'queries or ActiveRecord::Base.sanitize_sql to prevent SQL injection.',
+        confidence: 0.90,
     },
     {
         type: 'SQL_INJECTION',
@@ -189,6 +193,99 @@ const RUBY_PATTERNS = [
         message: 'eval() called with user-controlled or interpolated input. This executes arbitrary Ruby ' +
             'code and must never receive untrusted input.',
     },
+    // LDAP injection via Net::LDAP with string interpolation
+    {
+        type: 'LDAP_INJECTION',
+        severity: 'high',
+        pattern: /Net::LDAP.*\.search\s*\([^)]*(?:#\{|params|request)/,
+        message: 'Net::LDAP search built with string interpolation or user-controlled input. This allows ' +
+            'LDAP injection. Use Net::LDAP::Filter.eq or other filter constructors to build safe queries.',
+    },
+    {
+        type: 'LDAP_INJECTION',
+        severity: 'high',
+        pattern: /\.search\s*\(\s*(?:filter|base)\s*:\s*"[^"]*#\{.*\}.*".*Net::LDAP/,
+        message: 'Net::LDAP search filter built with string interpolation. This allows LDAP injection. ' +
+            'Use Net::LDAP::Filter.eq or other filter constructors to build safe queries.',
+    },
+    {
+        type: 'LDAP_INJECTION',
+        severity: 'high',
+        pattern: /\.search\s*\(.*filter:\s*"[^"]*#\{/,
+        message: 'LDAP search filter built with string interpolation. User input in LDAP filter strings ' +
+            'leads to LDAP injection. Use Net::LDAP::Filter.eq to construct filters safely.',
+    },
+    // ── Rails-specific: SQL injection via string concatenation ────────────────
+    // (complement to the interpolation patterns above — covers "..."+var patterns)
+    {
+        type: 'SQL_INJECTION',
+        severity: 'critical',
+        pattern: /\.where\s*\(\s*"[^"]*"\s*\+/,
+        message: 'ActiveRecord .where() called with SQL string built via concatenation. This allows SQL ' +
+            'injection. Use parameterised form: .where("column = ?", value) or a hash condition.',
+    },
+    {
+        type: 'SQL_INJECTION',
+        severity: 'critical',
+        pattern: /\.(?:find_by_sql|execute|select|joins)\s*\([^)]*"\s*\+/,
+        message: 'Raw SQL query built via string concatenation. Use ActiveRecord parameterised queries or ' +
+            'ActiveRecord::Base.sanitize_sql to prevent SQL injection.',
+    },
+    // ── Rails-specific: unsafe use of send() with user input ─────────────────
+    // send() and public_send() with user-controlled method names allow arbitrary method dispatch
+    {
+        type: 'COMMAND_INJECTION',
+        severity: 'critical',
+        pattern: /\.send\s*\(\s*(?:params|request|#\{|"[^"]*#\{)/,
+        message: 'send() called with user-controlled method name. An attacker can invoke any method on the ' +
+            'object, including dangerous ones. Use a whitelist of allowed method names before dispatching.',
+    },
+    {
+        type: 'COMMAND_INJECTION',
+        severity: 'high',
+        pattern: /\.public_send\s*\(\s*(?:params|request|#\{)/,
+        message: 'public_send() called with user-controlled method name. While restricted to public methods, ' +
+            'this still allows an attacker to call unintended methods. Validate against an allowlist first.',
+    },
+    // ── Rails-specific: N+1 query patterns ────────────────────────────────────
+    // Accessing an association inside an each loop without eager loading
+    {
+        type: 'PERFORMANCE_N_PLUS_ONE',
+        severity: 'low',
+        pattern: /\beach\s+do\s*\|[^|]+\|\s*\n[^e]*\.\w+\s*\.\s*(?:each|map|select|count|first|last|find)/,
+        message: 'Potential N+1 query: association accessed in a loop without eager loading. Use ' +
+            '.includes(:association), .preload(:association), or .eager_load(:association) to batch load.',
+    },
+    {
+        type: 'PERFORMANCE_N_PLUS_ONE',
+        severity: 'low',
+        pattern: /\.each\s*\{[^}]*\.[a-z_]+s\s*\./,
+        message: 'Potential N+1 query: collection association accessed inside an iteration block. ' +
+            'Eager-load with .includes(:relation) to avoid one query per record.',
+    },
+    // ── Rails-specific: unsafe mass assignment via strong params bypass ────────
+    // assign_attributes / update / update_attributes with raw params hash
+    {
+        type: 'MASS_ASSIGNMENT',
+        severity: 'high',
+        pattern: /\.(?:assign_attributes|update|update_attributes)\s*\(\s*params(?:\[:[^\]]+\])?\s*\)/,
+        message: 'Model updated directly with raw params hash. Without strong parameters (.permit), any ' +
+            'attribute can be set including privileged fields. Use params.require(:model).permit(...).',
+    },
+    {
+        type: 'MASS_ASSIGNMENT',
+        severity: 'high',
+        pattern: /\b[A-Z]\w*\.new\s*\(\s*params(?:\[:[^\]]+\])?\s*\)/,
+        message: 'ActiveRecord model instantiated directly from params hash without strong parameters. ' +
+            'Use params.require(:model).permit(:field1, :field2) to limit assignable attributes.',
+    },
+    {
+        type: 'MASS_ASSIGNMENT',
+        severity: 'medium',
+        pattern: /attr_accessible\s*:all/,
+        message: 'attr_accessible :all grants mass assignment of every attribute. This is dangerous in ' +
+            'Rails 3.x apps. Explicitly list safe attributes or migrate to strong parameters.',
+    },
 ];
 /**
  * Scans a parsed Ruby source for security vulnerabilities using pattern matching.
@@ -196,13 +293,75 @@ const RUBY_PATTERNS = [
  */
 function scanRuby(result) {
     const findings = [];
+    // ── Stateful N+1 detection: each/map/select + ActiveRecord calls ─────────────
+    //
+    // Ruby blocks use either `do...end` or `{...}` syntax.  We track both:
+    //   - brace depth: incremented on `{`, decremented on `}` (inline blocks)
+    //   - do-end depth: incremented on `do` keyword, decremented on `end` keyword
+    //
+    // When an iteration method (each, map, select, collect, detect, find, reject,
+    // flat_map, each_with_object, each_with_index) starts a block, we enter
+    // "loop context" and flag any ActiveRecord query inside it.
+    let inIterBlock = false;
+    let iterBraceDepth = 0;
+    let iterDoDepth = 0;
+    // Detects the start of an iteration block (each/map/select/etc. followed by do or {)
+    const ITER_START_BRACE = /\.\s*(?:each|map|select|collect|detect|find|reject|flat_map|each_with_object|each_with_index)\s*(?:\{|(?:\s*\|[^|]*\|\s*\{))/;
+    const ITER_START_DO = /\.\s*(?:each|map|select|collect|detect|find|reject|flat_map|each_with_object|each_with_index)\s*(?:do\b|\|[^|]*\|\s*$)/;
+    // ActiveRecord query calls that cause a DB round-trip
+    const AR_QUERY = /\b(?:\.find\b|\.find_by\b|\.find_by_|\.where\b|\.first\b|\.last\b|\.all\b|\.count\b|\.exists\b|\.pluck\b|\.sum\b|\.average\b|\.minimum\b|\.maximum\b|\.create\b|\.create!\b|\.update\b|\.update!\b|\.save\b|\.save!\b|\.destroy\b|\.reload\b)/;
     result.lines.forEach((line, idx) => {
         const lineNum = idx + 1;
         const trimmed = line.trim();
         // Skip pure comments
         if (trimmed.startsWith('#'))
             return;
-        for (const { type, severity, pattern, message } of RUBY_PATTERNS) {
+        // ── Stateful block tracking ──────────────────────────────────────────────
+        if (!inIterBlock) {
+            // Check for iteration block start
+            if (ITER_START_BRACE.test(line)) {
+                inIterBlock = true;
+                iterBraceDepth = (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length;
+                iterDoDepth = 0;
+            }
+            else if (ITER_START_DO.test(line)) {
+                inIterBlock = true;
+                iterDoDepth = 1;
+                iterBraceDepth = 0;
+            }
+        }
+        else {
+            // We are inside an iteration block — track depth changes
+            const openBraces = (line.match(/\{/g) ?? []).length;
+            const closeBraces = (line.match(/\}/g) ?? []).length;
+            iterBraceDepth += openBraces - closeBraces;
+            // do-end depth: count `do` and `end` keywords (conservative: only standalone tokens)
+            const doCount = (line.match(/\bdo\b/g) ?? []).length;
+            const endCount = (line.match(/\bend\b/g) ?? []).length;
+            iterDoDepth += doCount - endCount;
+            const exitedBraceBlock = iterBraceDepth <= 0 && iterDoDepth <= 0;
+            if (exitedBraceBlock) {
+                inIterBlock = false;
+                iterBraceDepth = 0;
+                iterDoDepth = 0;
+            }
+            else if (AR_QUERY.test(line)) {
+                findings.push({
+                    type: 'PERFORMANCE_N_PLUS_ONE',
+                    severity: 'low',
+                    line: lineNum,
+                    column: line.search(/\S/),
+                    snippet: trimmed.slice(0, 100),
+                    message: 'ActiveRecord query called inside an each/map/select block — this is an N+1 query pattern. ' +
+                        'Each iteration issues a separate DB round-trip. Use eager loading (.includes(:association)) ' +
+                        'or batch the query before the loop (e.g. Model.where(id: ids).index_by(&:id)) to avoid N+1.',
+                    file: result.filePath,
+                    confidence: 0.8,
+                });
+            }
+        }
+        // ──────────────────────────────────────────────────────────────────────────
+        for (const { type, severity, pattern, message, confidence } of RUBY_PATTERNS) {
             if (pattern.test(line)) {
                 findings.push({
                     type,
@@ -212,6 +371,7 @@ function scanRuby(result) {
                     snippet: trimmed.slice(0, 100),
                     message,
                     file: result.filePath,
+                    ...(confidence !== undefined ? { confidence } : {}),
                 });
             }
         }

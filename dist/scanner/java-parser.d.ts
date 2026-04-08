@@ -17,6 +17,7 @@
  *   - UNSAFE_DESERIALIZATION (ObjectInputStream.readObject)
  *   - XSS (direct output of user input in servlets)
  *   - SSRF (URL/HttpURLConnection with user input)
+ *   - PERFORMANCE_N_PLUS_ONE (JDBC/JPA query inside a loop)
  */
 import type { Finding } from './reporter';
 export interface JavaParseResult {

@@ -9,12 +9,14 @@
  * Covered vulnerability classes:
  *   - SSRF (net/http with user input)
  *   - SQL_INJECTION (fmt.Sprintf in queries)
- *   - COMMAND_INJECTION (exec.Command with user input)
+ *   - COMMAND_INJECTION_GO (exec.Command with user input)
  *   - SECRET_HARDCODED (hardcoded credentials)
  *   - EVAL_INJECTION (unsafe reflect / template execution)
  *   - WEAK_CRYPTO (md5, sha1)
  *   - PATH_TRAVERSAL (filepath.Join with user input)
  *   - INSECURE_RANDOM (math/rand for security)
+ *   - PERFORMANCE_N_PLUS_ONE (DB query inside a loop)
+ *   - SSTI (template.Execute / template.Parse with user input)
  */
 import type { Finding } from './reporter';
 export interface GoParseResult {

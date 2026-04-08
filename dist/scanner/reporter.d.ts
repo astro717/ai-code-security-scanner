@@ -14,6 +14,13 @@ export interface Finding {
     snippet?: string;
     message: string;
     file?: string;
+    /**
+     * Detection confidence score in the range [0.0, 1.0].
+     * High-specificity patterns (exact API matches, literal checks) use 0.9+.
+     * Broad heuristic patterns (generic regexes, keyword proximity) use lower values.
+     * Absent means the detector did not emit a confidence estimate.
+     */
+    confidence?: number;
 }
 export interface ScanSummary {
     critical: number;
@@ -23,9 +30,14 @@ export interface ScanSummary {
     total: number;
 }
 /**
- * Removes duplicate findings based on a stable key of (type, file, line, column).
- * When multiple detectors independently flag the same code location with the same
- * finding type, only the first occurrence is kept. Preserves original order.
+ * Deduplicates findings by composite key: file + line + type.
+ *
+ * When multiple detectors independently flag the same code location with the
+ * same vulnerability type, only the finding with the highest confidence score
+ * is kept (or the first one encountered when confidence is equal).
+ *
+ * This deliberately allows different types on the same line — a single line can
+ * legitimately have both SQL_INJECTION and XSS findings.
  */
 export declare function deduplicateFindings(findings: Finding[]): Finding[];
 export declare function summarize(findings: Finding[]): ScanSummary;

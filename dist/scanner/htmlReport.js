@@ -70,6 +70,12 @@ const REMEDIATION_SNIPPETS = {
     CORS_MISCONFIGURATION: `// Restrict origins explicitly:\napp.use(cors({ origin: 'https://yourdomain.com', credentials: true }));`,
     REDOS: `// Avoid user-controlled regex, or use safe-regex:\nimport safe from 'safe-regex';\nif (!safe(pattern)) throw new Error('Unsafe regex');`,
     COMMAND_INJECTION_C: `// Use execve() with explicit args:\nexecve("/usr/bin/ls", args, envp);`,
+    SSTI: `# Use render_template() with a static template file:\nfrom flask import render_template\n# Pass data as context variables, never as part of the template string:\nreturn render_template('page.html', user_name=user_name)`,
+    COMMAND_INJECTION_CS: `// Use ProcessStartInfo with explicit arguments and no shell:\nvar psi = new ProcessStartInfo("cmd", "/c echo safe") { UseShellExecute = false };\nProcess.Start(psi);`,
+    LDAP_INJECTION: `# Escape all user-supplied values before embedding in LDAP filters:\nfrom ldap3.utils.conv import escape_filter_chars\nsafe_value = escape_filter_chars(user_input)\nldap_filter = f"(uid={safe_value})"`,
+    XML_INJECTION: `# Disable external entities to prevent XXE:\n# Use defusedxml instead of xml.etree:\nimport defusedxml.ElementTree as ET\ntree = ET.fromstring(xml_string)`,
+    INSECURE_ASSERT: `# Replace assert with an explicit runtime check that cannot be optimised away:\nif not condition:\n    raise ValueError("Security check failed: <describe invariant>")`,
+    INSECURE_BINDING: `# Bind only to localhost unless external access is required:\napp.run(host='127.0.0.1', port=5000)\n# If external access is needed, place behind a reverse proxy (nginx/caddy).`,
 };
 /** Renders a single finding row. */
 function renderFinding(f, anchorId) {
@@ -88,18 +94,82 @@ function renderFinding(f, anchorId) {
          title="${escapeHtml(owasp.name)}"
          style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#1d4ed8;background:#dbeafe;padding:2px 7px;border-radius:3px;text-decoration:none;white-space:nowrap;">${escapeHtml(owasp.id)}</a>`
         : '';
+    // Language badge — shown for language-specific finding types
+    const KOTLIN_ANDROID_TYPES = new Set([
+        'INSECURE_SHARED_PREFS', 'WEBVIEW_LOAD_URL', 'PERFORMANCE_N_PLUS_ONE',
+    ]);
+    const SWIFT_IOS_TYPES = new Set(['SSRF']); // SSRF is cross-language; only badge on .swift files
+    const fileExt = f.file ? f.file.split('.').pop()?.toLowerCase() : undefined;
+    let langBadge = '';
+    if (KOTLIN_ANDROID_TYPES.has(f.type) || fileExt === 'kt' || fileExt === 'kts') {
+        langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#7c3aed;background:#ede9fe;padding:2px 7px;border-radius:3px;white-space:nowrap;">Kotlin/Android</span>`;
+    }
+    else if (fileExt === 'swift') {
+        langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#ea580c;background:#fff7ed;padding:2px 7px;border-radius:3px;white-space:nowrap;">Swift/iOS</span>`;
+    }
+    else if (fileExt === 'rb') {
+        langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#b91c1c;background:#fef2f2;padding:2px 7px;border-radius:3px;white-space:nowrap;">Ruby</span>`;
+    }
+    else if (fileExt === 'py') {
+        langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#15803d;background:#f0fdf4;padding:2px 7px;border-radius:3px;white-space:nowrap;">Python</span>`;
+    }
+    else if (fileExt === 'go') {
+        langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#0369a1;background:#f0f9ff;padding:2px 7px;border-radius:3px;white-space:nowrap;">Go</span>`;
+    }
+    else if (fileExt === 'java') {
+        langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#b45309;background:#fffbeb;padding:2px 7px;border-radius:3px;white-space:nowrap;">Java</span>`;
+    }
+    else if (fileExt === 'cs') {
+        langBadge = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#7c3aed;background:#f5f3ff;padding:2px 7px;border-radius:3px;white-space:nowrap;">C#</span>`;
+    }
+    // Confidence badge — shown when the parser emits a confidence value
+    const confidenceBadge = f.confidence != null
+        ? (() => {
+            const pct = Math.round(f.confidence * 100);
+            const confColor = pct >= 90 ? '#15803d' : pct >= 70 ? '#b45309' : '#6b7280';
+            const confBg = pct >= 90 ? '#f0fdf4' : pct >= 70 ? '#fffbeb' : '#f9fafb';
+            return `<span title="Detection confidence: ${pct}%" style="font-size:10px;font-weight:600;color:${confColor};background:${confBg};border:1px solid ${confColor}33;padding:2px 7px;border-radius:3px;white-space:nowrap;">${pct}% conf.</span>`;
+        })()
+        : '';
     const anchor = anchorId ? ` id="${anchorId}"` : '';
     return `
-    <div class="finding"${anchor} style="border-left: 4px solid ${color}; background: ${bg}; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;">
+    <div class="finding finding-row"${anchor} data-severity="${escapeHtml(f.severity)}" style="border-left: 4px solid ${color}; background: ${bg}; border-radius: 6px; padding: 12px 16px; margin-bottom: 10px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${color};background:${color}22;padding:2px 8px;border-radius:3px;">${escapeHtml(f.severity)}</span>
         <code style="font-size:12px;color:#374151;background:#f3f4f6;padding:1px 6px;border-radius:3px;">${escapeHtml(f.type)}</code>
         ${owaspBadge}
+        ${langBadge}
+        ${confidenceBadge}
         <span style="font-size:12px;color:#6b7280;">line ${f.line}, col ${f.column}</span>
       </div>
       <p style="margin:0;font-size:14px;color:#1f2937;">${escapeHtml(f.message)}</p>
       ${remediationBlock}
     </div>`;
+}
+/** Renders the interactive severity filter bar. */
+function renderSeverityFilterBar(findings) {
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const f of findings) {
+        if (f.severity in counts)
+            counts[f.severity]++;
+    }
+    const btnLabels = {
+        critical: `Critical (${counts['critical']})`,
+        high: `High (${counts['high']})`,
+        medium: `Medium (${counts['medium']})`,
+        low: `Low (${counts['low']})`,
+    };
+    const buttons = ['critical', 'high', 'medium', 'low']
+        .filter((sev) => counts[sev] > 0)
+        .map((sev) => `<button class="sev-btn" data-sev="${sev}" title="Toggle ${sev} findings">${btnLabels[sev]}</button>`)
+        .join('');
+    return `
+  <div class="sev-filter-bar" role="toolbar" aria-label="Severity filter">
+    <span class="filter-label">Filter:</span>
+    <button class="sev-btn active" data-sev="all" title="Show all severities">All</button>
+    ${buttons}
+    <span id="filter-count" class="filter-count">${findings.length} findings shown</span>
+  </div>`;
 }
 /** Renders a file card with all its findings. */
 function renderFileCard(filePath, findings, scanRoot) {
@@ -211,17 +281,92 @@ function renderOwaspBreakdown(findings) {
  * @param scanRoot - Absolute path of the scan target (used to shorten file paths).
  * @param generatedAt - ISO timestamp to display in the report header.
  */
-function buildHTMLReport(findings, scanRoot, generatedAt = new Date().toISOString()) {
+function buildHTMLReport(findings, scanRoot, generatedAt = new Date().toISOString(), fixResults, cacheStats) {
     const grouped = groupByFile(findings);
     const fileCards = [...grouped.entries()]
         .map(([filePath, f]) => renderFileCard(filePath, f, scanRoot))
         .join('');
+    // ── Fix diff section ────────────────────────────────────────────────────────
+    let fixDiffSection = '';
+    if (fixResults && fixResults.length > 0) {
+        const applied = fixResults.filter((r) => r.applied && r.originalLine !== undefined && r.fixedLine !== undefined);
+        if (applied.length > 0) {
+            const byFile = new Map();
+            for (const r of applied) {
+                if (!byFile.has(r.file))
+                    byFile.set(r.file, []);
+                byFile.get(r.file).push(r);
+            }
+            const fileBlocks = [...byFile.entries()].map(([filePath, results]) => {
+                const relPath = filePath.startsWith(scanRoot) ? filePath.slice(scanRoot.length).replace(/^\//, '') : filePath;
+                const diffLines = results.map((r) => {
+                    const lineHeader = '<div style="font-size:11px;color:#6b7280;font-family:monospace;margin-bottom:4px;">Line ' + r.finding.line + ' [' + escapeHtml(r.finding.type) + ']</div>';
+                    const minusLine = '<div style="padding:4px 12px;color:#f87171;background:#450a0a;">&minus; ' + escapeHtml(r.originalLine) + '</div>';
+                    const plusLine = '<div style="padding:4px 12px;color:#86efac;background:#052e16;">+ ' + escapeHtml(r.fixedLine) + '</div>';
+                    return '<div style="margin-bottom:10px;">' + lineHeader + '<div style="background:#1f2937;border-radius:4px;overflow:hidden;font-family:monospace;font-size:12px;line-height:1.6;">' + minusLine + plusLine + '</div></div>';
+                }).join('');
+                return '<div style="margin-bottom:18px;"><div style="font-size:13px;font-weight:600;color:#374151;font-family:monospace;background:#f3f4f6;padding:6px 12px;border-radius:4px 4px 0 0;border:1px solid #e5e7eb;border-bottom:none;">' + escapeHtml(relPath) + '</div><div style="border:1px solid #e5e7eb;border-radius:0 0 4px 4px;padding:12px;">' + diffLines + '</div></div>';
+            }).join('');
+            fixDiffSection = '<section style="margin-top:32px;"><div class="section-title">Auto-fix Diffs</div><p style="font-size:13px;color:#6b7280;margin-bottom:16px;">' + applied.length + ' fix(es) &#8212; before/after per changed line.</p>' + fileBlocks + '</section>';
+        }
+    }
     const emptyState = findings.length === 0
         ? `<div style="text-align:center;padding:60px 20px;color:#6b7280;">
         <p style="font-size:18px;margin-bottom:8px;">No findings</p>
         <p style="font-size:14px;">The scanned path produced no security findings at the selected severity level.</p>
       </div>`
         : '';
+    // ── Cache stats section ─────────────────────────────────────────────────────
+    let cacheStatsSection = '';
+    if (cacheStats && !cacheStats.disabled) {
+        const totalLookups = cacheStats.hits + cacheStats.misses;
+        const hitRatePct = cacheStats.hitRatePct !== '—' ? `${cacheStats.hitRatePct}%` : '—';
+        const age = cacheStats.ageDistribution;
+        const ttlHours = (cacheStats.cacheTtlMs / 3600000).toFixed(1);
+        const ageBar = (count, total, label, color) => {
+            const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+            return `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span style="width:80px;font-size:12px;color:#6b7280;text-align:right;">${escapeHtml(label)}</span>
+          <div style="flex:1;background:#f3f4f6;border-radius:4px;height:10px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;background:${escapeHtml(color)};transition:width 0.3s;"></div>
+          </div>
+          <span style="width:40px;font-size:12px;color:#374151;font-weight:600;">${count}</span>
+          <span style="width:36px;font-size:11px;color:#9ca3af;">${pct}%</span>
+        </div>`;
+        };
+        cacheStatsSection = `
+<section style="margin-top:32px;">
+  <div class="section-title">Scan Cache</div>
+  <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:20px;">
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;min-width:120px;text-align:center;">
+      <div style="font-size:24px;font-weight:800;color:#10b981;">${hitRatePct}</div>
+      <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;margin-top:4px;">Hit rate</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;min-width:120px;text-align:center;">
+      <div style="font-size:24px;font-weight:800;color:#3b82f6;">${cacheStats.hits}</div>
+      <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;margin-top:4px;">Hits</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;min-width:120px;text-align:center;">
+      <div style="font-size:24px;font-weight:800;color:#6b7280;">${cacheStats.misses}</div>
+      <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;margin-top:4px;">Misses</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;min-width:120px;text-align:center;">
+      <div style="font-size:24px;font-weight:800;color:#374151;">${cacheStats.entries}</div>
+      <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;margin-top:4px;">Entries</div>
+    </div>
+  </div>
+  ${cacheStats.entries > 0 ? `
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;">
+    <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:12px;">Entry age distribution (TTL: ${escapeHtml(ttlHours)}h)</div>
+    ${ageBar(age.lastHour, cacheStats.entries, '< 1 hour', '#10b981')}
+    ${ageBar(age.lastDay, cacheStats.entries, '1h – 24h', '#3b82f6')}
+    ${ageBar(age.lastWeek, cacheStats.entries, '1d – 7d', '#f59e0b')}
+    ${ageBar(age.older, cacheStats.entries, '> 7 days', '#ef4444')}
+  </div>` : ''}
+  <p style="font-size:12px;color:#9ca3af;margin-top:10px;">Cache path: <code>${escapeHtml(cacheStats.cachePath ?? '(none)')}</code></p>
+</section>`;
+    }
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -235,7 +380,63 @@ function buildHTMLReport(findings, scanRoot, generatedAt = new Date().toISOStrin
     .meta { font-size: 13px; color: #6b7280; margin-bottom: 28px; }
     code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; }
     .section-title { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #374151; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #e5e7eb; }
+    /* ── Severity filter bar ───────────────────────────────────────────────── */
+    .sev-filter-bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:20px; padding:12px 16px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; }
+    .sev-filter-bar .filter-label { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:#6b7280; margin-right:4px; }
+    .sev-btn { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; padding:4px 12px; border-radius:4px; border:1.5px solid transparent; cursor:pointer; transition:all 0.12s; background:#f3f4f6; color:#374151; border-color:#d1d5db; }
+    .sev-btn:hover { opacity:0.8; }
+    .sev-btn.active { box-shadow:0 0 0 2px currentColor; }
+    .sev-btn[data-sev="critical"] { color:#dc2626; background:#fee2e2; border-color:#fca5a5; }
+    .sev-btn[data-sev="high"] { color:#ea580c; background:#ffedd5; border-color:#fdba74; }
+    .sev-btn[data-sev="medium"] { color:#ca8a04; background:#fef9c3; border-color:#fde047; }
+    .sev-btn[data-sev="low"] { color:#16a34a; background:#dcfce7; border-color:#86efac; }
+    .sev-btn[data-sev="all"] { color:#4f46e5; background:#eef2ff; border-color:#a5b4fc; }
+    .file-card[data-hidden] { display:none; }
+    .finding-row[data-hidden] { display:none; }
+    .filter-count { font-size:12px; color:#6b7280; margin-left:8px; }
   </style>
+  <script>
+    // Severity filter logic — runs after DOM is ready (inline, at end of body)
+    function initSevFilter() {
+      var btns = document.querySelectorAll('.sev-btn');
+      var active = new Set(['critical','high','medium','low']);
+      function applyFilter() {
+        var countEl = document.getElementById('filter-count');
+        var visible = 0;
+        document.querySelectorAll('.finding-row').forEach(function(row) {
+          var sev = row.getAttribute('data-severity');
+          if (active.has(sev)) { row.removeAttribute('data-hidden'); visible++; }
+          else row.setAttribute('data-hidden','1');
+        });
+        document.querySelectorAll('.file-card').forEach(function(card) {
+          var anyVisible = card.querySelectorAll('.finding-row:not([data-hidden])').length > 0;
+          if (anyVisible) card.removeAttribute('data-hidden');
+          else card.setAttribute('data-hidden','1');
+        });
+        if (countEl) countEl.textContent = visible + ' finding' + (visible !== 1 ? 's' : '') + ' shown';
+      }
+      btns.forEach(function(btn) {
+        var sev = btn.getAttribute('data-sev');
+        if (sev === 'all') {
+          btn.addEventListener('click', function() {
+            active = new Set(['critical','high','medium','low']);
+            btns.forEach(function(b) {
+              if (b.getAttribute('data-sev') !== 'all') b.classList.add('active');
+            });
+            applyFilter();
+          });
+        } else {
+          btn.classList.add('active');
+          btn.addEventListener('click', function() {
+            if (active.has(sev)) { active.delete(sev); btn.classList.remove('active'); }
+            else { active.add(sev); btn.classList.add('active'); }
+            applyFilter();
+          });
+        }
+      });
+    }
+    document.addEventListener('DOMContentLoaded', initSevFilter);
+  </script>
 </head>
 <body>
   <h1>Security Scan Report</h1>
@@ -247,11 +448,17 @@ function buildHTMLReport(findings, scanRoot, generatedAt = new Date().toISOStrin
 
   ${renderSummaryBar(findings)}
 
+  ${findings.length > 0 ? renderSeverityFilterBar(findings) : ''}
+
   ${renderOwaspBreakdown(findings)}
 
   ${findings.length > 0 ? '<div class="section-title">Findings by file</div>' : ''}
   ${fileCards}
   ${emptyState}
+
+  ${fixDiffSection}
+
+  ${cacheStatsSection}
 
   <div style="margin-top:40px;padding-top:20px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;text-align:center;">
     Generated by <strong>ai-code-security-scanner</strong> &nbsp;·&nbsp;
