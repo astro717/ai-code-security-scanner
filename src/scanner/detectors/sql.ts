@@ -88,6 +88,7 @@ export function detectSQLInjection(result: ParseResult): Finding[] {
             column: node.loc!.start.column,
             snippet: result.lines[line - 1]?.trim() ?? '',
             message: 'Dynamic value passed directly to SQL query function. Use parameterized queries.',
+            confidence: 0.9,
           });
         }
       }

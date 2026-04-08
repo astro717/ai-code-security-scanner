@@ -15,6 +15,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from '../../src/server';
 import https from 'https';
+import { PassThrough } from 'stream';
 import { buildSARIF } from '../../src/scanner/sarif';
 
 // ── Vulnerable code fixture ───────────────────────────────────────────────────
@@ -77,7 +78,6 @@ function makeFakeGet(opts: any, cb: any) {
     body = '[]';
   }
 
-  const { PassThrough } = require('stream');
   const res = new PassThrough();
   (res as any).statusCode = 200;
   (res as any).headers = {};

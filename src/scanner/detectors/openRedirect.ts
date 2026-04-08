@@ -58,6 +58,7 @@ export function detectOpenRedirect(result: ParseResult): Finding[] {
         snippet: result.lines[line - 1]?.trim() ?? '',
         message:
           'res.redirect() called with a dynamic URL. Validate and whitelist redirect destinations to prevent open redirect attacks.',
+                confidence: 0.72,
       });
     }
   });

@@ -73,8 +73,8 @@ const SCANNER_VERSION = readScannerVersion();
 
 const CACHE_FILENAME = 'scan-cache.json';
 
-/** Maximum number of entries stored in the in-memory cache. Oldest-accessed entry is evicted when exceeded. */
-const MAX_CACHE_ENTRIES = 5000;
+/** Default maximum number of entries stored in the in-memory cache. Oldest-accessed entry is evicted when exceeded. */
+const DEFAULT_MAX_CACHE_ENTRIES = 5000;
 
 /** Default cache TTL: 7 days in milliseconds. */
 const DEFAULT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -97,6 +97,8 @@ export interface CacheOptions {
   disabled?: boolean;
   /** Cache entry TTL in milliseconds. Entries older than this are evicted. Default: 7 days. */
   cacheTtlMs?: number;
+  /** Maximum number of in-memory cache entries. Oldest entries are evicted when exceeded. Default: 5000. */
+  maxEntries?: number;
 }
 
 interface CacheFile {
@@ -116,6 +118,7 @@ let _disabled = false;
 let _hits = 0;
 let _misses = 0;
 let _cacheTtlMs: number = DEFAULT_CACHE_TTL_MS;
+let _maxEntries: number = DEFAULT_MAX_CACHE_ENTRIES;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -157,6 +160,13 @@ export function initCache(options: CacheOptions = {}): void {
     _cacheDir = dir;
     _cachePath = path.join(dir, CACHE_FILENAME);
     _cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+
+    // Read maxEntries from options or env var (SCAN_CACHE_MAX_ENTRIES)
+    const envMaxEntries = process.env['SCAN_CACHE_MAX_ENTRIES'];
+    _maxEntries = options.maxEntries ?? (envMaxEntries ? parseInt(envMaxEntries, 10) : DEFAULT_MAX_CACHE_ENTRIES);
+    if (isNaN(_maxEntries) || _maxEntries < 1) {
+      _maxEntries = DEFAULT_MAX_CACHE_ENTRIES;
+    }
   } else {
     _disabled = true;
     return;
@@ -241,7 +251,7 @@ export function setCachedFindings(
     findings,
   });
   // Evict the least-recently-used (first / oldest) entry if we exceed the limit.
-  if (_entries.size > MAX_CACHE_ENTRIES) {
+  if (_entries.size > _maxEntries) {
     const lruKey = _entries.keys().next().value;
     if (lruKey !== undefined) _entries.delete(lruKey);
   }
@@ -251,6 +261,11 @@ export function setCachedFindings(
 /**
  * Flush the in-memory cache to disk.
  * A no-op when the cache is disabled or nothing has changed since the last persist.
+ *
+ * Uses atomic write (write to temp file, then rename) to prevent corruption
+ * in concurrent process scenarios. This is safe even when multiple processes
+ * try to write simultaneously — the last rename wins, and intermediate files
+ * are cleaned up.
  */
 export function persistCache(): void {
   if (_disabled || !_dirty || !_cachePath || !_cacheDir) return;
@@ -261,7 +276,14 @@ export function persistCache(): void {
       scannerVersion: SCANNER_VERSION,
       entries: Object.fromEntries(_entries),
     };
-    fs.writeFileSync(_cachePath, JSON.stringify(data, null, 2), 'utf8');
+    const json = JSON.stringify(data, null, 2);
+
+    // Write to a temporary file first, then atomically rename to the target path.
+    // This prevents concurrent writers from creating a partially-written/corrupt cache.
+    const tmpPath = _cachePath + '.tmp';
+    fs.writeFileSync(tmpPath, json, 'utf8');
+    fs.renameSync(tmpPath, _cachePath);
+
     _dirty = false;
   } catch {
     // Cache write failure is non-fatal — the scan result is still correct.

@@ -56,6 +56,7 @@ export function detectInsecureRandom(result: ParseResult): Finding[] {
               column: node.loc!.start.column,
               snippet: result.lines[line - 1]?.trim() ?? '',
               message: `Math.random() used to generate "${idName}". Math.random() is not cryptographically secure — use crypto.randomBytes() or crypto.getRandomValues() instead.`,
+                confidence: 0.75,
             });
           }
         }
@@ -89,6 +90,7 @@ export function detectInsecureRandom(result: ParseResult): Finding[] {
               column: node.loc!.start.column,
               snippet: result.lines[line - 1]?.trim() ?? '',
               message: `Math.random() assigned to "${assignedName}". Math.random() is not cryptographically secure — use crypto.randomBytes() or crypto.getRandomValues() instead.`,
+                confidence: 0.75,
             });
           }
         }
@@ -125,6 +127,7 @@ export function detectInsecureRandom(result: ParseResult): Finding[] {
                 column: node.loc!.start.column,
                 snippet: result.lines[line - 1]?.trim() ?? '',
                 message: `Math.random() value encoded via ${fnName}(). This is not cryptographically secure. Use crypto.randomBytes() for tokens and credentials.`,
+                confidence: 0.75,
               });
             }
           }
@@ -161,6 +164,7 @@ export function detectInsecureRandom(result: ParseResult): Finding[] {
                     column: child.loc!.start.column,
                     snippet: result.lines[line - 1]?.trim() ?? '',
                     message: `Math.random() returned from "${fnName}()". Math.random() is not cryptographically secure — use crypto.randomBytes() or crypto.getRandomValues() instead.`,
+                confidence: 0.75,
                   });
                 }
               }
