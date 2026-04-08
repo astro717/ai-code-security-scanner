@@ -113,6 +113,12 @@ describe('Python scanner — vulnerable.py fixture', () => {
     const fromstringHits = hits.filter((f) => f.line === 55);
     expect(fromstringHits.length).toBeGreaterThan(0);
   });
+
+  test('MISSING_AUTH — detects Flask route with POST methods and no auth guard', () => {
+    const hits = findings.filter((f) => f.type === 'MISSING_AUTH');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].severity).toBe('high');
+  });
 });
 
 describe('Python scanner — clean.py fixture', () => {

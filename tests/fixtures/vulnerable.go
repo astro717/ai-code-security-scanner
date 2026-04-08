@@ -80,4 +80,14 @@ func unsafeRedirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, r.FormValue("next"), 302)
 }
 
+// ── Missing Auth ────────────────────────────────────────────────────────────
+
+func init() {
+	// MISSING_AUTH: http.HandleFunc handler reads r.FormValue without any auth guard
+	http.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
+		id := r.FormValue("id")
+		fmt.Fprintf(w, "data: %s", id)
+	})
+}
+
 func main() {}
