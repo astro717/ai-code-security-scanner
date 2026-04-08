@@ -73,7 +73,8 @@ describe('fixer — C/C++ FORMAT_STRING', () => {
 
   it('fixes fprintf(file, userInput) pattern', () => {
     const result = fixLine('FORMAT_STRING', '    fprintf(stderr, msg);');
-    expect(result).toContain('fprintf("%s"');
+    // fprintf keeps the file descriptor and inserts a format string: fprintf(stderr, "%s", msg)
+    expect(result).toContain('fprintf(stderr, "%s"');
   });
 });
 

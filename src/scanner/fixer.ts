@@ -780,7 +780,7 @@ ${indent}    raise ValueError(${msg})`;
     transform(line: string, finding: Finding): string | null {
       const ext = path.extname(finding.file ?? '').toLowerCase();
       if (ext !== '.go') return null;
-      if (/\?\s*,|\$\d+/.test(line)) return null; // already parameterized
+      if (/\?[",)'\s]|\$\d+/.test(line)) return null; // already parameterized (? followed by quote, comma, paren, or space)
       const indent = line.match(/^(\s*)/)?.[1] ?? '';
       return (
         `${indent}// TODO(SQL_INJECTION): use parameterized query: db.Query("SELECT ... WHERE id = ?", id)\n` +
@@ -797,6 +797,8 @@ ${indent}    raise ValueError(${msg})`;
       const ext = path.extname(finding.file ?? '').toLowerCase();
       if (ext !== '.go') return null;
       if (!/exec\.Command\s*\(|exec\.CommandContext\s*\(/.test(line)) return null;
+      // Only flag shell-string invocations ("sh"/"-c" or "bash"/"-c" pattern)
+      if (!/["'](?:sh|bash|zsh|fish|dash)["']\s*,\s*["']-c["']/.test(line)) return null;
       if (/TODO.*COMMAND_INJECTION_GO/.test(line)) return null;
       const indent = line.match(/^(\s*)/)?.[1] ?? '';
       return (
@@ -991,7 +993,7 @@ ${indent}    raise ValueError(${msg})`;
       if (/TODO.*WEBVIEW_LOAD_URL|navigationDelegate/.test(line)) return null;
       const indent = line.match(/^(\s*)/)?.[1] ?? '';
       return (
-        `${indent}// TODO(WEBVIEW_LOAD_URL): implement WKNavigationDelegate.webView(_:decidePolicyFor:) to allowlist allowed hosts\n` +
+        `${indent}// TODO(WEBVIEW_LOAD_URL): set navigationDelegate and implement WKNavigationDelegate.webView(_:decidePolicyFor:) to allowlist allowed hosts\n` +
         line
       );
     },
@@ -1046,13 +1048,28 @@ ${indent}    raise ValueError(${msg})`;
     transform(line: string, finding: Finding): string | null {
       const ext = path.extname(finding.file ?? '').toLowerCase();
       if (!['.c', '.cpp', '.h', '.hpp'].includes(ext)) return null;
-      // Match printf(variable) or printf(expr) but NOT printf("literal...")
-      const m = line.match(/\b(printf|fprintf|sprintf|snprintf)\s*\(\s*(?!["'])([^,)]+)\s*\)/);
+
+      // Case 1: fprintf(fd, variable) — two args where second is not a string literal
+      // e.g. fprintf(stderr, msg) → fprintf(stderr, "%s", msg)
+      const mFprintf = line.match(/\b(fprintf|sprintf|snprintf)\s*\(\s*(\w+)\s*,\s*(?!["'])([^,)][^)]*)\s*\)/);
+      if (mFprintf) {
+        const fn = mFprintf[1]!;
+        const fd = mFprintf[2]!;
+        const arg = mFprintf[3]!.trim();
+        const fixed = line.replace(
+          /\b(?:fprintf|sprintf|snprintf)\s*\(\s*(\w+)\s*,\s*(?!["'])([^,)][^)]*)\s*\)/,
+          `${fn}(${fd}, "%s", ${arg})`,
+        );
+        return fixed !== line ? fixed : null;
+      }
+
+      // Case 2: printf(variable) — single arg that is not a string literal
+      const m = line.match(/\b(printf)\s*\(\s*(?!["'])([^,)]+)\s*\)/);
       if (!m) return null;
       const fn = m[1]!;
       const arg = m[2]!.trim();
       const fixed = line.replace(
-        /\b(?:printf|fprintf|sprintf|snprintf)\s*\(\s*(?!["'])([^,)]+)\s*\)/,
+        /\b(?:printf)\s*\(\s*(?!["'])([^,)]+)\s*\)/,
         `${fn}("%s", ${arg})`,
       );
       return fixed !== line ? fixed : null;

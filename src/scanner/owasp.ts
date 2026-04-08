@@ -129,21 +129,11 @@ export const FINDING_TO_OWASP: Record<string, string> = {
   // A10 — SSRF
   SSRF:                   'A10:2021',
 
-  // Additional types — Kotlin / Android
+  // Additional types — C# / Kotlin / Android / iOS / Swift / Rust / PHP
   SQL_INJECTION_CS:       'A03:2021',
   WEBVIEW_LOAD_URL:       'A03:2021',
-
-  // A04 — Insecure Design (Android / performance)
-  PERFORMANCE_N_PLUS_ONE: 'A04:2021',
-
-  // A05 — Security Misconfiguration (iOS WebView)
-  UNSAFE_WEBVIEW:         'A05:2021',
-
-  // A04 — Insecure Design (Swift crash-risk patterns)
   FORCE_TRY:              'A04:2021',
   FORCE_UNWRAP:           'A04:2021',
-
-  // A04 — Insecure Design (Rust unsafe blocks)
   UNSAFE_BLOCK:           'A04:2021',
 
   // A01 — Broken Access Control (missing authentication)

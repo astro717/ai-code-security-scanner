@@ -176,8 +176,11 @@ describe('--ignore-type with invalid C# type identifier', () => {
 
   test('SQL_INJECTION_CS (correct) produces no warning despite typo neighbour', () => {
     const { warnings } = applyIgnoreType(findings, ['SQL_INJECTION_CS', 'SQLI_CS']);
-    // Only SQLI_CS should produce a warning — SQL_INJECTION_CS should not
-    expect(warnings.some((w) => w.includes('SQL_INJECTION_CS'))).toBe(false);
+    // Only SQLI_CS should produce a warning — SQL_INJECTION_CS should not.
+    // The SQLI_CS warning body includes the full known-types list which contains
+    // SQL_INJECTION_CS, so we must check that NO warning specifically identifies
+    // SQL_INJECTION_CS as the unknown type (i.e. it starts with "SQL_INJECTION_CS").
+    expect(warnings.some((w) => w.includes('"SQL_INJECTION_CS" is not a known'))).toBe(false);
     expect(warnings.some((w) => w.includes('SQLI_CS'))).toBe(true);
   });
 });

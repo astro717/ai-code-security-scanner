@@ -27,8 +27,8 @@ describe('Go scanner — vulnerable.go fixture', () => {
     expect(types.has('SQL_INJECTION')).toBe(true);
   });
 
-  test('detects COMMAND_INJECTION', () => {
-    expect(types.has('COMMAND_INJECTION')).toBe(true);
+  test('detects COMMAND_INJECTION_GO', () => {
+    expect(types.has('COMMAND_INJECTION_GO')).toBe(true);
   });
 
   test('detects SSRF', () => {

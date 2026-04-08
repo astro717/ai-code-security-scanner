@@ -14,6 +14,25 @@
 
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
+import net from 'net';
+
+/** Returns a free TCP port on localhost by binding to port 0 and reading the assigned port. */
+function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address();
+      srv.close(() => {
+        if (addr && typeof addr === 'object') {
+          resolve(addr.port);
+        } else {
+          reject(new Error('Could not determine free port'));
+        }
+      });
+    });
+    srv.on('error', reject);
+  });
+}
 
 const API_KEY = 'test-secret-key-abc123';
 

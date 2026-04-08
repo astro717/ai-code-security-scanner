@@ -737,6 +737,10 @@ program
     'Used with --fix: compute and display all remediations that would be applied without writing any files.',
   )
   .option(
+    '--yes',
+    'Used with --fix: automatically confirm applying all fixes without prompting (non-interactive mode).',
+  )
+  .option(
     '--severity-threshold <level>',
     'Alias for --severity-exit: sets both --severity and --min-severity to <level>. ' +
     'The process exits with code 1 only when findings at or above the threshold are present. ' +
@@ -770,7 +774,7 @@ program
     '(Anthropic or OpenAI) for plain-language explanations and fix suggestions. ' +
     'Requires a running ai-sec-scan server or direct API key via --openai-key / ANTHROPIC_API_KEY.',
   )
-  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; diff: boolean; fix: boolean; dryRun: boolean; typeList: boolean; listTypes: boolean; summaryOnly: boolean; aiProvider?: string; openaiKey?: string; explain?: boolean; minConfidence?: number }) => {
+  .action(async (targetPath: string, options: { json: boolean; sarif: boolean; html?: string; format?: string; severity: string; minSeverity?: string; severityExit?: string; severityThreshold?: string; ignore: string[]; excludePattern: string[]; config?: string; watch: boolean; output?: string; outputOnExit?: string; baseline?: string; exitCode?: string; failOn: string[]; ignoreType: string[]; maxFindings?: number; parallel: boolean; cacheStats: boolean; diffOnly: boolean; diff: boolean; fix: boolean; dryRun: boolean; yes: boolean; typeList: boolean; listTypes: boolean; summaryOnly: boolean; aiProvider?: string; openaiKey?: string; explain?: boolean; minConfidence?: number }) => {
     // --type-list: print all known finding types and exit immediately.
     if (options.typeList) {
       const types = [...KNOWN_TYPES].sort();
@@ -1173,17 +1177,23 @@ program
         }
 
         // Prompt for user confirmation unless --dry-run is specified (which only shows without asking)
-        let shouldApply = options.dryRun === true; // In dry-run mode, don't actually apply
+        // or --yes is specified (non-interactive auto-confirm)
+        let shouldApply = false;
 
         if (options.fix && !options.dryRun) {
-          // Ask user for confirmation before applying fixes
-          const response = await prompts({
-            type: 'confirm',
-            name: 'value',
-            message: 'Apply these fixes?',
-            initial: false,
-          });
-          shouldApply = response.value === true;
+          if (options.yes) {
+            // Auto-confirm: apply without prompting (useful for CI / non-TTY environments)
+            shouldApply = true;
+          } else {
+            // Ask user for confirmation before applying fixes
+            const response = await prompts({
+              type: 'confirm',
+              name: 'value',
+              message: 'Apply these fixes?',
+              initial: false,
+            });
+            shouldApply = response.value === true;
+          }
         }
 
         // Apply fixes if confirmed (and not in dry-run mode)

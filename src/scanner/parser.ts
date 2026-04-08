@@ -6,6 +6,8 @@ export interface ParseResult {
   ast: TSESTree.Program;
   code: string;
   lines: string[];
+  /** Source file path, if the result was produced from a file on disk. */
+  filePath?: string;
 }
 
 const BASE_PARSE_OPTIONS = {
@@ -28,5 +30,6 @@ export function parseCode(code: string, filename = 'input.tsx'): ParseResult {
     ast,
     code,
     lines: code.split('\n'),
+    filePath: filename,
   };
 }
