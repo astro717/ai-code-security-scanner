@@ -27,6 +27,7 @@ export function detectEval(result: ParseResult): Finding[] {
               column: node.loc!.start.column,
               snippet: result.lines[line - 1]?.trim() ?? '',
               message: 'eval() called with a non-literal argument. This can execute arbitrary code.',
+                confidence: 0.92,
             });
           }
         }
@@ -50,6 +51,7 @@ export function detectEval(result: ParseResult): Finding[] {
               column: node.loc!.start.column,
               snippet: result.lines[line - 1]?.trim() ?? '',
               message: `${call.callee.name}() called with a string variable — equivalent to eval().`,
+                confidence: 0.92,
             });
           }
         }
@@ -72,6 +74,7 @@ export function detectEval(result: ParseResult): Finding[] {
             column: node.loc!.start.column,
             snippet: result.lines[line - 1]?.trim() ?? '',
             message: 'new Function() with dynamic argument is equivalent to eval().',
+                confidence: 0.92,
           });
         }
       }
