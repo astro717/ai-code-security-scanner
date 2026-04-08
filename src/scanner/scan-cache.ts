@@ -261,6 +261,11 @@ export function setCachedFindings(
 /**
  * Flush the in-memory cache to disk.
  * A no-op when the cache is disabled or nothing has changed since the last persist.
+ *
+ * Uses atomic write (write to temp file, then rename) to prevent corruption
+ * in concurrent process scenarios. This is safe even when multiple processes
+ * try to write simultaneously — the last rename wins, and intermediate files
+ * are cleaned up.
  */
 export function persistCache(): void {
   if (_disabled || !_dirty || !_cachePath || !_cacheDir) return;
@@ -271,7 +276,14 @@ export function persistCache(): void {
       scannerVersion: SCANNER_VERSION,
       entries: Object.fromEntries(_entries),
     };
-    fs.writeFileSync(_cachePath, JSON.stringify(data, null, 2), 'utf8');
+    const json = JSON.stringify(data, null, 2);
+
+    // Write to a temporary file first, then atomically rename to the target path.
+    // This prevents concurrent writers from creating a partially-written/corrupt cache.
+    const tmpPath = _cachePath + '.tmp';
+    fs.writeFileSync(tmpPath, json, 'utf8');
+    fs.renameSync(tmpPath, _cachePath);
+
     _dirty = false;
   } catch {
     // Cache write failure is non-fatal — the scan result is still correct.
