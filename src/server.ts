@@ -1269,8 +1269,10 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       }
     }
 
+    const FILE_COLLECTION_LIMIT = 50;
     const collected: GHItem[] = [];
-    await collectFiles(apiBase, '', branch, collected, 50, patterns);
+    await collectFiles(apiBase, '', branch, collected, FILE_COLLECTION_LIMIT, patterns);
+    const truncated = collected.length >= FILE_COLLECTION_LIMIT;
 
     // Filter to changed files if incremental mode is active
     const filesToScan = changedFilePaths
@@ -1282,6 +1284,7 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
         findings: [],
         summary: summarize([]),
         filesScanned: 0,
+        ...(truncated ? { truncated: true, collectionLimit: FILE_COLLECTION_LIMIT } : {}),
         ...(changedFilePaths ? { incrementalMode: true, totalFiles: collected.length, changedFiles: changedFilePaths.size } : {}),
       });
       return;
@@ -1398,6 +1401,7 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       findings: dedupedFindings,
       summary: summarize(dedupedFindings),
       filesScanned: filesToScan.length,
+      ...(truncated ? { truncated: true, collectionLimit: FILE_COLLECTION_LIMIT } : {}),
       ...(changedFilePaths ? { incrementalMode: true, totalFiles: collected.length, changedFiles: changedFilePaths.size } : {}),
     };
     res.json(responsePayload);
