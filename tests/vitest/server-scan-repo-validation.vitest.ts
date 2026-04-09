@@ -45,7 +45,23 @@ describe('/scan-repo input validation', () => {
     expect(res.status).toBe(400);
     const body = res.body as { error?: string };
     expect(typeof body.error).toBe('string');
-    expect(body.error).toMatch(/github\.com|gitlab\.com|bitbucket/i);
+    expect(body.error).toMatch(/github\.com/i);
+  });
+
+  test('gitlab.com URL returns 400 with clear unsupported message', async () => {
+    const res = await request(app).post('/scan-repo').send({ repoUrl: 'https://gitlab.com/owner/repo' });
+    expect(res.status).toBe(400);
+    const body = res.body as { error?: string };
+    expect(typeof body.error).toBe('string');
+    expect(body.error).toMatch(/github\.com/i);
+  });
+
+  test('bitbucket.org URL returns 400 with clear unsupported message', async () => {
+    const res = await request(app).post('/scan-repo').send({ repoUrl: 'https://bitbucket.org/owner/repo' });
+    expect(res.status).toBe(400);
+    const body = res.body as { error?: string };
+    expect(typeof body.error).toBe('string');
+    expect(body.error).toMatch(/github\.com/i);
   });
 
   test('http:// (non-https) URL returns 400', async () => {
