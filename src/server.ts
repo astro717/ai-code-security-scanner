@@ -1290,10 +1290,12 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       return;
     }
 
-    const allFindings: Finding[] = [];
-
-    await Promise.all(
-      filesToScan.map(async (item) => {
+    // Each concurrent callback collects its own findings into a local array,
+    // then returns them. Promise.all gathers all per-file arrays and we flatten
+    // once after all callbacks complete — safe against concurrent Array.push
+    // interleaving with large spread arguments.
+    const perFileResults = await Promise.all(
+      filesToScan.map(async (item): Promise<Finding[]> => {
         try {
           const code = await githubGetText(`${apiBase}/contents/${item.path}?ref=${encodeURIComponent(branch)}`);
           const ext = path.extname(item.name).toLowerCase();
@@ -1352,12 +1354,16 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       ...detectCSRF(parsed),
             ].map((f) => ({ ...f, file: item.path }));
           }
-          allFindings.push(...findings);
+          return findings;
         } catch {
           // Skip files that fail to parse
+          return [];
         }
       }),
     );
+
+    // Flatten per-file results into a single array after all concurrent work is done.
+    const allFindings: Finding[] = perFileResults.flat();
 
     // Deduplicate by (type, file, line, column) across all scanned files — same
     // logic as the /scan endpoint — so parallel file scans don't produce duplicate
