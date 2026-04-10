@@ -121,7 +121,6 @@ const SCAN_REPO_BODY_SCHEMA: Record<string, FieldSchema> = {
   repoUrl:        { type: 'string', required: true },
   branch:         { type: 'string' },
   sinceCommit:    { type: 'string' },
-  changedFilesOnly: { type: 'boolean' },
   ignorePatterns: { type: 'array', items: 'string' },
   ignoreTypes:    { type: 'array', items: 'string' },
   webhookUrl:     { type: 'string' },
@@ -1178,11 +1177,10 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
     return;
   }
 
-  const { repoUrl, branch = 'main', sinceCommit, changedFilesOnly, ignorePatterns = [], ignoreTypes, webhookUrl, webhookSecret } = req.body as {
+  const { repoUrl, branch = 'main', sinceCommit, ignorePatterns = [], ignoreTypes, webhookUrl, webhookSecret } = req.body as {
     repoUrl?: string;
     branch?: string;
     sinceCommit?: string;
-    changedFilesOnly?: boolean;
     ignorePatterns?: string[];
     ignoreTypes?: string[];
     webhookUrl?: string;
