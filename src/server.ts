@@ -1208,9 +1208,13 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
     return;
   }
 
-  const ALLOWED_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
-  if (!ALLOWED_HOSTS.has(parsedUrl.hostname)) {
-    res.status(400).json({ error: 'Only github.com, gitlab.com, and bitbucket.org repositories are supported' });
+  // Only GitHub is supported — the API integration uses api.github.com exclusively.
+  // GitLab and Bitbucket have incompatible REST APIs; accepting their URLs while
+  // silently routing them to GitHub would produce confusing 404s or wrong data.
+  if (parsedUrl.hostname !== 'github.com') {
+    res.status(400).json({
+      error: 'Only github.com repositories are currently supported. GitLab and Bitbucket support is not yet available.',
+    });
     return;
   }
 
@@ -1222,14 +1226,13 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
   }
 
   // Parse GitHub URL: https://github.com/owner/repo
-  const match = repoUrl.trim().replace(/\.git$/, '').match(/(?:github\.com|gitlab\.com|bitbucket\.org)\/([^/]+)\/([^/]+)/);
+  const match = repoUrl.trim().replace(/\.git$/, '').match(/github\.com\/([^/]+)\/([^/]+)/);
   if (!match) {
-    res.status(400).json({ error: 'repoUrl must be a valid repository URL (https://github.com/owner/repo)' });
+    res.status(400).json({ error: 'repoUrl must be a valid GitHub repository URL (https://github.com/owner/repo)' });
     return;
   }
 
   const [, owner, repo] = match;
-  // Only GitHub is supported for the API calls — other hosts fall back to GitHub-compatible API
   const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
 
   try {
