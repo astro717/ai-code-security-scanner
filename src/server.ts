@@ -6,6 +6,20 @@ import fs from 'fs';
 import http from 'http';
 import https from 'https';
 import path from 'path';
+
+// ── Package version — read once at startup ────────────────────────────────────
+// Using readFileSync here is intentional: this runs once during module
+// initialisation before the server starts accepting connections, so the
+// synchronous read is not a concern.
+const PACKAGE_VERSION: string = (() => {
+  try {
+    const pkgPath = path.resolve(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: string };
+    return typeof pkg.version === 'string' ? pkg.version : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 import rateLimit from 'express-rate-limit';
 import { minimatch } from 'minimatch';
 import { parseCode } from './scanner/parser';
@@ -721,7 +735,7 @@ app.get('/badge/:orgId', (req, res): void => {
 });
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', version: '0.1.0' });
+  res.json({ status: 'ok', version: PACKAGE_VERSION });
 });
 
 app.get('/types', (_req, res) => {
@@ -1269,8 +1283,10 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       }
     }
 
+    const FILE_COLLECTION_LIMIT = 50;
     const collected: GHItem[] = [];
-    await collectFiles(apiBase, '', branch, collected, 50, patterns);
+    await collectFiles(apiBase, '', branch, collected, FILE_COLLECTION_LIMIT, patterns);
+    const truncated = collected.length >= FILE_COLLECTION_LIMIT;
 
     // Filter to changed files if incremental mode is active
     const filesToScan = changedFilePaths
@@ -1282,6 +1298,7 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
         findings: [],
         summary: summarize([]),
         filesScanned: 0,
+        ...(truncated ? { truncated: true, collectionLimit: FILE_COLLECTION_LIMIT } : {}),
         ...(changedFilePaths ? { incrementalMode: true, totalFiles: collected.length, changedFiles: changedFilePaths.size } : {}),
       });
       return;
@@ -1398,6 +1415,7 @@ app.post('/scan-repo', scanRepoLimiter, async (req, res) => {
       findings: dedupedFindings,
       summary: summarize(dedupedFindings),
       filesScanned: filesToScan.length,
+      ...(truncated ? { truncated: true, collectionLimit: FILE_COLLECTION_LIMIT } : {}),
       ...(changedFilePaths ? { incrementalMode: true, totalFiles: collected.length, changedFiles: changedFilePaths.size } : {}),
     };
     res.json(responsePayload);
